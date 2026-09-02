@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="vi" data-lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kệ sách Back End · Backend Bookshelf</title>
+<meta name="description" content="Kệ sách companion song ngữ (VI/EN) về back end — mỗi cuốn một site tự chứa, một trang mỗi chương.">
+<script>
+  // pre-hydration: apply saved language before first paint (no flash)
+  try {
+    var l = localStorage.getItem("shelf-lang");
+    if (l === "vi" || l === "en") document.documentElement.setAttribute("data-lang", l);
+  } catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --indigo: #4f5bd5;
+    --cyan: #2b8fb3;
+    --amber: #c8742a;
+    --ink: #1a1c24;
+    --muted: #5b6070;
+    --surface: #f6f5f2;
+    --surface-strong: #ffffff;
+    --line: #e2e0da;
+    --shadow: 0 1px 2px rgba(20, 22, 34, .06), 0 8px 28px rgba(20, 22, 34, .06);
+    --display: "Fraunces", Georgia, serif;
+    --body: "Inter", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --indigo: #99a2ff;
+      --cyan: #7fd3ee;
+      --amber: #f0a35e;
+      --ink: #ecebe6;
+      --muted: #9aa0b0;
+      --surface: #14151b;
+      --surface-strong: #1b1d25;
+      --line: #2c2e38;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .35);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 48px); }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 0; border-bottom: 1px solid var(--line);
+  }
+  .brand { font-family: var(--mono); font-size: 13px; letter-spacing: .04em; color: var(--muted); }
+  .brand b { color: var(--indigo); }
+  .lang-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .lang-toggle button {
+    border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    font: 600 12px/1 var(--body); padding: 8px 14px;
+  }
+  .lang-toggle button.active { background: var(--indigo); color: #fff; }
+  [data-lang="vi"] .en-only, [data-lang="en"] .vi-only { display: none; }
+  .hero { padding: clamp(48px, 9vw, 88px) 0 40px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--cyan); margin: 0 0 16px; }
+  h1 { font-family: var(--display); font-weight: 600; font-size: clamp(34px, 6vw, 52px); line-height: 1.08; margin: 0 0 20px; letter-spacing: -.01em; }
+  .lede { font-size: clamp(16px, 2.4vw, 19px); color: var(--muted); max-width: 60ch; margin: 0; }
+  .shelf { padding: 24px 0 8px; display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+  .book {
+    display: block; background: var(--surface-strong); border: 1px solid var(--line);
+    border-radius: 14px; padding: 22px 22px 20px; box-shadow: var(--shadow);
+    text-decoration: none; color: inherit; transition: transform .16s ease, border-color .16s ease;
+  }
+  .book:hover { transform: translateY(-2px); border-color: var(--indigo); }
+  .book .kicker { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--cyan); margin: 0 0 8px; }
+  .book h2 { font-family: var(--display); font-weight: 600; font-size: 21px; margin: 0 0 6px; }
+  .book p { font-size: 14px; color: var(--muted); margin: 0 0 14px; }
+  .book .cta { font: 600 13px/1 var(--body); color: var(--indigo); }
+  .empty {
+    grid-column: 1 / -1; text-align: center; padding: 48px 24px;
+    border: 1px dashed var(--line); border-radius: 14px; color: var(--muted);
+  }
+  .empty .mono { font-family: var(--mono); font-size: 12px; letter-spacing: .04em; display: block; margin-top: 10px; opacity: .8; }
+  footer { border-top: 1px solid var(--line); margin-top: 56px; padding: 28px 0 48px; color: var(--muted); font-size: 13px; }
+  footer a { color: var(--indigo); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <span class="brand"><b>backend</b>-bookshelf</span>
+    <div class="lang-toggle" role="group" aria-label="Language">
+      <button type="button" data-set-lang="vi">VI</button>
+      <button type="button" data-set-lang="en">EN</button>
+    </div>
+  </header>
+
+  <section class="hero">
+    <p class="eyebrow"><span class="vi-only">Kệ sách · đọc cùng</span><span class="en-only" lang="en">Bookshelf · read-along</span></p>
+    <h1>
+      <span class="vi-only">Đọc sâu các cuốn sách back end</span>
+      <span class="en-only" lang="en">Reading back-end books, deeply</span>
+    </h1>
+    <p class="lede">
+      <span class="vi-only">Mỗi cuốn là một site đọc-cùng song ngữ tự chứa: một trang mỗi chương, ba chế độ đọc, chế độ tối theo hệ điều hành. Mọi khẳng định đặc thù đều có trích dẫn nguồn ngoài thật — không bịa.</span>
+      <span class="en-only" lang="en">Each book is a self-contained bilingual read-along site: one page per chapter, three reading modes, OS dark mode. Every specific claim carries a real external citation — nothing fabricated.</span>
+    </p>
+  </section>
+
+  <main class="shelf" id="shelf">
+    <!-- BOOKS:START — one <a class="book"> per book as each site lands (main session) -->
+    <div class="empty">
+      <span class="vi-only">Chưa có cuốn nào trên kệ. Sẽ thêm khi dựng xong cuốn đầu.</span>
+      <span class="en-only" lang="en">No books on the shelf yet. The first one will appear once its site is built.</span>
+      <span class="mono">book-chapter-author → book-cover-curator → book-fidelity-auditor</span>
+    </div>
+    <!-- BOOKS:END -->
+  </main>
+
+  <footer>
+    <p>
+      <span class="vi-only">Bản đọc-cùng, không phải bản dịch. Mã nguồn & nội dung: </span>
+      <span class="en-only" lang="en">A read-along companion, not a translation. Source & content: </span>
+      <a href="https://github.com/ThanhHaiKhong/backend-bookshelf">github.com/ThanhHaiKhong/backend-bookshelf</a>
+    </p>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var btns = document.querySelectorAll("[data-set-lang]");
+    function apply(l) {
+      root.setAttribute("data-lang", l);
+      try { localStorage.setItem("shelf-lang", l); } catch (e) {}
+      btns.forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-set-lang") === l); });
+    }
+    btns.forEach(function (b) {
+      b.addEventListener("click", function () { apply(b.getAttribute("data-set-lang")); });
+    });
+    apply(root.getAttribute("data-lang") === "en" ? "en" : "vi");
+  })();
+</script>
+</body>
+</html>
