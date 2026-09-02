@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Trang bìa bộ đọc-cùng song ngữ cuốn Designing Data-Intensive Applications của Martin Kleppmann (O’Reilly, 2017) — nền tảng để xây hệ thống dữ liệu tin cậy, mở rộng được và dễ bảo trì; bắt đầu từ Chương 1.">
+<title>DDIA — Tin cậy, Mở rộng, Bảo trì · Designing Data-Intensive Applications</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 540px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 00";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(2.7rem, 5.6vw, 5.4rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.4rem, 4.8vw, 4.6rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.35 var(--mono);
+    letter-spacing: 0.08em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-part1 { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-part2 { left: 2%; bottom: 8%; }
+  .node-part3 { right: 2%; bottom: 8%; }
+
+  .node-part1 b { color: var(--teal); }
+  .node-part2 b { color: var(--blue); }
+  .node-part3 b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(64px, 9vw, 110px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .parts-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .part-card {
+    --part-accent: var(--teal);
+    display: grid;
+    gap: 16px;
+    align-content: start;
+    min-height: 340px;
+    padding: 28px 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--part-accent);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .part-card:hover {
+    border-color: var(--part-accent);
+    background: var(--surface-strong);
+  }
+
+  .part-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .part-card:last-child { border-radius: 8px 28px 8px 8px; }
+  .part-card.blue { --part-accent: var(--blue); }
+  .part-card.amber { --part-accent: var(--amber); }
+
+  /* Non-linked, forthcoming chapters */
+  .part-card.soon { opacity: 0.6; cursor: default; }
+  .part-card.soon:hover { border-color: var(--line); background: var(--surface); }
+  .part-card.soon .result { color: var(--muted); }
+
+  .part-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--part-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .part-card .term {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .part-card h3 { margin: 0; font-size: clamp(1.45rem, 2.2vw, 1.85rem); }
+  .part-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .chapter-list {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.86rem;
+  }
+
+  .chapter-list li { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; }
+  .chapter-list .mark { color: var(--part-accent); font: 500 0.72rem var(--mono); }
+  .chapter-list .live { color: var(--teal); font-weight: 600; }
+  .chapter-list a { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; transition: border-color 0.15s ease; }
+  .chapter-list a:hover { border-bottom-color: currentColor; }
+
+  .part-card .result {
+    align-self: end;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    color: var(--part-accent);
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .mindmap-banner {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: clamp(18px, 3vw, 34px);
+    align-items: center;
+    margin-top: 16px;
+    padding: 24px clamp(22px, 4vw, 40px);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--leaf);
+    border-radius: 8px 8px 28px 28px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .mindmap-banner.soon { opacity: 0.6; cursor: default; }
+  .mindmap-icon { font-size: 2.2rem; line-height: 1; }
+  .mindmap-banner h3 { margin: 0 0 4px; font-size: clamp(1.25rem, 2vw, 1.6rem); }
+  .mindmap-banner p { margin: 0; color: var(--muted); font-size: 0.92rem; max-width: 68ch; }
+  .mindmap-banner .result { color: var(--leaf); font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
+  .mindmap-banner.soon .result { color: var(--muted); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .howto {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading { grid-template-columns: 1fr; align-items: start; }
+    .parts-grid { grid-template-columns: 1fr; }
+    .mindmap-banner { grid-template-columns: auto 1fr; }
+    .mindmap-banner .result { grid-column: 2; }
+    .part-card { min-height: auto; border-radius: 18px !important; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.4rem, 12vw, 3.6rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .howto { grid-template-columns: 1fr; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Trang bìa</span><span class="easy-only">DDIA · Martin Kleppmann · Trang bìa</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Cover</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">Đọc-cùng bằng tiếng Việt</span><span class="easy-only">Đọc-cùng bằng tiếng Việt</span><span class="en-only" lang="en">A bilingual companion</span></div>
+      <h1 id="page-title"><span class="standard-copy"><span class="hero-title-accent">DDIA</span> — hệ thống dữ liệu</span><span class="easy-only">Xây phần mềm chứa nhiều dữ liệu</span><span class="en-only" lang="en"><span class="hero-title-accent">DDIA</span></span></h1>
+      <p class="standard-copy">Bộ đọc-cùng cuốn <strong lang="en">Designing Data-Intensive Applications</strong> của <strong>Martin Kleppmann</strong> (O’Reilly, 2017) — mỗi bài một chương. Luận điểm xuyên suốt: một ứng dụng thâm dụng dữ liệu sống hay chết nhờ ba phẩm chất phi chức năng — <strong>tin cậy, khả mở rộng, dễ bảo trì</strong> — và cuốn sách trao cho ta bộ từ vựng chính xác để suy luận về từng phẩm chất.</p>
+      <p class="easy-only">Bộ bài kể về một cuốn sách nổi tiếng dạy cách xây phần mềm chứa nhiều dữ liệu: làm sao để nó chạy đúng kể cả khi hỏng, lớn thêm mà vẫn kham nổi, và dễ sửa về sau.</p>
+      <p class="en-only" lang="en">A companion to <strong>Designing Data-Intensive Applications</strong> by <strong>Martin Kleppmann</strong> (O’Reilly, 2017) — one article per chapter. The thread running through it: a data-intensive application lives or dies by three non-functional qualities — <strong>reliability, scalability, maintainability</strong> — and the book hands us a precise vocabulary for each.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề xuyên suốt cuốn sách</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The book's central thesis</strong>
+          <p class="standard-copy">Ứng dụng hiện đại bị giới hạn bởi <em>lượng, độ phức tạp và tốc độ thay đổi của dữ liệu</em> chứ không phải bởi năng lực tính toán. Vì thế điều quyết định không phải một công nghệ đơn lẻ, mà là biết chọn và ghép các khối dựng (cơ sở dữ liệu, hàng đợi, cache, chỉ mục) sao cho hệ vẫn <span lang="en">reliable</span>, <span lang="en">scalable</span> và <span lang="en">maintainable</span> khi tải tăng và theo thời gian.</p>
+          <p class="easy-only">Không có một công cụ thần kỳ nào hợp mọi việc. Giỏi ở đây là biết ghép nhiều mảnh lại cho đúng. Nhớ nhé: chọn đúng công cụ cho đúng việc quan trọng hơn là tìm một công cụ làm được tất cả.</p>
+          <p class="en-only" lang="en">Modern applications are bounded by the <em>amount, complexity, and rate of change of data</em> rather than by raw compute. What matters is not a single technology but choosing and composing the right building blocks — databases, queues, caches, indexes — so the system stays <span lang="en">reliable</span>, <span lang="en">scalable</span>, and <span lang="en">maintainable</span> as load grows and over time.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Cuốn DDIA chia thành ba phần: nền tảng hệ dữ liệu, dữ liệu phân tán, và dữ liệu dẫn xuất">
+      <div class="pulse"></div>
+      <div class="core">DDIA</div>
+      <div class="node node-part1">
+        <b><span class="vi-only">Nền tảng</span><span class="en-only" lang="en">Foundations</span></b>
+        <small class="standard-copy">Mô hình, lưu trữ, mã hóa</small>
+        <small class="easy-only">Khối dựng cơ bản.</small>
+        <small class="en-only" lang="en">Data models, storage, encoding</small>
+      </div>
+      <div class="node node-part2">
+        <b><span class="vi-only">Dữ liệu phân tán</span><span class="en-only" lang="en">Distributed data</span></b>
+        <small class="standard-copy">Nhân bản, phân mảnh, giao dịch, đồng thuận</small>
+        <small class="easy-only">Nhiều máy làm việc cùng nhau.</small>
+        <small class="en-only" lang="en">Replication, partitioning, consensus</small>
+      </div>
+      <div class="node node-part3">
+        <b><span class="vi-only">Dữ liệu dẫn xuất</span><span class="en-only" lang="en">Derived data</span></b>
+        <small class="standard-copy">Xử lý lô, xử lý luồng, tương lai</small>
+        <small class="easy-only">Biến dữ liệu thô thành thứ dùng được.</small>
+        <small class="en-only" lang="en">Batch, streams, the future</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="parts" aria-labelledby="parts-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="standard-copy">Mười hai chương · Ba phần</span><span class="easy-only">Mười hai chương · Ba phần</span><span class="en-only" lang="en">Twelve chapters · Three parts</span></div>
+        <h2 id="parts-title"><span class="standard-copy">Chọn chương để bắt đầu</span><span class="easy-only">Chọn bài để đọc</span><span class="en-only" lang="en">Pick a chapter to begin</span></h2>
+      </div>
+      <p class="standard-copy">Bộ đọc-cùng dựng dần theo đúng mạch của sách. Chương 1 đã sẵn sàng — nó đặt bộ từ vựng (tin cậy · mở rộng · bảo trì) cho toàn cuốn; các chương còn lại sẽ lần lượt xuất hiện.</p>
+      <p class="easy-only">Đang dựng dần theo thứ tự sách. Chương 1 đã có — đọc trước nhé.</p>
+      <p class="en-only" lang="en">The companion is being built in the book's own order. Chapter 1 is ready — it sets the vocabulary (reliable · scalable · maintainable) for the whole book; the rest will appear over time.</p>
+    </div>
+
+    <div class="parts-grid">
+      <div class="part-card">
+        <div class="part-number">01</div>
+        <div class="term" lang="en">Foundations of Data Systems · Chapters 1–4</div>
+        <h3><span class="standard-copy">Nền tảng của hệ thống dữ liệu</span><span class="easy-only">Nền móng</span><span class="en-only" lang="en">Foundations of Data Systems</span></h3>
+        <ul class="chapter-list">
+          <li><span class="mark live">01 ●</span><a href="chapter-1-reliable-scalable-and-maintainable-applications.html"><span class="live vi-only">Tin cậy, Mở rộng &amp; Bảo trì</span><span class="live en-only" lang="en">Reliable, Scalable &amp; Maintainable</span></a></li>
+          <li><span class="mark">02 ○</span><span class="vi-only">Mô hình dữ liệu &amp; ngôn ngữ truy vấn <em>(sắp có)</em></span><span class="en-only" lang="en">Data Models &amp; Query Languages <em>(soon)</em></span></li>
+          <li><span class="mark">03 ○</span><span class="vi-only">Lưu trữ &amp; truy xuất <em>(sắp có)</em></span><span class="en-only" lang="en">Storage &amp; Retrieval <em>(soon)</em></span></li>
+          <li><span class="mark">04 ○</span><span class="vi-only">Mã hóa &amp; tiến hóa <em>(sắp có)</em></span><span class="en-only" lang="en">Encoding &amp; Evolution <em>(soon)</em></span></li>
+        </ul>
+        <div class="result"><span class="vi-only">1 / 4 chương đã sẵn sàng →</span><span class="en-only" lang="en">1 of 4 chapters ready →</span></div>
+      </div>
+      <div class="part-card blue soon">
+        <div class="part-number">02</div>
+        <div class="term" lang="en">Distributed Data · Chapters 5–9</div>
+        <h3><span class="standard-copy">Dữ liệu phân tán</span><span class="easy-only">Nhiều máy cùng làm việc</span><span class="en-only" lang="en">Distributed Data</span></h3>
+        <ul class="chapter-list">
+          <li><span class="mark">05 ○</span><span class="vi-only">Nhân bản <em>(sắp có)</em></span><span class="en-only" lang="en">Replication <em>(soon)</em></span></li>
+          <li><span class="mark">06 ○</span><span class="vi-only">Phân mảnh <em>(sắp có)</em></span><span class="en-only" lang="en">Partitioning <em>(soon)</em></span></li>
+          <li><span class="mark">07 ○</span><span class="vi-only">Giao dịch <em>(sắp có)</em></span><span class="en-only" lang="en">Transactions <em>(soon)</em></span></li>
+          <li><span class="mark">08 ○</span><span class="vi-only">Rắc rối của hệ phân tán <em>(sắp có)</em></span><span class="en-only" lang="en">The Trouble with Distributed Systems <em>(soon)</em></span></li>
+          <li><span class="mark">09 ○</span><span class="vi-only">Nhất quán &amp; đồng thuận <em>(sắp có)</em></span><span class="en-only" lang="en">Consistency &amp; Consensus <em>(soon)</em></span></li>
+        </ul>
+        <div class="result"><span class="vi-only">Sắp có · 0 / 5</span><span class="en-only" lang="en">Coming soon · 0 of 5</span></div>
+      </div>
+      <div class="part-card amber soon">
+        <div class="part-number">03</div>
+        <div class="term" lang="en">Derived Data · Chapters 10–12</div>
+        <h3><span class="standard-copy">Dữ liệu dẫn xuất</span><span class="easy-only">Biến dữ liệu thô thành thứ dùng được</span><span class="en-only" lang="en">Derived Data</span></h3>
+        <ul class="chapter-list">
+          <li><span class="mark">10 ○</span><span class="vi-only">Xử lý theo lô <em>(sắp có)</em></span><span class="en-only" lang="en">Batch Processing <em>(soon)</em></span></li>
+          <li><span class="mark">11 ○</span><span class="vi-only">Xử lý luồng <em>(sắp có)</em></span><span class="en-only" lang="en">Stream Processing <em>(soon)</em></span></li>
+          <li><span class="mark">12 ○</span><span class="vi-only">Tương lai của hệ dữ liệu <em>(sắp có)</em></span><span class="en-only" lang="en">The Future of Data Systems <em>(soon)</em></span></li>
+        </ul>
+        <div class="result"><span class="vi-only">Sắp có · 0 / 3</span><span class="en-only" lang="en">Coming soon · 0 of 3</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="how-to-read" aria-labelledby="howto-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="standard-copy">Cách đọc bộ bài</span><span class="easy-only">Cách đọc bộ bài</span><span class="en-only" lang="en">How to read this series</span></div>
+        <h2 id="howto-title"><span class="standard-copy">Ba chế độ đọc, hai ngôn ngữ</span><span class="easy-only">Chọn kiểu đọc hợp với bạn</span><span class="en-only" lang="en">Two languages, three depths</span></h2>
+      </div>
+      <p class="standard-copy">Góc phải phía trên mỗi trang có nút VI/EN và ba nút chế độ đọc. Lựa chọn được ghi nhớ chung cho cả bộ — chọn một lần, mọi trang hiển thị theo cùng cách.</p>
+      <p class="easy-only">Bấm nút ở góc trên để chọn tiếng và kiểu đọc. Chọn một lần là cả bộ đều theo.</p>
+      <p class="en-only" lang="en">The top-right corner of every page has a VI/EN switch. The Vietnamese side offers three reading modes; the English side is a single standard version, kept faithful to Kleppmann's own terminology so you can cross-reference the original book. Your choice is remembered across the whole series.</p>
+    </div>
+
+    <div class="howto">
+      <div class="info-block">
+        <h4><span class="standard-copy">Dễ hiểu</span><span class="easy-only">Dễ hiểu</span><span class="en-only" lang="en">Vietnamese · 3 modes</span></h4>
+        <p class="standard-copy">Giải thích bằng ví dụ đời thường — chơi, học, đồ dùng — cho người mới và trẻ nhỏ. Không thuật ngữ, không lý thuyết nặng.</p>
+        <p class="easy-only">Kể bằng chuyện chơi và học, ai đọc cũng hiểu.</p>
+        <p class="en-only" lang="en">The Vietnamese side has three reading modes: Dễ hiểu (everyday examples for newcomers and kids), Tóm tắt (just the essentials), and Đầy đủ (deep analysis blocks).</p>
+      </div>
+      <div class="info-block">
+        <h4><span class="standard-copy">Tóm tắt</span><span class="easy-only">Tóm tắt</span><span class="en-only" lang="en">English · standard</span></h4>
+        <p class="standard-copy">Chỉ phần cốt lõi của mỗi mục — đọc nhanh để nắm khung ý chính của cả chương trong ít phút.</p>
+        <p class="easy-only">Bản ngắn gọn, đọc nhanh nhất.</p>
+        <p class="en-only" lang="en">The English side is one standard version per section — concise, complete, and aligned with the book's original terms for easy reference.</p>
+      </div>
+      <div class="info-block">
+        <h4><span class="standard-copy">Đầy đủ</span><span class="easy-only">Đầy đủ</span><span class="en-only" lang="en">Shared memory</span></h4>
+        <p class="standard-copy">Thêm các khối phân tích sâu: cơ chế, dẫn chứng, giới hạn của từng khái niệm và liên kết giữa các chương.</p>
+        <p class="easy-only">Bản dài nhất, dành cho người muốn hiểu kỹ.</p>
+        <p class="en-only" lang="en">Language and reading-mode choices persist across all pages of the series — set them once, and every article follows.</p>
+      </div>
+      <div class="info-block">
+        <h4><span class="standard-copy">Bắt đầu từ đâu</span><span class="easy-only">Bắt đầu từ đâu</span><span class="en-only" lang="en">Where to start</span></h4>
+        <p class="standard-copy">Chương 1 đặt bộ từ vựng của cả cuốn: tin cậy, khả mở rộng, dễ bảo trì. Đọc nó trước, rồi theo các chương sau khi chúng xuất hiện.</p>
+        <p class="easy-only">Đọc Chương 1 trước — nó nói ba điều quan trọng nhất của cả sách.</p>
+        <p class="en-only" lang="en">Chapter 1 lays the vocabulary of the whole book: reliability, scalability, maintainability. Read it first, then follow the later chapters as they appear.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p class="standard-copy"><strong>Nguồn chính:</strong> Martin Kleppmann, <em lang="en">Designing Data-Intensive Applications</em>, O’Reilly Media, 2017. Bộ tài liệu này là bản đọc-cùng và tổng hợp phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung sách.<br><strong>Đối chiếu công khai:</strong> <a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net</a> · <a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O’Reilly</a> · <a href="https://en.wikipedia.org/wiki/Designing_Data-Intensive_Applications" target="_blank" rel="noopener noreferrer">Wikipedia</a>.</p>
+    <p class="easy-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em lang="en">Designing Data-Intensive Applications</em>, O’Reilly Media, 2017. Bộ tài liệu này là bản đọc-cùng và tổng hợp phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung sách.<br><strong>Đối chiếu công khai:</strong> <a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net</a> · <a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O’Reilly</a> · <a href="https://en.wikipedia.org/wiki/Designing_Data-Intensive_Applications" target="_blank" rel="noopener noreferrer">Wikipedia</a>.</p>
+    <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O’Reilly Media, 2017. This series is an interpretive study companion, not a verbatim translation or reproduction of the book.<br><strong>Public references:</strong> <a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net</a> · <a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O’Reilly</a> · <a href="https://en.wikipedia.org/wiki/Designing_Data-Intensive_Applications" target="_blank" rel="noopener noreferrer">Wikipedia</a>.</p>
+    <div class="edition"><span class="standard-copy">VI · 2026</span><span class="easy-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+</script>
+</body>
+</html>

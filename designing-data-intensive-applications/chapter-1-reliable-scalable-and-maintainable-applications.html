@@ -1,0 +1,1500 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 1 &quot;Reliable, Scalable, and Maintainable Applications&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: reliability (dung thứ lỗi), scalability (tả tải &amp; percentile), và maintainability (vận hành, đơn giản, tiến hóa).">
+<title>Reliable, Scalable, and Maintainable Applications</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 01";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 1</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 1</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 1</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 1 · Ứng dụng đáng tin, co giãn, dễ bảo trì</span><span class="easy-only">DDIA · Chương 1 · Ứng dụng đáng tin, co giãn, dễ bảo trì</span><span class="en-only" lang="en">DDIA · Chapter 1 · Reliable, Scalable & Maintainable Applications</span></div>
+      <h1 id="page-title"><span class="standard-copy">Ba phẩm chất của hệ <span class="hero-title-accent">thâm dụng dữ liệu</span></span><span class="easy-only">Hệ tốt cần ba điều</span><span class="en-only" lang="en">Three qualities of a <span class="hero-title-accent">data-intensive</span> system</span></h1>
+      <p class="standard-copy">Kleppmann mở đầu <em>Designing Data-Intensive Applications</em> bằng một quan sát: phần lớn ứng dụng ngày nay bị giới hạn không phải bởi CPU mà bởi <strong>lượng dữ liệu, độ phức tạp của nó và tốc độ nó thay đổi</strong> — ông gọi chúng là hệ <em>data-intensive</em>, đối lập với <em>compute-intensive</em><span class="cite"><a href="#ref-2">2</a></span>. Những hệ như thế được ghép từ các khối quen thuộc: cơ sở dữ liệu, cache, chỉ mục tìm kiếm, hàng đợi, xử lý luồng và theo mẻ. Câu hỏi của cả cuốn sách — và của chương mở đầu — là: <strong>điều gì làm nên một hệ dữ liệu <em>tốt</em>, và ta lấy gì để suy luận về nó?</strong></p>
+      <p class="easy-only">Ngày nay, app không chậm vì máy yếu, mà vì phải lo <strong>rất nhiều dữ liệu</strong>: lưu ở đâu, tìm sao cho nhanh, đổi mà không hỏng. Cuốn sách hỏi: một hệ lưu dữ liệu thế nào mới gọi là tốt? Chương 1 trả lời bằng ba chữ: đáng tin, co giãn được, và dễ sửa về sau.</p>
+      <p class="en-only" lang="en">Kleppmann opens <em>Designing Data-Intensive Applications</em> with an observation: most applications today are limited not by CPU but by <strong>the amount of data, its complexity and the speed at which it changes</strong> — he calls these <em>data-intensive</em> systems, as opposed to <em>compute-intensive</em> ones<span class="cite"><a href="#ref-2">2</a></span>. Such systems are assembled from familiar blocks: databases, caches, search indexes, queues, stream and batch processing. The question of the whole book — and of this opening chapter — is: <strong>what makes a data system <em>good</em>, and what vocabulary do we reason about it with?</strong></p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương mở đầu</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the opening chapter</strong>
+          <p class="standard-copy">Ba mối bận tâm quyết định số phận của gần như mọi hệ phần mềm — <em>reliability</em> (độ tin cậy), <em>scalability</em> (khả năng co giãn) và <em>maintainability</em> (khả năng bảo trì)<span class="cite"><a href="#ref-2">2</a></span>. Đây là ba phẩm chất <em>phi chức năng</em>: chúng không nói hệ <em>làm gì</em>, mà nói hệ trụ được ra sao khi có lỗi, khi tải tăng, và khi con người phải sống chung với nó qua nhiều năm. Chương 1 biến ba từ mơ hồ ấy thành bộ từ vựng kỹ thuật có thể đo và tranh luận được.</p>
+          <p class="easy-only">Một hệ tốt cần ba điều. Một: đáng tin — hỏng vặt vẫn chạy tiếp. Hai: co giãn — đông người dùng vẫn kham được. Ba: dễ bảo trì — người sau còn sửa và nâng cấp được. Nhớ nhé: ba chữ đó là thước đo xem một hệ có "khỏe" hay không.</p>
+          <p class="en-only" lang="en">Three concerns decide the fate of nearly every software system — <em>reliability</em>, <em>scalability</em> and <em>maintainability</em><span class="cite"><a href="#ref-2">2</a></span>. These are <em>non-functional</em> qualities: they describe not what the system <em>does</em>, but how it holds up when things go wrong, when load grows, and when people must live with it over years. Chapter 1 turns those three vague words into a technical vocabulary we can measure and argue about.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Ba phẩm chất phi chức năng của Chương 1: đáng tin cậy, co giãn được, và dễ bảo trì">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">HỆ DỮ LIỆU<br>TỐT LÀ GÌ?</span><span class="en-only" lang="en">WHAT MAKES<br>A GOOD DATA<br>SYSTEM?</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Reliability</span><span class="en-only" lang="en">Reliability</span></b>
+        <small class="standard-copy">Vẫn chạy đúng ngay cả khi có lỗi</small>
+        <small class="easy-only">Hỏng vặt vẫn chạy tiếp được.</small>
+        <small class="en-only" lang="en">Keeps working correctly even when faults occur</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Scalability</span><span class="en-only" lang="en">Scalability</span></b>
+        <small class="standard-copy">Kham được khi tải và dữ liệu tăng</small>
+        <small class="easy-only">Đông người dùng vẫn chịu được.</small>
+        <small class="en-only" lang="en">Copes as load and data grow</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Maintainability</span><span class="en-only" lang="en">Maintainability</span></b>
+        <small class="standard-copy">Người sau còn vận hành và sửa được</small>
+        <small class="easy-only">Người khác còn sửa được về sau.</small>
+        <small class="en-only" lang="en">Others can operate and change it later</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#reliability"><span><span class="vi-only">Reliability</span><span class="en-only" lang="en">Reliability</span></span><b class="standard-copy">Dung thứ lỗi, không phải không hỏng</b><b class="easy-only">Hỏng vặt vẫn chạy tiếp</b><b class="en-only" lang="en">Tolerating faults, not avoiding them</b></a>
+    <a href="#scalability"><span><span class="vi-only">Scalability</span><span class="en-only" lang="en">Scalability</span></span><b class="standard-copy">Tả tải và đo bằng percentile</b><b class="easy-only">Đông người vẫn kham được</b><b class="en-only" lang="en">Describing load, measuring with percentiles</b></a>
+    <a href="#maintainability"><span><span class="vi-only">Maintainability</span><span class="en-only" lang="en">Maintainability</span></span><b class="standard-copy">Vận hành, đơn giản, tiến hóa</b><b class="easy-only">Người sau còn sửa được</b><b class="en-only" lang="en">Operability, simplicity, evolvability</b></a>
+    <a href="#diagnostic"><span><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></span><b class="standard-copy">Soi ba phẩm chất trên hệ của bạn</b><b class="easy-only">Câu hỏi tự hỏi mình</b><b class="en-only" lang="en">Test the three on your own system</b></a>
+  </nav>
+
+  <section class="section" id="reliability" aria-labelledby="reliability-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Phẩm chất 1 · <span lang="en">Reliability</span></span><span class="en-only" lang="en">Quality 1 · Reliability</span></div>
+        <h2 id="reliability-title"><span class="vi-only">Đáng tin không phải là không bao giờ hỏng</span><span class="en-only" lang="en">Reliable doesn't mean never breaking</span></h2>
+      </div>
+      <p class="standard-copy">Với Kleppmann, một hệ <em>đáng tin cậy</em> là hệ vẫn <strong>tiếp tục làm đúng việc của nó ở mức hiệu năng mong muốn ngay cả khi có trục trặc</strong><span class="cite"><a href="#ref-2">2</a></span>. Chìa khóa nằm ở cách ông tách hai khái niệm hay bị gộp: <em>fault</em> là khi một thành phần đơn lẻ lệch khỏi đặc tả của nó; <em>failure</em> là khi cả hệ ngừng cung cấp dịch vụ cho người dùng. Mục tiêu không phải là chặn mọi fault — điều bất khả — mà là thiết kế cơ chế <strong>dung thứ lỗi</strong> để fault không leo thang thành failure.</p>
+      <p class="easy-only">"Đáng tin" nghe như là "không bao giờ hỏng". Nhưng máy móc thì kiểu gì cũng có lúc trục trặc. Nên "đáng tin" thật ra nghĩa là: <strong>một chỗ hỏng vặt vẫn không làm sập cả hệ</strong>. Giống như xe có bánh dự phòng: thủng một lốp vẫn đi tiếp được.</p>
+      <p class="en-only" lang="en">For Kleppmann, a <em>reliable</em> system is one that <strong>keeps doing the right thing at the desired level of performance even when things go wrong</strong><span class="cite"><a href="#ref-2">2</a></span>. The key is a distinction people often blur: a <em>fault</em> is one component deviating from its spec; a <em>failure</em> is the system as a whole stopping service to users. The goal is not to prevent every fault — impossible — but to design <strong>fault-tolerant</strong> mechanisms so a fault does not escalate into a failure.</p>
+    </div>
+
+    <div class="overview-grid">
+      <article class="overview-card teal">
+        <div class="term"><span class="vi-only">Ý lõi 01 · <span lang="en">Fault vs failure</span></span><span class="en-only" lang="en">Idea 01 · Fault vs failure</span></div>
+        <h3><span class="vi-only">Lỗi bộ phận ≠ sập cả hệ</span><span class="en-only" lang="en">A part fault ≠ a whole failure</span></h3>
+        <p class="standard-copy">Vì không thể triệt tiêu fault, ta chuyển mục tiêu sang <strong>ngăn fault trở thành failure</strong>. Nghịch lý mà Kleppmann nêu: đôi khi cố tránh mọi lỗi lại làm hệ giòn hơn — tốt hơn là chấp nhận fault sẽ xảy ra và dựng lớp dung thứ quanh nó. Một hệ dung thứ lỗi tốt có thể chứa hàng loạt fault nhỏ mà người dùng không hề hay biết.</p>
+        <p class="easy-only">Một con ốc lỏng không nên làm hỏng cả cỗ máy. Ý ở đây là: đừng mơ "không bao giờ có lỗi", mà hãy làm sao cho một lỗi nhỏ <strong>không</strong> kéo sập mọi thứ. Nhớ nhé: chuẩn bị cho lỗi, đừng giả vờ lỗi sẽ không đến.</p>
+        <p class="en-only" lang="en">Since faults can't be eliminated, the goal shifts to <strong>keeping a fault from becoming a failure</strong>. Kleppmann's paradox: trying to avoid all errors can make a system more brittle — better to accept faults will happen and build tolerance around them. A well-designed fault-tolerant system can absorb many small faults with users none the wiser.</p>
+        <div class="result standard-copy">Dung thứ lỗi, không xóa lỗi.</div>
+        <div class="result easy-only">Nhớ nhé: chịu được lỗi.</div>
+        <div class="result en-only" lang="en">Tolerate faults, not erase them.</div>
+      </article>
+      <article class="overview-card blue">
+        <div class="term"><span class="vi-only">Ý lõi 02 · <span lang="en">Three kinds of fault</span></span><span class="en-only" lang="en">Idea 02 · Three kinds of fault</span></div>
+        <h3><span class="vi-only">Phần cứng, phần mềm, con người</span><span class="en-only" lang="en">Hardware, software, human</span></h3>
+        <p class="standard-copy">Kleppmann phân lỗi thành ba nhóm<span class="cite"><a href="#ref-2">2</a></span>. <em>Lỗi phần cứng</em> (đĩa chết, mất điện) thường ngẫu nhiên và độc lập, xử lý bằng dư thừa. <em>Lỗi phần mềm</em> nguy hiểm hơn vì có tính hệ thống, có thể quật ngã đồng loạt nhiều nút. <em>Lỗi con người</em> — cấu hình sai, thao tác nhầm — được ông xem là nguồn gây sự cố phổ biến nhất trong vận hành, và giảm bằng thiết kế tốt, sandbox, rollback nhanh chứ không phải bằng đổ lỗi.</p>
+        <p class="easy-only">Lỗi tới từ ba chỗ: máy hỏng, phần mềm có bug, và con người bấm nhầm. Điều bất ngờ: con người mới hay gây sự cố nhất. Nhớ nhé: làm hệ dễ dùng đúng thì bớt lỗi hơn là bắt mọi người "cẩn thận hơn".</p>
+        <p class="en-only" lang="en">Kleppmann groups faults into three kinds<span class="cite"><a href="#ref-2">2</a></span>. <em>Hardware faults</em> (dead disks, power loss) are usually random and independent, handled with redundancy. <em>Software faults</em> are more dangerous because they are systematic and can take down many nodes at once. <em>Human errors</em> — misconfiguration, wrong operations — he treats as the most common source of operational incidents, reduced by good design, sandboxes and fast rollback rather than by blame.</p>
+        <div class="result standard-copy">Con người thường là nguồn lỗi lớn nhất.</div>
+        <div class="result easy-only">Nhớ nhé: người hay nhầm nhất.</div>
+        <div class="result en-only" lang="en">Humans are often the biggest source.</div>
+      </article>
+      <article class="overview-card amber">
+        <div class="term"><span class="vi-only">Ý lõi 03 · <span lang="en">Inducing faults</span></span><span class="en-only" lang="en">Idea 03 · Inducing faults</span></div>
+        <h3><span class="vi-only">Chủ động tiêm lỗi để tin</span><span class="en-only" lang="en">Break it on purpose to trust it</span></h3>
+        <p class="standard-copy">Cách chắc chắn nhất để biết cơ chế dung thứ lỗi có chạy là <strong>cố tình gây lỗi</strong> và xem hệ phản ứng ra sao. Một ví dụ có thật của tư tưởng này là <em>Chaos Monkey</em> của Netflix — công cụ tắt ngẫu nhiên máy chủ trong môi trường thật để buộc hệ phải chịu được sự cố<span class="cite"><a href="#ref-6">6</a></span> — và rộng hơn là <em>chaos engineering</em>, kỷ luật thử nghiệm trên hệ phân tán để xây niềm tin vào khả năng trụ vững của nó<span class="cite"><a href="#ref-7">7</a></span>.</p>
+        <p class="easy-only">Muốn biết bánh xe dự phòng có dùng được không, thỉnh thoảng phải thử tháo lốp ra thật. Có đội còn viết chương trình <strong>tự tắt bớt máy</strong> để chắc chắn hệ vẫn chạy khi máy hỏng. Nhớ nhé: thử làm hỏng có kiểm soát thì mới dám tin lúc hỏng thật.</p>
+        <p class="en-only" lang="en">The surest way to know fault-tolerance works is to <strong>trigger faults on purpose</strong> and watch how the system responds. A real example of this idea is Netflix's <em>Chaos Monkey</em> — a tool that randomly kills servers in production to force the system to cope<span class="cite"><a href="#ref-6">6</a></span> — and more broadly <em>chaos engineering</em>, the discipline of experimenting on a distributed system to build confidence in its resilience<span class="cite"><a href="#ref-7">7</a></span>.</p>
+        <div class="result standard-copy">Gây lỗi có chủ đích để kiểm chứng.</div>
+        <div class="result easy-only">Nhớ nhé: thử hỏng trước.</div>
+        <div class="result en-only" lang="en">Induce faults to verify tolerance.</div>
+      </article>
+    </div>
+
+    <div class="surprise-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Reliability = tolerating faults, not avoiding them</div>
+        <p class="definition standard-copy">Độ tin cậy không đo bằng lời hứa "sẽ không bao giờ hỏng", mà bằng việc hệ <em>vẫn phục vụ đúng</em> trong khi các thành phần bên trong lần lượt trục trặc. Càng thừa nhận fault là chuyện thường ngày, ta càng thiết kế được lớp chịu lỗi thật sự.</p>
+        <p class="definition easy-only">Đừng tin lời hứa "không bao giờ hỏng". Hãy hỏi: khi một chỗ hỏng, cả hệ có còn chạy không? Nhớ nhé: hệ tốt là hệ đã chuẩn bị sẵn cho lúc hỏng.</p>
+        <p class="definition en-only" lang="en">Reliability is not measured by a promise to "never break," but by the system <em>still serving correctly</em> while its parts fail one by one. The more we accept faults as routine, the better the tolerance we can actually design.</p>
+        <p class="deep-only">Kleppmann nhấn rằng dung thứ lỗi luôn có giới hạn: ta chọn <em>loại</em> fault muốn chịu (một đĩa chết, một nút mất mạng) chứ không thể chịu mọi thứ (ví dụ toàn bộ trung tâm dữ liệu bị hủy vĩnh viễn). Vì thế "reliable" luôn là một mệnh đề <em>có điều kiện</em>: đáng tin <strong>trước những fault nào</strong>, ở mức hiệu năng nào. Việc nói rõ tập fault mình cam kết chịu — rồi kiểm chứng bằng cách tiêm lỗi — chính là nội dung kỹ thuật của độ tin cậy, thay cho khẩu hiệu marketing "high availability".</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về reliability">
+        <div class="equation-row">
+          <b>Fault ≠ failure</b>
+          <span>Fault là lỗi bộ phận; failure là cả hệ ngừng phục vụ. Mục tiêu: chặn cái trước hóa cái sau.</span>
+        </div>
+        <div class="equation-row">
+          <b>Con người trội</b>
+          <span>Lỗi thao tác/cấu hình thường gây sự cố nhiều hơn phần cứng; giảm bằng thiết kế, không bằng đổ lỗi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Tiêm lỗi để tin</b>
+          <span>Chủ động gây fault (Chaos Monkey, chaos engineering) để kiểm chứng khả năng trụ vững.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về reliability">
+        <div class="equation-row">
+          <b>Hỏng vặt vẫn chạy</b>
+          <span>Một chỗ trục trặc không được kéo sập cả hệ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Người hay nhầm</b>
+          <span>Làm hệ dễ dùng đúng thì bớt sự cố hơn là bắt mọi người cẩn thận.</span>
+        </div>
+        <div class="equation-row">
+          <b>Thử hỏng trước</b>
+          <span>Cố tình làm hỏng có kiểm soát để chắc lúc hỏng thật vẫn ổn.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about reliability">
+        <div class="equation-row">
+          <b>Fault ≠ failure</b>
+          <span>A fault is a part deviating; a failure is the whole system stopping. Stop the first becoming the second.</span>
+        </div>
+        <div class="equation-row">
+          <b>Humans dominate</b>
+          <span>Operator and config errors cause more incidents than hardware; reduce by design, not blame.</span>
+        </div>
+        <div class="equation-row">
+          <b>Induce to trust</b>
+          <span>Trigger faults deliberately (Chaos Monkey, chaos engineering) to verify resilience.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="scalability" aria-labelledby="scalability-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Phẩm chất 2 · <span lang="en">Scalability</span></span><span class="en-only" lang="en">Quality 2 · Scalability</span></div>
+        <h2 id="scalability-title"><span class="vi-only">Co giãn không phải một cái nhãn có/không</span><span class="en-only" lang="en">Scalability isn't a yes/no label</span></h2>
+      </div>
+      <p class="standard-copy"><em>Scalability</em> là khả năng của hệ đối phó với <strong>tải tăng lên</strong><span class="cite"><a href="#ref-2">2</a></span>. Kleppmann bác bỏ lối nói "X có scalable không?" như thể đó là một tính từ nhị phân; câu hỏi đúng phải cụ thể: "<em>nếu</em> tải tăng theo một cách nhất định, ta có những lựa chọn nào để kham?". Muốn trả lời, trước hết phải <strong>tả tải</strong> bằng các <em>load parameter</em>, rồi <strong>tả hiệu năng</strong> bằng con số — và cả hai phần này chương 1 làm rất kỹ.</p>
+      <p class="easy-only">"Co giãn được" không phải nhãn dán có/không. Phải hỏi rõ: đông lên <em>theo kiểu nào</em> — nhiều người đọc hơn, hay nhiều người viết hơn? Rồi đo xem lúc đó hệ chậm đi bao nhiêu. Nhớ nhé: nói "hệ này scalable" mà không nói tải kiểu gì thì gần như vô nghĩa.</p>
+      <p class="en-only" lang="en"><em>Scalability</em> is a system's ability to cope with <strong>increased load</strong><span class="cite"><a href="#ref-2">2</a></span>. Kleppmann rejects the phrasing "is X scalable?" as if it were a binary adjective; the right question is specific: "<em>if</em> load grows in a particular way, what options do we have for coping?". To answer, we must first <strong>describe load</strong> with <em>load parameters</em>, then <strong>describe performance</strong> in numbers — and Chapter 1 does both carefully.</p>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Load parameters · the Twitter example</div>
+          <h3><span class="vi-only">Tả tải: ví dụ dòng thời gian Twitter</span><span class="en-only" lang="en">Describing load: the Twitter timeline</span></h3>
+          <p class="standard-copy">Load parameter là con số nắm bắt "tải" của hệ theo đúng nút thắt của nó. Kleppmann dùng ví dụ Twitter (số liệu công bố năm 2012)<span class="cite"><a href="#ref-4">4</a></span>: đăng tweet ở mức trung bình ~4.6k yêu cầu/giây, đỉnh hơn 12k/giây; nhưng đọc <em>home timeline</em> lên tới ~300k yêu cầu/giây. Chính sự chênh lệch giữa ghi và đọc — chứ không phải tổng số tweet — mới là load parameter định hình thiết kế.</p>
+          <p class="easy-only">"Tải" là con số nói hệ đang bị đè nặng ở đâu. Ví dụ Twitter: số người <strong>đăng bài</strong> ít hơn hẳn số lần người ta <strong>mở bảng tin để đọc</strong>. Nhớ nhé: phải biết chỗ nào đông nhất thì mới thiết kế cho đúng chỗ đó.</p>
+          <p class="en-only" lang="en">A load parameter is a number that captures "load" at the system's real bottleneck. Kleppmann uses Twitter (figures published in 2012)<span class="cite"><a href="#ref-4">4</a></span>: posting a tweet ran at ~4.6k requests/sec on average, over 12k/sec at peak; but reading the <em>home timeline</em> reached ~300k requests/sec. It is the gap between writes and reads — not the total tweet count — that is the load parameter shaping the design.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao quan trọng</strong>Chọn đúng load parameter cho biết nút thắt thật nằm ở đâu. Với Twitter, đó là số lần đọc timeline khổng lồ, không phải số lần đăng.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Đo đúng chỗ đông nhất — ở đây là lượt đọc bảng tin — mới thiết kế đúng.</div>
+            <div class="en-only" lang="en"><strong>Why it matters</strong>The right load parameter reveals the true bottleneck. For Twitter it's the huge volume of timeline reads, not the posts.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cơ chế</h4>
+              <p>Load parameter không có công thức chung: mỗi hệ có tham số riêng — số yêu cầu/giây với web service, tỉ lệ đọc/ghi với cơ sở dữ liệu, số kết nối đồng thời với chat, tỉ lệ trúng cache. Chọn sai tham số thì mọi phép đo scalability sau đó đều lệch.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao là bước đầu</h4>
+              <p>Chỉ khi đã cố định tham số tải, câu "hệ chịu được tải gấp đôi không?" mới có nghĩa. Không có nó, "scalable" chỉ là khẩu hiệu — đúng như phê phán mở đầu của Kleppmann.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Fan-out: on write vs on read</div>
+          <h3><span class="vi-only">Hai cách dựng dòng thời gian</span><span class="en-only" lang="en">Two ways to build a timeline</span></h3>
+          <p class="standard-copy">Kleppmann trình bày hai cách xử lý <em>fan-out</em> — việc một tweet phải tới tất cả người theo dõi<span class="cite"><a href="#ref-4">4</a></span>. <em>Fan-out khi đọc</em>: mỗi lần mở timeline mới đi gộp tweet của những người mình theo dõi — nhẹ khi ghi, nặng khi đọc. <em>Fan-out khi ghi</em>: mỗi tweet được nhét sẵn vào bộ nhớ đệm timeline của từng follower — đọc rất nhanh, nhưng một bài của người có <strong>rất nhiều</strong> follower sinh ra <strong>cực nhiều</strong> lượt ghi. Twitter chuyển sang cách ghi-sẵn, rồi lai ghép để né chi phí với các tài khoản siêu nổi tiếng.</p>
+          <p class="easy-only">Có hai cách đưa bài tới người theo dõi. Một: lúc ai mở bảng tin mới đi gom bài — mở thì hơi lâu. Hai: đăng phát là nhét sẵn vào bảng tin của từng người — mở ra nhanh, nhưng người nổi tiếng đăng một bài thì phải chép cho hàng triệu người. Nhớ nhé: mỗi cách được cái này thì mất cái kia.</p>
+          <p class="en-only" lang="en">Kleppmann lays out two ways to handle <em>fan-out</em> — getting a tweet to all followers<span class="cite"><a href="#ref-4">4</a></span>. <em>Fan-out on read</em>: each timeline open merges tweets from the people you follow — cheap writes, expensive reads. <em>Fan-out on write</em>: each tweet is pushed into every follower's timeline cache — very fast reads, but a post from someone with <strong>very many</strong> followers spawns a <strong>huge</strong> number of writes. Twitter moved to write-time fan-out, then a hybrid to dodge the cost for super-popular accounts.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đánh đổi</strong>Không có cách "đúng" tuyệt đối: chọn giữa ghi rẻ/đọc đắt và đọc rẻ/ghi đắt tùy vào load parameter thật của hệ.</div>
+            <div class="easy-only"><strong>Đánh đổi</strong>Chọn "mở nhanh" hay "đăng nhẹ" tùy hệ của bạn đông đọc hay đông đăng hơn.</div>
+            <div class="en-only" lang="en"><strong>The trade-off</strong>There is no absolute "right": choose between cheap-write/expensive-read and cheap-read/expensive-write based on the real load parameter.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cơ chế</h4>
+              <p>Cách lai của Twitter: đa số người dùng được fan-out-khi-ghi, còn một nhúm tài khoản có lượng follower quá lớn thì để fan-out-khi-đọc cho riêng họ. Đây là ví dụ kinh điển cho thấy load parameter (phân bố số follower) trực tiếp quyết định kiến trúc.</p>
+            </div>
+            <div class="info-block">
+              <h4>Bài học rộng</h4>
+              <p>Cùng một chức năng ("hiện dòng thời gian") có thể hiện thực bằng những kiến trúc chi phí khác hẳn nhau. Việc chọn kiến trúc là chọn nơi <em>trả</em> chi phí — lúc ghi hay lúc đọc — chứ không phải xóa chi phí.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Percentiles &amp; tail latency</div>
+          <h3><span class="vi-only">Tả hiệu năng: percentile, không phải trung bình</span><span class="en-only" lang="en">Describing performance with percentiles</span></h3>
+          <p class="standard-copy">Để tả hiệu năng, Kleppmann bảo <strong>đừng tin số trung bình</strong>: nó giấu đi những yêu cầu chậm bất thường. Thay vào đó dùng <em>percentile</em> — p50 (trung vị), p95, p99, p999 — của thời gian phản hồi. Các percentile cao (<em>tail latency</em>) mới phản ánh trải nghiệm tệ nhất mà người dùng gặp, và thường chính những người này lại là khách nhiều dữ liệu, quý nhất. Dean &amp; Barroso mô tả hiện tượng <em>tail latency amplification</em>: khi một yêu cầu phải gọi nhiều dịch vụ song song, chỉ cần một nhánh chậm là cả yêu cầu chậm<span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <p class="easy-only">Đừng chỉ nhìn "trung bình nhanh". Có khi trung bình đẹp mà cứ 100 người thì 1 người phải chờ rất lâu. Người ta đo bằng cách xếp hàng: 99 người trong 100 nhanh hơn mức nào? Nhớ nhé: nhìn người <strong>chậm nhất</strong> mới biết hệ có thật sự nhanh không.</p>
+          <p class="en-only" lang="en">To describe performance, Kleppmann says <strong>don't trust the average</strong>: it hides unusually slow requests. Use <em>percentiles</em> instead — p50 (median), p95, p99, p999 — of response time. The high percentiles (<em>tail latency</em>) reflect the worst experience users actually hit, and those users are often the most valuable, data-heavy ones. Dean &amp; Barroso describe <em>tail latency amplification</em>: when one request fans out to many parallel services, a single slow branch makes the whole request slow<span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dùng khi nào</strong>Đặt mục tiêu hiệu năng bằng percentile (ví dụ "p99 dưới 200ms"), không bằng trung bình — vì SLA và trải nghiệm sống ở phần đuôi.</div>
+            <div class="easy-only"><strong>Dùng sao</strong>Đặt mục tiêu kiểu "99 trong 100 người phải nhanh", chứ không phải "trung bình nhanh".</div>
+            <div class="en-only" lang="en"><strong>When to use</strong>Set performance targets in percentiles (e.g. "p99 under 200ms"), not averages — because SLAs and experience live in the tail.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Response time vs latency</h4>
+              <p>Kleppmann tách <em>response time</em> (thời gian khách thấy: xử lý + hàng đợi + mạng) khỏi <em>latency</em> (khoảng chờ để được phục vụ). Phần lớn biến thiên ở đuôi đến từ hàng đợi, nên giảm tail thường là chuyện quản lý hàng đợi chứ không phải làm CPU nhanh hơn.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao đuôi khó</h4>
+              <p>Tail amplification khiến hệ càng phân tán, càng nhiều lời gọi song song thì tỉ lệ người dùng chạm phải một nhánh chậm càng cao. Đó là lý do p99/p999 của cả hệ có thể tệ hơn của từng dịch vụ con<span class="cite"><a href="#ref-5">5</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Coping with load</div>
+          <h3><span class="vi-only">Kham tải: scale up hay scale out</span><span class="en-only" lang="en">Coping: scale up or scale out</span></h3>
+          <p class="standard-copy">Khi đã tả được tải và hiệu năng, mới bàn tới <em>kham tải</em><span class="cite"><a href="#ref-2">2</a></span>. Hai hướng: <em>scale up</em> (máy mạnh hơn) và <em>scale out</em> (chia tải ra nhiều máy, kiến trúc <span lang="en">shared-nothing</span>). Thực tế thường lai cả hai. Kleppmann nhấn: <strong>không có kiến trúc co giãn vạn năng</strong> — kiến trúc tốt cho một ứng dụng được dựng quanh đúng những load parameter của nó, nên sao chép kiến trúc của công ty khác thường thất bại.</p>
+          <p class="easy-only">Muốn kham đông hơn có hai cách: mua một máy khỏe hơn, hoặc dùng nhiều máy thường chia nhau việc. Nhưng không có "công thức chung" cho mọi app. Nhớ nhé: đừng bê nguyên cách của người khác — phải làm hợp với hệ của mình.</p>
+          <p class="en-only" lang="en">Once load and performance are described, we can talk about <em>coping with load</em><span class="cite"><a href="#ref-2">2</a></span>. Two directions: <em>scaling up</em> (a more powerful machine) and <em>scaling out</em> (spreading load across many machines, a <span lang="en">shared-nothing</span> architecture). In practice it's usually a mix. Kleppmann stresses: <strong>there is no magic one-size scalable architecture</strong> — a good one is built around that application's specific load parameters, so copying another company's architecture often fails.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thực tế</strong>Kiến trúc co giãn phải được thiết kế cho tải cụ thể của bạn; công cụ và mẫu hình chỉ là điểm khởi đầu, không phải lời giải sẵn.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Làm hợp với hệ của mình, đừng chép nguyên của người khác.</div>
+            <div class="en-only" lang="en"><strong>The practical upshot</strong>A scalable architecture must be designed for your specific load; tools and patterns are a starting point, not a ready-made answer.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Elastic vs thủ công</h4>
+              <p>Một số hệ <em>elastic</em> — tự thêm bớt tài nguyên khi phát hiện tải đổi; số khác được người vận hành scale thủ công. Elastic tiện khi tải khó đoán, nhưng đơn giản hơn vẫn có lợi khi tải dễ dự báo.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao không sao chép được</h4>
+              <p>Vì kiến trúc gắn chặt với load parameter, hai ứng dụng "trông giống nhau" có thể cần thiết kế khác hẳn. Đây là lý do chương 1 dành công tả tải trước khi bàn giải pháp.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ chịu tải đến sống cùng con người</strong>
+      <strong class="en-only" lang="en">From coping with load to living with people</strong>
+      <span class="standard-copy">Reliability giữ hệ đứng vững trước lỗi, scalability giữ nó đứng vững trước tải. Nhưng phần lớn chi phí của phần mềm không nằm ở lúc viết ra, mà ở những năm tháng bảo trì sau đó — nơi con người phải hiểu, vận hành và thay đổi hệ. Đó là phẩm chất thứ ba.</span>
+      <span class="easy-only">Vậy là hệ đã chịu được lỗi và chịu được đông. Còn một điều nữa: người sau có dễ hiểu và sửa nó không? Phần tiếp nói về điều đó.</span>
+      <span class="en-only" lang="en">Reliability holds a system up against faults, scalability against load. But most of software's cost lies not in writing it but in the years of maintenance after — where people must understand, operate and change it. That is the third quality.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="maintainability" aria-labelledby="maintainability-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Phẩm chất 3 · <span lang="en">Maintainability</span></span><span class="en-only" lang="en">Quality 3 · Maintainability</span></div>
+        <h2 id="maintainability-title"><span class="vi-only">Phần lớn chi phí nằm ở bảo trì, không ở lúc viết</span><span class="en-only" lang="en">Most of the cost is maintenance, not writing</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann chỉ ra rằng <strong>phần lớn chi phí của phần mềm không nằm ở lúc dựng ban đầu, mà ở quá trình bảo trì kéo dài sau đó</strong><span class="cite"><a href="#ref-2">2</a></span>: sửa lỗi, giữ hệ chạy, điều tra sự cố, thích nghi với nền tảng mới, thêm tính năng. Ông gói maintainability thành ba nguyên tắc thiết kế: <em>operability</em> (dễ vận hành), <em>simplicity</em> (dễ hiểu) và <em>evolvability</em> (dễ thay đổi). Cả ba đều nhằm một điều: để những người tiếp quản hệ sau này bớt khổ.</p>
+      <p class="easy-only">Viết xong phần mềm mới chỉ là bắt đầu. Tốn kém nhất là <strong>những năm sau</strong>: giữ cho nó chạy, vá lỗi, thêm cái mới. Nên hệ tốt phải: dễ trông coi, dễ hiểu, và dễ sửa. Nhớ nhé: hãy nghĩ tới người sẽ chăm hệ này sau bạn.</p>
+      <p class="en-only" lang="en">Kleppmann points out that <strong>most of software's cost lies not in the initial build but in the long maintenance that follows</strong><span class="cite"><a href="#ref-2">2</a></span>: fixing bugs, keeping it running, investigating incidents, adapting to new platforms, adding features. He packages maintainability into three design principles: <em>operability</em> (easy to run), <em>simplicity</em> (easy to understand) and <em>evolvability</em> (easy to change). All three aim at one thing: sparing the people who inherit the system later.</p>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">A</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Operability</div>
+          <h3><span class="vi-only">Operability — làm nhẹ việc cho người vận hành</span><span class="en-only" lang="en">Operability — make ops' life easy</span></h3>
+          <p class="standard-copy">Operability là làm cho đội vận hành giữ hệ chạy trơn tru được dễ dàng: quan sát tốt (monitoring), tự động hóa việc lặp, tài liệu rõ, hành vi đoán trước được. Đây là nơi các mục tiêu dịch vụ được lượng hóa thành <em>SLI → SLO → SLA</em><span class="cite"><a href="#ref-8">8</a></span>: SLI là chỉ số đo thực tế (ví dụ tỉ lệ yêu cầu dưới ngưỡng p99), SLO là mục tiêu đặt trên chỉ số đó, SLA là cam kết có hệ quả với khách hàng.</p>
+          <p class="easy-only">"Dễ vận hành" là làm sao cho người trực hệ đỡ vất: có bảng theo dõi, máy tự làm việc lặp, và biết trước hệ sẽ hành xử ra sao. Người ta còn đặt mục tiêu rõ ràng kiểu "99% yêu cầu phải nhanh" để biết hệ có đạt không. Nhớ nhé: đo được thì mới giữ được.</p>
+          <p class="en-only" lang="en">Operability is making it easy for the ops team to keep the system running smoothly: good monitoring, automation of repetitive work, clear docs, predictable behavior. This is where service goals get quantified as <em>SLI → SLO → SLA</em><span class="cite"><a href="#ref-8">8</a></span>: an SLI is a measured indicator (e.g. the fraction of requests under a p99 threshold), an SLO is a target set on it, and an SLA is a contractual promise with consequences.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Gắn với chương này</strong>SLO thường được phát biểu bằng percentile của phần Scalability — ví dụ "99.9% yêu cầu trả trong 300ms" — nối trực tiếp reliability, performance và vận hành lại với nhau.</div>
+            <div class="easy-only"><strong>Nối với phần trước</strong>Mục tiêu hay viết kiểu "99,9% yêu cầu phải nhanh trong 300ms" — chính là dùng lại cách đo ở phần co giãn.</div>
+            <div class="en-only" lang="en"><strong>Tie to this chapter</strong>SLOs are usually stated in the percentiles from the Scalability section — e.g. "99.9% of requests within 300ms" — linking reliability, performance and operations directly.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cơ chế</h4>
+              <p>Một hệ dễ vận hành phơi bày trạng thái bên trong (metrics, log, trace), cho phép triển khai và rollback an toàn, và không bắt người trực phải nhớ những bước thủ công tinh vi. Khi việc lặp được tự động hóa, con người dồn sức cho việc chỉ người mới làm được.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao đo bằng SLO</h4>
+              <p>SLO biến "đủ tốt" từ cảm tính thành con số có thể theo dõi, và <em>error budget</em> (phần ngân sách lỗi còn lại dưới SLO) cho phép cân bằng giữa ra tính năng mới và giữ ổn định — một công cụ vận hành cốt lõi của SRE<span class="cite"><a href="#ref-8">8</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">B</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Simplicity &amp; evolvability</div>
+          <h3><span class="vi-only">Đơn giản để hiểu, mềm để đổi</span><span class="en-only" lang="en">Simple to grasp, supple to change</span></h3>
+          <p class="standard-copy"><em>Simplicity</em> là chống lại <strong>độ phức tạp ngẫu sinh</strong> (accidental complexity) — phần rối rắm không đến từ bài toán mà từ cách ta hiện thực nó<span class="cite"><a href="#ref-2">2</a></span>. Vũ khí của Kleppmann là <em>abstraction</em>: che chi tiết rối sau một giao diện sạch. <em>Evolvability</em> là mức độ dễ thay đổi hệ khi yêu cầu đổi — chính là "agile" ở cấp độ kiến trúc dữ liệu. Một hệ đơn giản, sáng sủa gần như luôn dễ tiến hóa hơn một hệ rối.</p>
+          <p class="easy-only">"Đơn giản" không phải ít tính năng, mà là <strong>không rối một cách vô cớ</strong>: chỗ nào khó thì gói gọn lại cho dễ dùng. "Dễ đổi" là khi cần thêm hay sửa thì không phải đập đi xây lại. Nhớ nhé: càng gọn gàng thì càng dễ sửa về sau.</p>
+          <p class="en-only" lang="en"><em>Simplicity</em> is fighting <strong>accidental complexity</strong> — the tangle that comes not from the problem but from how we implemented it<span class="cite"><a href="#ref-2">2</a></span>. Kleppmann's weapon is <em>abstraction</em>: hiding messy detail behind a clean interface. <em>Evolvability</em> is how easily the system changes as requirements do — "agility" at the level of data architecture. A simple, clear system is nearly always easier to evolve than a tangled one.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Phân biệt quan trọng</strong>Độ phức tạp <em>bản chất</em> (do bài toán) không thể xóa; độ phức tạp <em>ngẫu sinh</em> (do ta) thì có thể — và abstraction tốt là cách gỡ nó mà không mất sức mạnh.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Có cái khó là do đề bài, có cái khó là do mình làm rối. Cái do mình thì gỡ được.</div>
+            <div class="en-only" lang="en"><strong>Key distinction</strong>Complexity <em>essential</em> to the problem can't be removed; <em>accidental</em> complexity we introduced can — and good abstraction removes it without losing power.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao đơn giản giúp tin cậy</h4>
+              <p>Hệ càng rối, người sửa càng dễ hiểu sai và cài thêm bug — tức simplicity nuôi cả reliability lẫn evolvability. Ba phẩm chất không tách rời: một quyết định thiết kế thường chạm cả ba cùng lúc.</p>
+            </div>
+            <div class="info-block">
+              <h4>Evolvability trong thực tế</h4>
+              <p>Yêu cầu gần như luôn thay đổi: thị trường mới, luật mới, quy mô mới. Evolvability là khả năng bám theo những thay đổi ấy với chi phí thấp — và nó phụ thuộc nặng vào việc hệ có đơn giản, dễ hiểu hay không.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="surprise-lead trap-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Maintainability = operability + simplicity + evolvability</div>
+        <p class="definition standard-copy">Một hệ dễ bảo trì không phải hệ có nhiều tài liệu nhất, mà là hệ để người tiếp quản <em>vận hành, hiểu và thay đổi</em> nó với chi phí thấp — suốt vòng đời chứ không chỉ ngày ra mắt.</p>
+        <p class="definition easy-only">Dễ bảo trì không phải là viết thật nhiều giấy tờ. Là để người sau <em>trông coi, hiểu và sửa</em> hệ mà không khổ. Nhớ nhé: nghĩ cho người đến sau chính là làm hệ tốt.</p>
+        <p class="definition en-only" lang="en">A maintainable system is not the one with the most docs, but the one that lets its inheritors <em>operate, understand and change</em> it cheaply — across its whole life, not just launch day.</p>
+        <p class="deep-only">Kleppmann cột ba phẩm chất lại thành một khung suy luận, và khung ấy là xương sống của cả cuốn sách: các phần sau lần lượt mổ xẻ mô hình dữ liệu và ngôn ngữ truy vấn (Chương 2–3), lưu trữ và truy xuất (Chương 3), mã hóa và tiến hóa (Chương 4), rồi dữ liệu phân tán — sao chép, phân mảnh, giao dịch, đồng thuận (Chương 5–9), trước khi bàn dữ liệu dẫn xuất qua xử lý theo mẻ và luồng (Chương 10–12). Mọi lựa chọn kỹ thuật ở các chương đó đều quay lại đo bằng chính bộ ba reliability · scalability · maintainability của Chương 1.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nguyên tắc của maintainability">
+        <div class="equation-row">
+          <b>Operability</b>
+          <span>Làm việc vận hành dễ: monitoring, tự động hóa, hành vi đoán trước; đo bằng SLI/SLO/SLA.</span>
+        </div>
+        <div class="equation-row">
+          <b>Simplicity</b>
+          <span>Gỡ độ phức tạp ngẫu sinh bằng abstraction, để hệ dễ hiểu và ít bug.</span>
+        </div>
+        <div class="equation-row">
+          <b>Evolvability</b>
+          <span>Dễ thay đổi khi yêu cầu đổi — agile ở cấp kiến trúc dữ liệu.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều làm nên dễ bảo trì">
+        <div class="equation-row">
+          <b>Dễ trông coi</b>
+          <span>Có bảng theo dõi và máy tự làm việc lặp.</span>
+        </div>
+        <div class="equation-row">
+          <b>Dễ hiểu</b>
+          <span>Không rối một cách vô cớ; chỗ khó thì gói lại.</span>
+        </div>
+        <div class="equation-row">
+          <b>Dễ đổi</b>
+          <span>Thêm hay sửa mà không phải đập đi xây lại.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three principles of maintainability">
+        <div class="equation-row">
+          <b>Operability</b>
+          <span>Make operations easy: monitoring, automation, predictable behavior; measured with SLI/SLO/SLA.</span>
+        </div>
+        <div class="equation-row">
+          <b>Simplicity</b>
+          <span>Remove accidental complexity via abstraction, so the system is understandable and less buggy.</span>
+        </div>
+        <div class="equation-row">
+          <b>Evolvability</b>
+          <span>Easy to change as requirements change — agility at the data-architecture level.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận thường gặp về ba phẩm chất</span><span class="en-only" lang="en">Three common misreadings of the three qualities</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Reliable = không bao giờ hỏng”</span><span class="en-only" lang="en">"Reliable = never breaks"</span></h4>
+          <p class="standard-copy">Sai: fault là chuyện thường ngày. Reliable nghĩa là <em>dung thứ</em> fault để chúng không thành failure — và cách kiểm chứng là chủ động tiêm lỗi, không phải cầu cho lỗi đừng đến.</p>
+          <p class="en-only" lang="en">Wrong: faults are routine. Reliable means <em>tolerating</em> faults so they don't become failures — verified by inducing faults, not by hoping they never come.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Scalable là nhãn có/không”</span><span class="en-only" lang="en">"Scalable is a yes/no label"</span></h4>
+          <p class="standard-copy">Sai: phải hỏi "tải tăng <em>theo cách nào</em>". Scalability chỉ có nghĩa khi gắn với load parameter cụ thể và mục tiêu percentile cụ thể — không có kiến trúc co giãn vạn năng.</p>
+          <p class="en-only" lang="en">Wrong: you must ask "load grows <em>how?</em>". Scalability only means something tied to a specific load parameter and percentile target — there is no universal scalable architecture.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Maintainable = nhiều tài liệu”</span><span class="en-only" lang="en">"Maintainable = lots of docs"</span></h4>
+          <p class="standard-copy">Sai: tài liệu chỉ là một phần của operability. Dễ bảo trì thật sự đến từ đơn giản và dễ tiến hóa — một hệ sáng sủa cần ít tài liệu hơn để người sau hiểu được.</p>
+          <p class="en-only" lang="en">Wrong: docs are only part of operability. True maintainability comes from simplicity and evolvability — a clear system needs fewer docs for the next person to understand.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi ba phẩm chất trên chính hệ của bạn</span><span class="en-only" lang="en">Test the three qualities on your own system</span></h2>
+        <p class="standard-copy">Chương 1 mới đặt bộ từ vựng; nhưng bạn có thể áp ngay vào một hệ mình đang làm bằng vài câu hỏi. Chúng không đo hệ của bạn "lớn" tới đâu, mà soi xem bạn đã <em>nói rõ</em> được reliability, scalability và maintainability của nó thành điều đo được hay chưa.</p>
+        <p class="easy-only">Thử soi một hệ thật (app, dịch vụ) bằng mấy câu dưới. Không phải để khoe hệ to, mà để xem bạn đã biết rõ nó đáng tin, chịu tải và dễ sửa tới đâu chưa.</p>
+        <p class="en-only" lang="en">Chapter 1 only sets the vocabulary; but you can apply it now to a system you work on through a few questions. They don't measure how "big" your system is, but whether you can yet <em>state</em> its reliability, scalability and maintainability as something measurable.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Hệ của bạn cam kết dung thứ những fault nào?</strong><span class="deep-only">Reliable luôn là mệnh đề có điều kiện. Hãy nêu cụ thể: một đĩa chết? một nút mất mạng? một vùng dữ liệu sập? Cái gì nằm ngoài danh sách đó là cái bạn đã ngầm chấp nhận sẽ gây failure.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn đã bao giờ chủ động tiêm lỗi để kiểm chứng chưa?</strong><span class="deep-only">Cơ chế dung thứ lỗi chưa từng bị thử thì chưa đáng tin. Bạn có bài tập dừng đột ngột một nút, cắt mạng, hay chạy kiểu Chaos Monkey trong môi trường an toàn không?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Đâu là rủi ro lỗi-con-người lớn nhất, và bạn giảm nó bằng thiết kế hay bằng nhắc nhở?</strong><span class="deep-only">Vì lỗi thao tác/cấu hình thường là nguồn sự cố hàng đầu, hãy hỏi: có sandbox, có rollback nhanh, có cấu hình khó bấm-nhầm không — hay chỉ trông vào việc mọi người "cẩn thận hơn"?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Load parameter thật của hệ bạn là gì?</strong><span class="deep-only">Nút thắt nằm ở đâu: số yêu cầu/giây, tỉ lệ đọc/ghi, số kết nối đồng thời, tỉ lệ trúng cache? Nếu chưa gọi tên được, thì mọi phát biểu về "scalable" của hệ vẫn còn mơ hồ.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Mục tiêu hiệu năng của bạn nói bằng trung bình hay bằng percentile?</strong><span class="deep-only">Trung bình giấu phần đuôi. Bạn có một mục tiêu kiểu "p99 dưới X ms" không, và bạn có thật sự đo được nó không? Nhớ rằng khách chạm phải tail thường là khách quý nhất.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu tải tăng gấp mười, kế hoạch của bạn là scale up hay scale out?</strong><span class="deep-only">Không có kiến trúc co giãn vạn năng. Câu trả lời phải bám vào load parameter cụ thể ở trên — và nói rõ bạn định trả chi phí ở đâu (lúc ghi hay lúc đọc, một máy khỏe hay nhiều máy).</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Phần phức tạp trong hệ là bản chất hay ngẫu sinh?</strong><span class="deep-only">Hãy chỉ ra một chỗ rối. Nó rối vì bài toán vốn khó, hay vì cách bạn hiện thực? Phần ngẫu sinh có thể gỡ bằng abstraction — và gỡ nó thường cải thiện cả reliability lẫn evolvability.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Người tiếp quản hệ sau bạn sẽ vận hành, hiểu và đổi nó dễ tới đâu?</strong><span class="deep-only">Đây là câu hỏi trung tâm của phần maintainability. Có monitoring, có SLO đo được, có tài liệu và abstraction đủ để một người mới không phải hỏi bạn mọi thứ không? Nếu "không nhiều", chi phí thật của hệ nằm ở tương lai đó.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Khi một chỗ hỏng, cả hệ của bạn có còn chạy không?</strong><span>Hệ tốt là hỏng vặt vẫn phục vụ tiếp. Bạn đã chuẩn bị cho lúc hỏng chưa?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Chỗ nào của hệ bị "đè" nặng nhất — người đọc hay người ghi?</strong><span>Biết chỗ đông nhất mới thiết kế cho đúng chỗ đó.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn đo "nhanh" bằng trung bình hay bằng "99 trong 100 người"?</strong><span>Nhìn người chậm nhất mới biết hệ có thật sự nhanh không.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Người khác tiếp nhận hệ này có dễ hiểu và sửa không?</strong><span>Nghĩ cho người đến sau chính là làm hệ tốt.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>Which faults does your system commit to tolerating?</strong><span>Reliable is always conditional. Name them: a dead disk? a node losing network? a zone down? Anything off that list you've silently accepted as a possible failure.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Have you ever induced faults on purpose to verify?</strong><span>Untested fault-tolerance isn't trustworthy yet. Do you kill a node, cut the network, or run something Chaos-Monkey-like in a safe environment?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>What's your biggest human-error risk, and do you reduce it by design or by reminders?</strong><span>Since operator/config errors are a leading incident source, ask: sandboxes, fast rollback, hard-to-misclick config — or just hoping people are "more careful"?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>What is your system's real load parameter?</strong><span>Where's the bottleneck: requests/sec, read/write ratio, concurrent connections, cache hit rate? If you can't name it, every "scalable" claim stays vague.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is your performance target stated as an average or a percentile?</strong><span>Averages hide the tail. Do you have a "p99 under X ms" target, and can you actually measure it? The users hitting the tail are often your most valuable.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>If load grew tenfold, is your plan to scale up or scale out?</strong><span>There's no universal scalable architecture. The answer must ride on the specific load parameter above — and say where you pay the cost.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is your system's complexity essential or accidental?</strong><span>Point at one tangle. Is it hard because the problem is, or because of your implementation? Accidental complexity can be removed with abstraction — improving reliability and evolvability too.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How easily will whoever inherits it operate, understand and change it?</strong><span>This is the central maintainability question. Monitoring, measurable SLOs, docs and abstractions enough that a newcomer needn't ask you everything? If "not much," that future is where the real cost sits.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Một hệ dữ liệu tốt không được đo bằng nó <span class="closing-accent">làm được gì</span>, mà bằng việc nó <span class="closing-accent">trụ được ra sao</span>: đáng tin khi có lỗi, co giãn khi tải tăng, dễ bảo trì khi con người phải sống cùng nó qua năm tháng. Ba phẩm chất ấy không phải khẩu hiệu — chúng là <span class="closing-accent">bộ từ vựng đo được</span> mà cả cuốn sách dùng để suy luận. Mọi lựa chọn kỹ thuật ở các chương sau đều quay lại soi qua đúng ba câu hỏi của Chương 1.</span><span class="easy-only">Hệ tốt không phải hệ làm được nhiều thứ nhất, mà là hệ <span class="closing-accent">hỏng vặt vẫn chạy</span>, <span class="closing-accent">đông vẫn kham</span>, và <span class="closing-accent">người sau còn sửa được</span>. Nhớ nhé: ba chữ — đáng tin, co giãn, dễ bảo trì — là thước đo đi theo suốt cả cuốn sách.</span><span class="en-only" lang="en">A good data system is measured not by what it <span class="closing-accent">can do</span>, but by how it <span class="closing-accent">holds up</span>: reliable when faults occur, scalable when load grows, maintainable when people must live with it over years. These three are not slogans — they are the <span class="closing-accent">measurable vocabulary</span> the whole book reasons with. Every technical choice in later chapters comes back to the three questions of Chapter 1.</span></blockquote>
+  </section>
+
+  <!-- NAV:START (curator-owned: chapter prev/next) -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="index.html">
+      <span class="nav-label"><span class="vi-only">◀ Mục lục</span><span class="en-only" lang="en">◀ Contents</span></span>
+      <span class="nav-title"><span class="vi-only">Trang bìa · DDIA</span><span class="en-only" lang="en">Cover · DDIA</span></span>
+    </a>
+    <span class="nav-cell nav-next" aria-disabled="true">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 2 · Mô hình dữ liệu &amp; ngôn ngữ truy vấn · sắp có</span><span class="en-only" lang="en">Chapter 2 · Data Models & Query Languages · soon</span></span>
+    </span>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 1 <span lang="en">“Reliable, Scalable, and Maintainable Applications”</span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (bánh xe dự phòng, con ốc lỏng…) là minh họa do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. Số liệu Twitter (~4.6k/12k/300k yêu cầu/giây) là số Kleppmann trích từ bài nói của Raffi Krikorian năm 2012 <span class="cite"><a href="#ref-4">4</a></span>, không phải số liệu vận hành hiện thời của nền tảng.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 1 “Reliable, Scalable, and Maintainable Applications”. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (spare tyre, loose bolt…) are illustrations added by this companion, not examples from the book. The Twitter figures (~4.6k/12k/300k requests/sec) are ones Kleppmann cites from Raffi Krikorian's 2012 talk <span class="cite"><a href="#ref-4">4</a></span>, not the platform's current operational numbers.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 1.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách (bộ ba reliable / scalable / maintainable, khung "data-intensive")</a></li>
+        <li id="ref-3"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O'Reilly — trang sách chính thức (mục lục, định danh chương)</a></li>
+        <li id="ref-4"><a href="https://www.infoq.com/presentations/Twitter-Timeline-Scalability/" target="_blank" rel="noopener noreferrer">Raffi Krikorian, “Timelines at Scale”, QCon 2012 (InfoQ) — số liệu tweet/timeline &amp; fan-out on write vs read</a></li>
+        <li id="ref-5"><a href="https://cacm.acm.org/research/the-tail-at-scale/" target="_blank" rel="noopener noreferrer">Jeffrey Dean &amp; Luiz André Barroso, “The Tail at Scale”, Communications of the ACM, 2013 — tail latency &amp; percentile</a></li>
+        <li id="ref-6"><a href="https://github.com/Netflix/chaosmonkey" target="_blank" rel="noopener noreferrer">Netflix — Chaos Monkey (tiêm lỗi trong môi trường thật)</a></li>
+        <li id="ref-7"><a href="https://principlesofchaos.org/" target="_blank" rel="noopener noreferrer">Principles of Chaos Engineering — định nghĩa chaos engineering</a></li>
+        <li id="ref-8"><a href="https://sre.google/sre-book/service-level-objectives/" target="_blank" rel="noopener noreferrer">Google SRE Book — Service Level Objectives (SLI / SLO / SLA, error budget)</a></li>
+      </ol>
+      <!-- NAV:START (curator-owned: series cross-links) -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a>. <span class="soon-note">Chương 2 — Mô hình dữ liệu &amp; ngôn ngữ truy vấn: sắp có.</span></p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a>. <span class="soon-note">Chapter 2 — Data Models & Query Languages: coming soon.</span></p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+</script>
+</body>
+</html>
