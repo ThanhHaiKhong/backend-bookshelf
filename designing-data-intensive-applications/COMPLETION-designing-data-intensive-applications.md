@@ -162,7 +162,7 @@ Auditor nêu 4 gap không chặn PASS; cả bốn đã được route về đún
 |---|---|---|
 | 1 | Ch5 `ref-18` (haslab.wordpress.com, 403) thiếu ghi chú bot-block | Đã thêm `<em>` ngoài thẻ `<a>` |
 | 2 | Ch7 `ref-10` (dev.mysql.com, 403) thiếu ghi chú | Đã thêm; Ch7 nay có 4 ref bị chặn, tất cả đều có ghi chú |
-| 3 | Ch6 `ref-20` (elastic.co/blog) trả 502 | **Link mục nát thật** (502 trên 6 lần thử; `elastic.co/docs` vẫn 200). Thay bằng doc `_routing` chính thức (200), chặt hơn blog cũ. Một khẳng định chuyển sang `ref-21` thật sự đỡ được nó; **hai mảnh chỉ blog mới có — con số "cả 20 shard" và một câu trích — bị gỡ hẳn** thay vì bịa nguồn |
+| 3 | Ch6 `ref-20` (elastic.co/blog) trả 502 | **Sự cố tạm thời, không phải link mục nát.** Body của phản hồi 502 là trang lỗi có thương hiệu của chính Elastic (`Temporary outage — We're on it!`, phục vụ tĩnh từ S3), và `elastic.co/docs` vẫn 200 — tức hỏng một phần hạ tầng, resource không biến mất. Giữ nguyên URL, thêm `<em>` nói đúng bản chất (**không** dùng câu mẫu bot-blocked). Bổ sung `ref-28` (doc `_routing` chính thức, 200) đỡ phần cơ chế, giữ `ref-21` đỡ phần coordinating node. Cả ba khẳng định Elastic nay có doc chính thức còn sống đỡ cơ chế **cộng** blog đỡ minh hoạ — chắc chắn hơn trạng thái ban đầu. Ch6: 28 ref, 127 cite |
 | 4 | Ch7 dùng "phân vùng" cho sharding trong khi canonical là "Phân mảnh" | Đổi đủ 9/9 chỗ; Ch7 nay còn 0 chữ "phân vùng". "Phân vùng **mạng**" ở Ch5/Ch8/Ch9 là khái niệm khác, giữ nguyên |
 
 ## Bài học hạ tầng của wave này
@@ -180,6 +180,12 @@ Chỉ khi mở bằng **trình duyệt thật** mới phân biệt được ba t
 
 **Ref trỏ blog của vendor mục nát nhanh hơn ref trỏ doc của vendor.** Ưu tiên doc chính thức khi cả hai cùng đỡ được một khẳng định.
 
+**Gặp 5xx thì đọc body, đừng chỉ đọc mã.** Một 502 có thể là link mục nát, cũng có thể
+là trang lỗi tạm thời do chính vendor phục vụ — hai thứ đòi hai cách xử lý ngược nhau
+(thay nguồn vs giữ nguyên kèm ghi chú). Trong wave này chẩn đoán "mục nát" ban đầu là
+**sai**: body cho thấy trang `Temporary outage` có thương hiệu Elastic, và `elastic.co/docs`
+vẫn 200. Gỡ một nguồn hợp lệ vì máy chủ của họ hỏng nửa tiếng là phản tác dụng.
+
 **Scratchpad dùng chung gây ghi đè chéo.** Năm agent ghi file trung gian **cùng tên** (`body1.html`…) vào **cùng một thư mục**; bản ráp đầu của Ch5 lẫn nội dung Ch7 và Ch9. `ddia-ch5` tự phát hiện, chuyển sang thư mục riêng, viết lại, và cảnh báo. Kiểm chéo sau đó (định danh chương; thuật ngữ chỉ-có-ở-một-chương; nội dung từng section khớp id; auditor đọc hiểu độc lập) xác nhận **không có nhiễm nào sống sót** — nhưng mọi gate đều xanh trong lúc file đang lẫn, nên nếu Ch5 không tự bắt thì cả wave đã hỏng âm thầm. Đã đưa luật `scratchpad/chN/` vào `CLAUDE.md`.
 
 ## Mục mở
@@ -187,3 +193,15 @@ Chỉ khi mở bằng **trình duyệt thật** mới phân biệt được ba t
 **Chính tả `hoá` / `hóa` trộn lẫn toàn cuốn** — có sẵn từ wave genesis, không do wave này sinh ra. Bìa + Ch1 + Ch4 dùng `hóa` (60 chỗ); Ch2, 3, 5, 6, 7, 8, 9 dùng `hoá` (436 chỗ). Cả hai đều là tiếng Việt hợp lệ, khác nhau ở chỗ đặt dấu thanh. Tên chương canonical trên bìa và toàn bộ nav dùng `hóa`. Chưa chuẩn hoá — chờ quyết định, cần một lượt riêng.
 
 **`ref-1` thiếu link ngoài** ở 8/9 chương (chỉ Ch2 link tới Open Library). Không vi phạm "không bịa" (trích dẫn sách in đủ tên/nhà xuất bản/năm/chương). Để lượt polish sau.
+
+
+## Đính chính
+
+Commit `60a5f35` mô tả sai kết cục của việc số 3 ở trên: message ghi rằng link blog
+Elastic là link mục nát, đã bị thay bằng doc chính thức, và hai khẳng định chỉ blog mới
+có đã bị gỡ. Đó là ảnh chụp trạng thái **giữa hai vòng sửa** của `ddia-ch6`, không phải
+trạng thái được commit. Nội dung thật sự nằm trong `60a5f35` là kết quả vòng hai: URL
+blog **được giữ** kèm ghi chú outage, hai khẳng định **được khôi phục** (dựa trên văn
+bản blog mà agent đã fetch và đọc thành công sớm hơn trong phiên, trước khi outage xảy
+ra — không phải khôi phục theo trí nhớ), và `ref-28` được **bổ sung** chứ không thay thế.
+File trên đĩa khớp commit; chỉ phần mô tả là sai. Bảng ở trên đã sửa.
