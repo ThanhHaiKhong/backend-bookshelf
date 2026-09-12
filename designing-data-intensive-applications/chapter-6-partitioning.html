@@ -1,0 +1,2070 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 6 &quot;Partitioning&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: phân mảnh theo dải khoá vs theo băm, chỉ mục phụ cục bộ vs toàn cục, tái cân bằng và định tuyến yêu cầu.">
+<title>Partitioning</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 06";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 6</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 6</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 6</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 6 · Phân mảnh</span><span class="easy-only">DDIA · Chương 6 · Phân mảnh</span><span class="en-only" lang="en">DDIA · Chapter 6 · Partitioning</span></div>
+      <h1 id="page-title"><span class="standard-copy">Mỗi bản ghi thuộc đúng <span class="hero-title-accent">một mảnh</span></span><span class="easy-only">Chia dữ liệu ra nhiều ngăn</span><span class="en-only" lang="en">Every record lives in exactly <span class="hero-title-accent">one partition</span></span></h1>
+      <p class="standard-copy">Chương 5 hỏi làm sao giữ <em>cùng một</em> dữ liệu trên nhiều máy. Chương 6 hỏi câu ngược lại: khi tập dữ liệu và tải quá lớn cho một máy, ta <strong>cắt nó ra</strong> thế nào. Kleppmann gọi mỗi mảnh là một <em lang="en">partition</em>, và định nghĩa nó rất chặt: mỗi bản ghi (mỗi hàng, mỗi tài liệu) thuộc về <strong>đúng một</strong> phân mảnh, và mỗi phân mảnh vận hành như một cơ sở dữ liệu nhỏ của riêng nó<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. Điều quan trọng cần nói ngay: phân mảnh <strong>không thay thế</strong> nhân bản — hai thứ gần như luôn đi cùng nhau, mỗi phân mảnh vẫn được giữ trên nhiều node để chịu lỗi.</p>
+      <p class="easy-only">Khi tủ hồ sơ đầy quá một cái tủ không chứa nổi, ta mua thêm tủ và <strong>chia hồ sơ ra</strong>. Mỗi tờ hồ sơ chỉ nằm trong <strong>một</strong> ngăn duy nhất, nhưng để phòng cháy thì mỗi ngăn vẫn được photo ra vài bản để ở chỗ khác. Chương này nói về việc chia thế nào cho đều — và chia xong thì tìm lại bằng cách nào.</p>
+      <p class="en-only" lang="en">Chapter 5 asked how to keep <em>the same</em> data on several machines. Chapter 6 asks the opposite: when the dataset and the load are too big for one machine, how do we <strong>cut it up</strong>. Kleppmann calls each piece a <em>partition</em>, and defines it tightly: every record (every row, every document) belongs to <strong>exactly one</strong> partition, and each partition behaves like a small database of its own<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. One thing to say up front: partitioning does <strong>not</strong> replace replication — the two almost always travel together, with each partition still kept on several nodes for fault tolerance.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Phân mảnh là bài toán <strong>vẽ ranh giới</strong>, và chỉ có hai câu hỏi thật sự: <em>vẽ thế nào để tải chia đều</em>, và <em>sau khi ranh giới dịch chuyển thì tìm lại dữ liệu bằng cách nào</em>. Mọi kỹ thuật trong chương — dải khoá hay băm, chỉ mục cục bộ hay toàn cục, tái cân bằng, định tuyến — đều là câu trả lời cho đúng hai câu hỏi ấy. Và mọi câu trả lời đều là một đánh đổi, không có phương án nào thắng ở cả hai đầu.</p>
+          <p class="easy-only">Chia dữ liệu ra nhiều ngăn thì phải trả lời hai câu. Một: chia sao cho không ngăn nào quá tải? Hai: chia xong rồi, muốn lấy một tờ ra thì biết nó ở ngăn nào? Nhớ nhé: cả chương chỉ xoay quanh hai câu hỏi đó, và cách nào cũng có cái được cái mất.</p>
+          <p class="en-only" lang="en">Partitioning is the problem of <strong>drawing boundaries</strong>, and there are really only two questions: <em>how do we draw them so the load spreads evenly</em>, and <em>once the boundaries move, how do we find the data again</em>. Every technique in the chapter — key range or hash, local or global index, rebalancing, routing — answers exactly those two. And every answer is a trade-off; nothing wins at both ends.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Bốn trục của Chương 6: vẽ ranh giới theo dải khoá hay theo băm, chỉ mục phụ cục bộ hay toàn cục, tái cân bằng phân mảnh, và định tuyến yêu cầu / The four axes of Chapter 6: drawing boundaries by key range or hash, local or global secondary indexes, rebalancing, and request routing">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">CHIA SAO<br>CHO ĐỀU?</span><span class="en-only" lang="en">HOW DO WE<br>SPLIT IT<br>EVENLY?</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Range vs hash</span><span class="en-only" lang="en">Range vs hash</span></b>
+        <small class="standard-copy">Vẽ ranh giới theo dải khoá hay theo băm của khoá</small>
+        <small class="easy-only">Chia theo thứ tự, hay chia theo bốc thăm.</small>
+        <small class="en-only" lang="en">Draw the line by key range or by hash of the key</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Local vs global</span><span class="en-only" lang="en">Local vs global</span></b>
+        <small class="standard-copy">Chỉ mục phụ theo document hay theo term</small>
+        <small class="easy-only">Mỗi ngăn tự ghi mục lục, hay có mục lục chung.</small>
+        <small class="en-only" lang="en">Secondary indexes by document or by term</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Rebalance &amp; route</span><span class="en-only" lang="en">Rebalance &amp; route</span></b>
+        <small class="standard-copy">Dời mảnh, rồi tìm lại dữ liệu ở đâu</small>
+        <small class="easy-only">Dọn ngăn xong thì tra bản đồ mới.</small>
+        <small class="en-only" lang="en">Move partitions, then find the data again</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#key-partitioning"><span><span class="vi-only">Trục 1</span><span class="en-only" lang="en">Axis 1</span></span><b class="standard-copy">Dải khoá hay băm của khoá</b><b class="easy-only">Chia theo thứ tự hay bốc thăm</b><b class="en-only" lang="en">Key range or hash of key</b></a>
+    <a href="#secondary-indexes"><span><span class="vi-only">Trục 2</span><span class="en-only" lang="en">Axis 2</span></span><b class="standard-copy">Chỉ mục phụ: cục bộ hay toàn cục</b><b class="easy-only">Mục lục riêng hay mục lục chung</b><b class="en-only" lang="en">Secondary indexes: local or global</b></a>
+    <a href="#rebalancing"><span><span class="vi-only">Trục 3</span><span class="en-only" lang="en">Axis 3</span></span><b class="standard-copy">Tái cân bằng mà không dời cả thế giới</b><b class="easy-only">Dọn ngăn mà không xáo tung</b><b class="en-only" lang="en">Rebalancing without moving everything</b></a>
+    <a href="#request-routing"><span><span class="vi-only">Trục 4</span><span class="en-only" lang="en">Axis 4</span></span><b class="standard-copy">Định tuyến yêu cầu &amp; truy vấn song song</b><b class="easy-only">Tra bản đồ để tìm đúng ngăn</b><b class="en-only" lang="en">Request routing &amp; parallel queries</b></a>
+  </nav>
+
+  <section class="section" id="key-partitioning" aria-labelledby="key-partitioning-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">Partitioning of key-value data</span></span><span class="en-only" lang="en">Axis 1 · Partitioning of key-value data</span></div>
+        <h2 id="key-partitioning-title"><span class="vi-only">Vẽ ranh giới: theo dải khoá hay theo băm</span><span class="en-only" lang="en">Drawing the line: by key range or by hash</span></h2>
+      </div>
+      <p class="standard-copy">Mục tiêu của phân mảnh là chia <strong>đều</strong> — cả dữ liệu lẫn tải truy vấn. Nếu chia không đều, Kleppmann gọi đó là <em lang="en">skew</em> (lệch), và mảnh phải gánh phần bất cân xứng là một <em lang="en">hot spot</em> (điểm nóng)<span class="cite"><a href="#ref-1">1</a></span>. Có một cách chia đều tuyệt đối: ném mỗi bản ghi vào một mảnh ngẫu nhiên. Nó đều thật, và cũng vô dụng thật — vì sau đó không ai biết bản ghi nằm ở đâu, nên mọi truy vấn đều phải hỏi tất cả các mảnh. Từ đó sinh ra <strong>hai</strong> cách vẽ ranh giới thực dụng, và cả chương sau này là hệ quả của việc bạn chọn cách nào.</p>
+      <p class="easy-only">Chia hồ sơ ra nhiều ngăn thì phải chia cho <strong>đều</strong>, không để một ngăn phồng lên còn các ngăn khác trống trơn. Ngăn bị nhét quá nhiều gọi là "điểm nóng". Có thể chia đều bằng cách bốc thăm ngẫu nhiên, nhưng rồi tìm lại thì phải lục hết mọi ngăn. Nhớ nhé: chia đều thôi chưa đủ — phải chia sao cho còn tìm lại được.</p>
+      <p class="en-only" lang="en">The goal of partitioning is an <strong>even</strong> spread — of data and of query load. When the spread is uneven, Kleppmann calls it <em>skew</em>, and a partition carrying a disproportionate share is a <em>hot spot</em><span class="cite"><a href="#ref-1">1</a></span>. There is one way to get a perfectly even spread: throw each record at a random partition. It really is even, and it really is useless — nobody then knows where a record lives, so every query must ask every partition. Out of that come <strong>two</strong> workable ways to draw the boundary, and the rest of the chapter follows from which one you pick.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Skew · hot spot · partition = a small database of its own</div>
+        <p class="definition standard-copy">Một phân mảnh là một lát cắt của tập dữ liệu mà mỗi bản ghi chỉ thuộc về <em>một</em> lát duy nhất. Vẽ ranh giới tốt nghĩa là không mảnh nào phải gánh phần bất cân xứng — và vẫn còn cách để biết một khoá thuộc mảnh nào mà không phải hỏi khắp nơi.</p>
+        <p class="definition easy-only">Mỗi tờ hồ sơ chỉ nằm ở một ngăn. Chia giỏi là chia sao cho không ngăn nào quá đầy, mà nhìn vào tên hồ sơ là biết ngay nó ở ngăn nào. Nhớ nhé: chia đều và tìm nhanh phải đi cùng nhau.</p>
+        <p class="definition en-only" lang="en">A partition is a slice of the dataset such that every record belongs to <em>exactly one</em> slice. Drawing the boundary well means no partition carries a disproportionate share — and you can still tell which partition a key is in without asking everywhere.</p>
+        <p class="deep-only">Một lưu ý về thuật ngữ, vì nó gây nhầm lẫn thật sự khi đọc tài liệu sản phẩm: cái mà DDIA gọi là <em lang="en">partition</em> thì mỗi hệ đặt một tên khác. Elasticsearch và MongoDB gọi là <em lang="en">shard</em><span class="cite"><a href="#ref-20">20</a></span><span class="cite"><a href="#ref-9">9</a></span>, HBase gọi là <em lang="en">region</em> — một dải liên tục trong không gian khoá, không chồng lấn, và một khoá thuộc đúng một region tại mỗi thời điểm<span class="cite"><a href="#ref-15">15</a></span>, Cassandra và Riak gọi là <em lang="en">vnode</em><span class="cite"><a href="#ref-13">13</a></span><span class="cite"><a href="#ref-17">17</a></span>, còn Couchbase gọi là <em lang="en">vBucket</em><span class="cite"><a href="#ref-19">19</a></span>. Cùng một khái niệm, năm cái tên — nên khi so sánh hai hệ, việc đầu tiên phải làm là dịch từ vựng về cùng một mẫu số.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về phân mảnh">
+        <div class="equation-row">
+          <b>Đúng một mảnh</b>
+          <span>Mỗi bản ghi thuộc về một phân mảnh duy nhất; mỗi phân mảnh là một CSDL nhỏ của riêng nó.</span>
+        </div>
+        <div class="equation-row">
+          <b>Vẫn cần nhân bản</b>
+          <span>Phân mảnh giải bài toán dung lượng, nhân bản giải bài toán chịu lỗi. Hai thứ chồng lên nhau, không thay nhau.</span>
+        </div>
+        <div class="equation-row">
+          <b>Lệch sinh điểm nóng</b>
+          <span>Chia không đều thì một mảnh gánh phần bất cân xứng, và chính nó trở thành trần hiệu năng của cả hệ.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về phân mảnh">
+        <div class="equation-row">
+          <b>Một tờ, một ngăn</b>
+          <span>Mỗi tờ hồ sơ chỉ nằm ở đúng một ngăn, không nằm hai chỗ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Vẫn phải photo</b>
+          <span>Chia ngăn để chứa được nhiều; photo thêm bản để phòng cháy. Hai việc khác nhau.</span>
+        </div>
+        <div class="equation-row">
+          <b>Ngăn quá đầy là hỏng</b>
+          <span>Một ngăn phồng lên thì cả tủ chậm theo nó.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about partitioning">
+        <div class="equation-row">
+          <b>Exactly one</b>
+          <span>Each record belongs to exactly one partition; each partition is a small database of its own.</span>
+        </div>
+        <div class="equation-row">
+          <b>Replication stays</b>
+          <span>Partitioning solves capacity, replication solves fault tolerance. They stack; they don't substitute.</span>
+        </div>
+        <div class="equation-row">
+          <b>Skew makes hot spots</b>
+          <span>An uneven split leaves one partition carrying a disproportionate share — and it becomes the whole system's ceiling.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Partitioning by key range</div>
+          <h3><span class="vi-only">Theo dải khoá — quét theo dải rẻ, nhưng dễ nóng</span><span class="en-only" lang="en">By key range — cheap scans, easy hot spots</span></h3>
+          <p class="standard-copy">Cách thứ nhất là giao cho mỗi mảnh một <strong>dải khoá liên tục</strong>, như các tập của một bộ bách khoa toàn thư. Vì khoá được giữ theo thứ tự bên trong mảnh, quét theo dải trở nên rẻ. MongoDB gọi đây là <em lang="en">ranged sharding</em> và mô tả đúng cái được: những tài liệu có giá trị khoá "gần nhau" nhiều khả năng nằm cùng một chunk hoặc shard, nên các truy vấn đọc trong một dải liên tục là truy vấn hiệu quả<span class="cite"><a href="#ref-8">8</a></span>. HBase thì gọi mỗi mảnh là một <em lang="en">region</em>: một dải liên tục trong không gian khoá, các region không chồng lấn nhau, và mỗi khoá thuộc về đúng một region tại một thời điểm<span class="cite"><a href="#ref-15">15</a></span>.</p>
+          <p class="easy-only">Cách thứ nhất là chia như tủ hồ sơ theo bảng chữ cái: ngăn A–C, ngăn D–F, ngăn G–K… Ai cần tra một loạt hồ sơ liền nhau thì chỉ phải mở một ngăn. Nhớ nhé: chia theo thứ tự thì tra một dải rất nhanh.</p>
+          <p class="en-only" lang="en">The first way gives each partition a <strong>contiguous range of keys</strong>, like the volumes of an encyclopaedia. Because keys stay sorted within a partition, range scans are cheap. MongoDB calls this <em>ranged sharding</em> and describes exactly that benefit: documents with "close" shard key values are likely to sit in the same chunk or shard, which makes reads over a contiguous range efficient<span class="cite"><a href="#ref-8">8</a></span>. HBase calls each piece a <em>region</em>: a continuous range within the key space, non-overlapping, with a single row key belonging to exactly one region at any point in time<span class="cite"><a href="#ref-15">15</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Được gì</strong>Truy vấn kiểu "mọi số đo của cảm biến X trong tháng 5" chỉ chạm một mảnh, vì các khoá liền kề nằm cạnh nhau và đã sắp sẵn theo thứ tự.</div>
+            <div class="easy-only"><strong>Được gì</strong>Tra một loạt hồ sơ liền nhau chỉ cần mở đúng một ngăn.</div>
+            <div class="en-only" lang="en"><strong>What you gain</strong>A query like "all readings from sensor X in May" touches one partition only, because adjacent keys sit together and already sorted.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Ranh giới không chia đều</h4>
+              <p>Các dải khoá thường <em>không</em> cách đều nhau, vì dữ liệu không phân bố đều: phần "A" của một danh bạ luôn dày hơn phần "X". Ranh giới phải được chọn theo phân bố thật, hoặc do người vận hành đặt, hoặc do hệ tự điều chỉnh. HBase thừa nhận thẳng điều này: nó không thể tự đoán điểm tách vì việc ấy phụ thuộc nặng vào phân bố khoá trong dữ liệu của bạn<span class="cite"><a href="#ref-15">15</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cái giá: khoá tăng đơn điệu</h4>
+              <p>Nếu khoá là dấu thời gian, mọi lần ghi mới đều rơi vào đúng mảnh cuối. MongoDB mô tả cơ chế này rất cụ thể: luôn tồn tại một chunk có biên trên là <code>MaxKey</code>, và nếu khoá luôn tăng thì mọi lần chèn đều được định tuyến vào chunk ấy, khiến shard chứa nó trở thành nút cổ chai của mọi thao tác ghi<span class="cite"><a href="#ref-10">10</a></span>. Cùng một cái bẫy đã được Ikai Lan viết lại cho App Engine Datastore từ năm 2011<span class="cite"><a href="#ref-7">7</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Partitioning by hash of key</div>
+          <h3><span class="vi-only">Theo băm của khoá — đều hơn, nhưng mất thứ tự</span><span class="en-only" lang="en">By hash of key — more even, but order is gone</span></h3>
+          <p class="standard-copy">Cách thứ hai là băm khoá trước, rồi giao cho mỗi mảnh một dải của <strong>không gian băm</strong>. Vì hàm băm xáo tung mọi trật tự, những khoá gần nhau bị ném đi khắp nơi — và đó vừa là thuốc vừa là độc. MongoDB nói rõ cả hai mặt: băm cho phân bố dữ liệu đều hơn, nhưng cái giá là giảm số thao tác "trúng đích", và <span lang="en">mongos</span> nhiều khả năng phải phát tán (<em lang="en">broadcast</em>) tới mọi shard để trả lời một truy vấn theo dải<span class="cite"><a href="#ref-9">9</a></span>. Đổi lại, băm đúng là thuốc cho cái bẫy ở thẻ trước: tài liệu MongoDB khuyên dùng chỉ mục băm cho những khoá thay đổi đơn điệu như <span lang="en">ObjectId</span> hay dấu thời gian<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="easy-only">Cách thứ hai là <strong>bốc thăm có quy tắc</strong>: đưa tên hồ sơ qua một cái máy xáo, máy ra số nào thì bỏ vào ngăn đó. Cùng một tên thì luôn ra cùng một số, nên tra một tờ vẫn nhanh. Nhưng hai tờ tên gần nhau lại rơi vào hai ngăn xa nhau, nên tra "một loạt liền nhau" thì phải mở hết mọi ngăn. Nhớ nhé: xáo lên thì đều hơn, nhưng mất mất cái thứ tự.</p>
+          <p class="en-only" lang="en">The second way hashes the key first, then gives each partition a range of the <strong>hash space</strong>. Because a hash function destroys ordering, adjacent keys get scattered — which is both the cure and the poison. MongoDB states both sides: hashing gives a more even distribution at the cost of fewer targeted operations, and <span lang="en">mongos</span> is more likely to broadcast to every shard to answer a ranged query<span class="cite"><a href="#ref-9">9</a></span>. In exchange, hashing is the cure for the previous card's trap: MongoDB's docs recommend hashed indexes precisely for shard keys that change monotonically, such as <span lang="en">ObjectId</span> values or timestamps<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đánh đổi</strong>Bạn mua sự phân bố đều bằng đúng cái mình vừa được ở cách thứ nhất: khả năng quét theo dải. Không có cách nào giữ cả hai cùng một lúc trên cùng một khoá.</div>
+            <div class="easy-only"><strong>Đánh đổi</strong>Chọn "chia đều" thì mất "tra theo dải". Chọn "tra theo dải" thì phải canh chừng ngăn quá đầy.</div>
+            <div class="en-only" lang="en"><strong>The trade-off</strong>You buy the even spread with exactly what the first way gave you: range scans. There is no way to keep both on the same key.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Hàm băm nào cũng được?</h4>
+              <p>Không. Kleppmann đã viết hẳn một bài về chuyện này trước khi viết sách: hàm băm phục vụ những mục đích rất khác nhau, và hàm dùng cho bảng băm trong một ngôn ngữ lập trình không phải hàm dùng để chia việc cho các máy trong một cụm — <span lang="en">hashCode</span> của Java không an toàn cho hệ phân tán<span class="cite"><a href="#ref-6">6</a></span>. Về phía sản phẩm, Couchbase dùng CRC32 để ánh xạ một mục vào vBucket<span class="cite"><a href="#ref-19">19</a></span>, còn Riak băm cặp bucket/key thành một giá trị nhị phân 160 bit rồi ánh xạ nó lên một vòng có thứ tự<span class="cite"><a href="#ref-17">17</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Phân mảnh ≠ truy vấn</h4>
+              <p>Băm không xoá mất khả năng lọc theo dải — nó chỉ khiến việc lọc ấy không còn <em>rẻ</em>. Hệ vẫn trả đúng kết quả, nhưng bằng cách hỏi mọi mảnh rồi gộp lại, tức là trả bằng thông lượng và độ trễ đuôi thay vì bằng một lần đọc trúng đích. Đây chính là lý do MongoDB nói <span lang="en">mongos</span> "nhiều khả năng phải broadcast" chứ không nói là "không làm được"<span class="cite"><a href="#ref-9">9</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Compound primary key</div>
+          <h3><span class="vi-only">Khoá tổ hợp — đường trung dung</span><span class="en-only" lang="en">The compound key — a middle road</span></h3>
+          <p class="standard-copy">Không nhất thiết phải chọn một trong hai. Cassandra tách khoá chính thành hai phần có vai trò khác nhau: <strong>partition key</strong> — thành phần đầu tiên, có thể gồm nhiều cột trong một cặp ngoặc — là thứ duy nhất quyết định bản ghi thuộc mảnh nào; các cột còn lại là <strong>clustering columns</strong>, chúng định thứ tự sắp xếp <em>bên trong</em> mảnh<span class="cite"><a href="#ref-14">14</a></span>. Kết quả là một mô hình một–nhiều rất đẹp: nếu cố định thành phần đầu, việc quét theo dải trên phần còn lại vẫn rẻ như ở cách thứ nhất. Kleppmann lấy ví dụ một mạng xã hội với khoá <span lang="en">(user_id, update_timestamp)</span>: mọi bài của một người nằm chung một mảnh và đã sắp theo thời gian, nên "lấy các bài của người này trong khoảng thời gian kia" chỉ là một lần quét gọn<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Có cách đi giữa: lấy <strong>phần đầu</strong> của tên hồ sơ để chọn ngăn, rồi trong ngăn thì xếp theo <strong>phần sau</strong>. Ví dụ tất cả bài viết của cùng một bạn nằm chung một ngăn, và trong ngăn thì xếp theo ngày. Muốn xem bài của bạn ấy tháng trước? Mở đúng một ngăn, lật đúng một đoạn. Nhớ nhé: chọn ngăn bằng phần đầu, xếp trong ngăn bằng phần sau.</p>
+          <p class="en-only" lang="en">You don't have to pick just one. Cassandra splits the primary key into two parts with different jobs: the <strong>partition key</strong> — the first component, possibly several columns inside one set of parentheses — is the only thing that decides which partition a row lands in; the remaining <strong>clustering columns</strong> define the sort order <em>within</em> that partition<span class="cite"><a href="#ref-14">14</a></span>. The result is a neat one-to-many model: fix the first component, and range scans over the rest stay as cheap as in the first approach. Kleppmann's example is a social network keyed by <span lang="en">(user_id, update_timestamp)</span>: all of one user's updates sit in one partition, already sorted by time, so "this user's posts in that time window" is one tidy scan<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Ở đâu bạn gặp nó</strong>Bất cứ chỗ nào có quan hệ một–nhiều tự nhiên: bài viết theo người dùng, sự kiện theo thiết bị, đơn hàng theo khách. Thành phần đầu chia tải, các thành phần sau giữ thứ tự.</div>
+            <div class="easy-only"><strong>Ở đâu bạn gặp nó</strong>Bài viết của một người, sự kiện của một máy, đơn hàng của một khách — cái gì "của ai" thì lấy "ai" làm ngăn.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Anywhere there's a natural one-to-many: posts per user, events per device, orders per customer. The first component spreads the load; the rest keep the order.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cái giá vẫn còn đó</h4>
+              <p>Khoá tổ hợp không xoá bỏ đánh đổi — nó chỉ <em>thu nhỏ phạm vi</em> của nó. Bạn vẫn không thể quét theo dải trên <em>toàn bộ</em> tập dữ liệu, chỉ quét được trong phạm vi một partition key đã cố định. Và nếu một người dùng quá nổi tiếng, cả mảnh của người ấy phồng lên: đây đúng là bài toán lệch tải ở thẻ tiếp theo, chỉ đổi lớp áo.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cú pháp nói lên thiết kế</h4>
+              <p>Tài liệu CQL viết rất gọn: <code>PRIMARY KEY (a, b, c)</code> thì <code>a</code> là partition key, <code>b</code> và <code>c</code> là clustering columns; còn <code>PRIMARY KEY ((a, b), c)</code> thì <code>a</code> và <code>b</code> hợp thành partition key tổ hợp, còn <code>c</code> là clustering column<span class="cite"><a href="#ref-14">14</a></span>. Cặp ngoặc thừa ấy không phải cú pháp trang trí — nó là ranh giới phân mảnh, viết thẳng vào lược đồ.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Skewed workloads &amp; relieving hot spots</div>
+          <h3><span class="vi-only">Tải lệch: chỗ mà băm không cứu được</span><span class="en-only" lang="en">Skewed workloads: where hashing can't help</span></h3>
+          <p class="standard-copy">Đây là chỗ hay bị hiểu nhầm nhất. Băm rải đều <em>khoá</em>, chứ không rải đều <em>tải</em>. Nếu hàng triệu lượt đọc và ghi cùng đổ vào đúng <strong>một</strong> khoá — chẳng hạn một tài khoản siêu nổi tiếng vừa làm điều gì đó — thì mọi yêu cầu vẫn rơi trọn vào một mảnh, bất kể bạn đã băm kỹ đến đâu. Kleppmann nói thẳng rằng phần lớn hệ dữ liệu ngày nay không tự bù được sự lệch này, và cách chữa phải nằm ở tầng ứng dụng: thêm một số ngẫu nhiên hai chữ số vào đầu khoá để tách một khoá nóng thành 100 khoá nằm trên 100 mảnh<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Xáo hồ sơ ra các ngăn cho đều là một chuyện. Nhưng nếu cả trường cùng lúc muốn xem đúng <strong>một</strong> tờ hồ sơ, thì cái ngăn chứa nó vẫn kẹt cứng. Cách chữa: photo tờ đó ra 100 bản, đánh số từ 01 đến 100, rải ra 100 ngăn. Chỉ có điều lúc muốn xem đầy đủ thì lại phải gom cả 100 bản. Nhớ nhé: chia đều <em>đồ</em> không có nghĩa là chia đều <em>việc</em>.</p>
+          <p class="en-only" lang="en">This is the most misread part. Hashing spreads <em>keys</em> evenly, not <em>load</em>. If millions of reads and writes all land on <strong>one</strong> key — some celebrity account just did something — every request still falls into a single partition, no matter how well you hashed. Kleppmann says plainly that most data systems today can't compensate for this skew automatically, and the fix has to live in the application: prefix the key with a random two-digit number to split one hot key into 100 keys across 100 partitions<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cái giá đi kèm</strong>Ghi thì rải được, nhưng đọc thì từ nay phải hỏi cả 100 nơi rồi gộp lại. Vì thế Kleppmann chỉ khuyên áp cách này cho một số ít khoá thật sự nóng, không phải cho toàn bộ khoá — và phải tự ghi sổ khoá nào đã bị tách<span class="cite"><a href="#ref-1">1</a></span>.</div>
+            <div class="easy-only"><strong>Cái giá đi kèm</strong>Photo ra 100 bản thì cất dễ, nhưng lúc cần xem đủ lại phải đi gom 100 chỗ. Chỉ nên làm với vài tờ nóng nhất thôi.</div>
+            <div class="en-only" lang="en"><strong>The price</strong>Writes spread, but reads now have to ask all 100 places and merge. That's why Kleppmann recommends it only for a small number of genuinely hot keys, and only with bookkeeping of which keys were split<span class="cite"><a href="#ref-1">1</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Lệch dữ liệu ≠ lệch tải</h4>
+              <p>Hai loại lệch trông giống nhau trên biểu đồ nhưng có cách chữa khác hẳn. Lệch <em>dữ liệu</em> (một mảnh chứa nhiều byte hơn) chữa được bằng cách vẽ lại ranh giới — tách mảnh, dời mảnh. Lệch <em>tải</em> (một khoá bị hỏi quá nhiều) thì vẽ lại ranh giới không giúp gì cả, vì bản thân khoá là đơn vị nhỏ nhất không tách được. Khi chẩn đoán một điểm nóng, việc đầu tiên là xác định mình đang gặp loại nào.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao chương này nhắc lại Chương 1</h4>
+              <p>Bài toán tài khoản siêu nổi tiếng chính là bài toán <em lang="en">fan-out</em> của dòng thời gian Twitter trong Chương 1, nhìn từ một góc khác: ở đó nó biểu hiện thành số lượt ghi bùng nổ, ở đây nó biểu hiện thành một điểm nóng phân mảnh. Cùng một sự thật vật lý — phân bố người dùng có đuôi rất dài — chỉ đổi chỗ ta gặp nó trong kiến trúc.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Nối sang phần sau</strong>
+      <strong class="easy-only">Tiếp theo là gì</strong>
+      <strong class="en-only" lang="en">Where this leads</strong>
+      <div class="standard-copy">Cho tới đây mô hình vẫn rất gọn: biết khoá là biết mảnh. Phần sau phá vỡ sự gọn gàng đó bằng một thứ mọi ứng dụng thật đều cần — chỉ mục phụ, tức là khả năng tìm bản ghi <em>không</em> bằng khoá chính.</div>
+      <div class="easy-only">Đến đây mọi thứ còn dễ: biết tên hồ sơ là biết ngăn. Phần sau nói về lúc bạn muốn tìm theo thứ khác — ví dụ "tất cả xe màu đỏ" — khi đó cái sổ mục lục bắt đầu rắc rối.</div>
+      <div class="en-only" lang="en">So far the model is tidy: know the key, know the partition. The next part breaks that tidiness with something every real application needs — secondary indexes, the ability to find records by something other than the primary key.</div>
+    </aside>
+  </section>
+
+  <section class="section" id="secondary-indexes" aria-labelledby="secondary-indexes-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · <span lang="en">Partitioning and secondary indexes</span></span><span class="en-only" lang="en">Axis 2 · Partitioning and secondary indexes</span></div>
+        <h2 id="secondary-indexes-title"><span class="vi-only">Chỉ mục phụ phá vỡ sự gọn gàng</span><span class="en-only" lang="en">Secondary indexes break the tidiness</span></h2>
+      </div>
+      <p class="standard-copy">Một chỉ mục phụ không xác định duy nhất một bản ghi; nó là cách <em>tìm</em> mọi bản ghi có một giá trị nào đó — mọi xe màu đỏ, mọi bài viết chứa một từ. Vấn đề là nó không ăn khớp với ranh giới phân mảnh: các bản ghi "màu đỏ" nằm rải khắp mọi mảnh. Kleppmann chỉ ra rằng có đúng <strong>hai</strong> cách xử lý, và chúng là hình ảnh phản chiếu của nhau: một cách làm ghi rẻ và đọc đắt, cách kia làm ngược lại<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Cho tới giờ ta chỉ tìm hồ sơ bằng <em>tên</em>. Nhưng đời thật hay hỏi kiểu khác: "cho tôi tất cả hồ sơ màu đỏ". Những tờ màu đỏ thì nằm rải khắp mọi ngăn, nên phải có một cuốn sổ mục lục. Câu hỏi là: mỗi ngăn tự giữ sổ của mình, hay cả tủ dùng chung một cuốn sổ?</p>
+      <p class="en-only" lang="en">A secondary index doesn't identify a record uniquely; it's a way to <em>find</em> all records with some value — every red car, every post containing a word. The trouble is that it doesn't line up with partition boundaries: the "red" records are scattered across every partition. Kleppmann shows there are exactly <strong>two</strong> ways to handle it, and they are mirror images: one makes writes cheap and reads expensive, the other the reverse<span class="cite"><a href="#ref-1">1</a></span>.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Document-partitioned (local) vs term-partitioned (global)</div>
+        <p class="definition standard-copy">Chỉ mục phụ <strong>theo document</strong> chỉ biết về dữ liệu của chính mảnh chứa nó — ghi gọn trong một mảnh, nhưng đọc phải hỏi tất cả rồi gộp. Chỉ mục phụ <strong>theo term</strong> được phân mảnh theo chính giá trị được đánh chỉ mục — đọc chỉ chạm một mảnh, nhưng một lần ghi có thể phải chạm nhiều mảnh chỉ mục.</p>
+        <p class="definition easy-only">Kiểu một: mỗi ngăn tự giữ sổ mục lục của riêng mình. Tìm thì phải mở hết mọi sổ. Kiểu hai: cả tủ dùng chung một bộ sổ chia theo chủ đề. Tìm thì mở đúng một cuốn, nhưng mỗi lần thêm hồ sơ lại phải đi sửa mấy cuốn sổ.</p>
+        <p class="definition en-only" lang="en">A <strong>document-partitioned</strong> secondary index only knows about the data in its own partition — writes stay local, but reads must ask everyone and merge. A <strong>term-partitioned</strong> index is partitioned by the indexed value itself — reads touch one partition, but a single write may have to touch several index partitions.</p>
+        <p class="deep-only">Hai cái tên này là cùng một sự phân biệt mà thế giới CSDL quan hệ đã đặt tên từ lâu. Tài liệu Oracle gọi chỉ mục trên bảng đã phân mảnh là <em lang="en">local</em> khi nó được gắn tự động theo cách phân mảnh của bảng, và <em lang="en">global</em> khi nó được phân mảnh <em>độc lập</em> với bảng — và đưa ra đúng lời khuyên mà lý thuyết dự đoán: dùng global cho ứng dụng OLTP cần thời gian phản hồi nhanh, dùng local cho kho dữ liệu và DSS nơi người ta quan tâm tới thông lượng<span class="cite"><a href="#ref-22">22</a></span>. Đọc nhanh thì trả bằng ghi phức tạp; đó là cùng một định luật bảo toàn dưới hai bộ từ vựng.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định về chỉ mục phụ trên dữ liệu đã phân mảnh">
+        <div class="equation-row">
+          <b>Local: ghi gọn</b>
+          <span>Mỗi mảnh tự giữ chỉ mục của mình; một lần ghi chỉ chạm một mảnh, không cần phối hợp.</span>
+        </div>
+        <div class="equation-row">
+          <b>Local: đọc tán</b>
+          <span>Truy vấn theo chỉ mục phụ phải phát tới mọi mảnh rồi gộp kết quả — Kleppmann gọi là scatter/gather.</span>
+        </div>
+        <div class="equation-row">
+          <b>Global: đảo ngược</b>
+          <span>Chỉ mục chia theo term: đọc chỉ chạm một mảnh, nhưng ghi phải phối hợp nhiều mảnh, thường là bất đồng bộ.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về sổ mục lục">
+        <div class="equation-row">
+          <b>Sổ riêng: ghi dễ</b>
+          <span>Thêm hồ sơ vào ngăn nào thì chỉ sửa sổ của ngăn đó.</span>
+        </div>
+        <div class="equation-row">
+          <b>Sổ riêng: tìm mệt</b>
+          <span>Muốn tìm thì phải mở sổ của tất cả các ngăn.</span>
+        </div>
+        <div class="equation-row">
+          <b>Sổ chung: ngược lại</b>
+          <span>Tìm thì mở đúng một cuốn, nhưng mỗi lần thêm hồ sơ phải đi sửa nhiều cuốn.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three claims about secondary indexes over partitioned data">
+        <div class="equation-row">
+          <b>Local: cheap writes</b>
+          <span>Each partition keeps its own index; a write touches one partition, no coordination needed.</span>
+        </div>
+        <div class="equation-row">
+          <b>Local: scattered reads</b>
+          <span>A secondary-index query must go to every partition and merge — Kleppmann's scatter/gather.</span>
+        </div>
+        <div class="equation-row">
+          <b>Global: the mirror</b>
+          <span>Index partitioned by term: reads hit one partition, writes must coordinate several, usually asynchronously.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Document-partitioned index · scatter/gather</div>
+          <h3><span class="vi-only">Chỉ mục cục bộ và cái giá của việc hỏi khắp nơi</span><span class="en-only" lang="en">The local index and the cost of asking everyone</span></h3>
+          <p class="standard-copy">Cách phổ biến nhất: mỗi mảnh giữ một chỉ mục phụ chỉ bao phủ dữ liệu <em>của chính nó</em> và không biết gì về các mảnh khác. Ghi thì tuyệt vời — sửa một tài liệu chỉ đụng đến một mảnh. Đọc thì phải trả giá. Tài liệu Elasticsearch mô tả đúng luồng ấy: node nhận một yêu cầu đọc có trách nhiệm chuyển tiếp nó tới các node đang giữ những shard liên quan, thu gom các phản hồi rồi trả lời client — node ấy được gọi là <em lang="en">coordinating node</em>; và vì phần lớn truy vấn tìm kiếm phải đọc từ <strong>nhiều</strong> shard, mỗi shard giữ một tập con dữ liệu khác nhau, nên bước cuối luôn là gộp các kết quả lại rồi mới trả về<span class="cite"><a href="#ref-21">21</a></span>. Bài viết của Elastic minh hoạ cái giá ấy bằng một con số: với một chỉ mục 20 shard, vì “Elasticsearch không biết tài liệu của bạn nằm ở đâu” — tài liệu được rải ngẫu nhiên khắp cụm — nó không có lựa chọn nào ngoài phát tán yêu cầu tới cả 20 shard<span class="cite"><a href="#ref-20">20</a></span>. Kleppmann gọi kiểu đọc này là <em lang="en">scatter/gather</em><span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Kiểu phổ biến nhất: mỗi ngăn tự ghi sổ mục lục cho riêng nó. Bỏ thêm một tờ hồ sơ vào ngăn số 3 thì chỉ phải sửa sổ của ngăn số 3 — nhanh gọn. Nhưng muốn hỏi "tất cả hồ sơ màu đỏ" thì phải mở sổ của <strong>tất cả</strong> các ngăn rồi gom lại. Nhớ nhé: cất thì dễ, tìm thì phải chạy khắp tủ.</p>
+          <p class="en-only" lang="en">The most common approach: each partition keeps a secondary index covering only <em>its own</em> data and knowing nothing about other partitions. Writes are great — updating a document touches one partition. Reads pay for it. The Elasticsearch docs describe exactly that flow: the node receiving a read request is responsible for forwarding it to the nodes holding the relevant shards, collating the responses and replying to the client — that node is called the <em>coordinating node</em>; and because most searches have to read from <strong>several</strong> shards, each holding a different subset of the data, the final step is always to combine the results before responding<span class="cite"><a href="#ref-21">21</a></span>. Elastic’s own post puts a number on the cost: with a 20-shard index, because “Elasticsearch has no idea where to look for your document” — the docs were randomly distributed around the cluster — it has no choice but to broadcast the request to all 20 shards<span class="cite"><a href="#ref-20">20</a></span>. Kleppmann calls this read pattern <em>scatter/gather</em><span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao vẫn phổ biến</strong>Vì ghi là thao tác thường xuyên hơn và cần đơn giản hơn. Giữ chỉ mục cục bộ nghĩa là không bao giờ phải phối hợp giữa các mảnh khi ghi — không giao dịch phân tán, không hàng đợi, không trạng thái nửa vời.</div>
+            <div class="easy-only"><strong>Vì sao vẫn phổ biến</strong>Vì ta bỏ hồ sơ vào tủ nhiều hơn là đi tra cứu. Ghi đơn giản thì cả hệ đơn giản.</div>
+            <div class="en-only" lang="en"><strong>Why it's still the default</strong>Because writes are more frequent and need to stay simple. A local index means no cross-partition coordination on write — no distributed transaction, no queue, no half-finished state.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Scatter/gather khuếch đại đuôi</h4>
+              <p>Một truy vấn scatter/gather chỉ nhanh bằng <em>mảnh chậm nhất</em> mà nó phải hỏi. Với 20 mảnh, xác suất chạm phải một mảnh đang bận cao gấp bội so với một lần đọc trúng đích. Đây chính là hiện tượng khuếch đại độ trễ đuôi mà Chương 1 đã dựng nền từ vựng để nói, nay xuất hiện lại như một hệ quả trực tiếp của lựa chọn phân mảnh chỉ mục.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ai dùng kiểu này</h4>
+              <p>Ngoài Elasticsearch, Riak cung cấp chỉ mục phụ (2i) cho phép gắn nhãn cho object <em>ngay lúc ghi</em> bằng một hoặc nhiều giá trị có thể truy vấn, rồi dùng chúng để tìm nhiều object<span class="cite"><a href="#ref-18">18</a></span>. Bản thân tài liệu Riak hiện khuyến nghị dùng Riak Search thay cho 2i cho các truy vấn không dựa trên khoá chính, vì Search có API truy vấn rộng hơn và dùng được với mọi backend lưu trữ<span class="cite"><a href="#ref-18">18</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Custom routing · dodging the broadcast</div>
+          <h3><span class="vi-only">Cách né scatter/gather mà không đổi kiến trúc</span><span class="en-only" lang="en">Dodging scatter/gather without changing architecture</span></h3>
+          <p class="standard-copy">Có một lối thoát nửa đường, và nó đáng biết vì rẻ. Mặc định, giá trị định tuyến <span lang="en">_routing</span> của một tài liệu chính là <span lang="en">_id</span> của nó, và Elasticsearch chọn shard bằng công thức <code>shard_num = hash(_routing) % num_primary_shards</code><span class="cite"><a href="#ref-28">28</a></span>. Nhưng bạn có thể tự đặt giá trị định tuyến cho từng tài liệu — <span lang="en">user_id</span>, mã bưu chính, bất cứ thứ gì ứng dụng của bạn thường lọc theo. Tài liệu nói thẳng cái lợi: thay vì phải phát tán một yêu cầu tìm kiếm tới <strong>mọi</strong> shard của chỉ mục, yêu cầu có thể được gửi tới đúng shard khớp với giá trị định tuyến ấy<span class="cite"><a href="#ref-28">28</a></span> — bài viết của Elastic nói gọn hơn: định tuyến tuỳ biến bảo đảm <strong>chỉ một</strong> shard bị truy vấn<span class="cite"><a href="#ref-20">20</a></span>, bất kể chỉ mục của bạn có 20 hay 100 shard. Về bản chất, bạn đang mượn ý tưởng khoá tổ hợp ở trục 1 và áp nó lên tầng chỉ mục.</p>
+          <p class="easy-only">Có một mẹo đi tắt. Thay vì để máy xáo tự chọn ngăn, bạn tự quy ước: "mọi hồ sơ của lớp 6A luôn để ở ngăn số 3". Thế thì hỏi "hồ sơ lớp 6A" chỉ phải mở một ngăn. Nhớ nhé: nếu bạn biết trước mình hay tìm theo cái gì, hãy lấy chính cái đó để chọn ngăn.</p>
+          <p class="en-only" lang="en">There's a halfway escape, and it's worth knowing because it's cheap. By default a document’s <span lang="en">_routing</span> value is its <span lang="en">_id</span>, and Elasticsearch picks the shard with <code>shard_num = hash(_routing) % num_primary_shards</code><span class="cite"><a href="#ref-28">28</a></span>. But you can set a custom routing value per document — <span lang="en">user_id</span>, a postcode, whatever your application usually filters on. The docs state the payoff outright: instead of having to fan out a search request to <strong>all</strong> the shards in an index, the request can be sent to just the shard matching that routing value<span class="cite"><a href="#ref-28">28</a></span> — Elastic’s post says it more bluntly: custom routing ensures <strong>only one</strong> shard is queried<span class="cite"><a href="#ref-20">20</a></span>, no matter whether your index has 20 shards or 100. In essence you're borrowing the compound-key idea from axis 1 and applying it at the index layer.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Điều kiện để dùng được</strong>Bạn phải biết trước chiều truy vấn chủ đạo của mình, và chiều ấy phải đủ nhiều giá trị để không dồn tất cả vào một shard. Nói cách khác: bạn đã tự tay tạo ra nguy cơ lệch tải để đổi lấy tốc độ đọc.</div>
+            <div class="easy-only"><strong>Điều kiện</strong>Phải biết trước mình hay tìm theo gì, và cái đó phải có nhiều loại — nếu ai cũng ở "lớp 6A" thì ngăn số 3 lại kẹt.</div>
+            <div class="en-only" lang="en"><strong>When it applies</strong>You must know your dominant query dimension in advance, and it must have enough distinct values not to pile onto one shard. Put differently: you've deliberately created skew risk in exchange for read speed.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Ghi vẫn đi một đường</h4>
+              <p>Tài liệu Elasticsearch mô tả mọi thao tác lập chỉ mục đều được phân giải về một nhóm nhân bản thông qua <em lang="en">routing</em>, thường là dựa trên ID tài liệu, rồi mới chuyển tiếp nội bộ tới shard chính hiện thời của nhóm<span class="cite"><a href="#ref-21">21</a></span>. Định tuyến tuỳ biến chỉ thay cái đầu vào của phép băm ấy — nó không thay đổi hình dạng đường ghi, nên không thêm chi phí phối hợp nào.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao đây không phải chỉ mục toàn cục</h4>
+              <p>Định tuyến tuỳ biến không tạo ra một chỉ mục chia theo term — nó chỉ khiến việc phân mảnh <em>tài liệu</em> trùng khớp với chiều truy vấn của bạn. Khi ứng dụng cần hỏi theo một chiều <em>khác</em>, bạn lại rơi về scatter/gather như cũ. Một chỉ mục toàn cục thật sự mới là thứ giải được bài toán ở mọi chiều — và đó là nội dung thẻ tiếp theo.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Term-partitioned (global) index</div>
+          <h3><span class="vi-only">Chỉ mục toàn cục: đọc gọn, ghi phức tạp</span><span class="en-only" lang="en">The global index: tidy reads, complicated writes</span></h3>
+          <p class="standard-copy">Cách thứ hai lật ngược mọi thứ: thay vì để mỗi mảnh dữ liệu tự giữ sổ, ta dựng một chỉ mục <strong>bao phủ toàn bộ dữ liệu</strong> rồi phân mảnh chính cái chỉ mục ấy — theo <em>term</em>, tức theo giá trị được đánh chỉ mục. Tất cả mục "màu đỏ" nằm chung một mảnh chỉ mục, tất cả mục "màu xanh" nằm ở mảnh khác. Đọc trở nên gọn: chỉ hỏi đúng mảnh giữ term mình cần. Nhưng ghi thì đắt và phức tạp, vì một lần ghi <em>một</em> tài liệu có thể phải chạm tới <em>nhiều</em> mảnh chỉ mục — mỗi term một mảnh. Vì thế trong thực tế các chỉ mục toàn cục thường được cập nhật bất đồng bộ, nghĩa là chỉ mục có thể trễ so với dữ liệu<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Cách thứ hai làm ngược lại: thay vì mỗi ngăn một sổ, cả tủ dùng chung một <strong>bộ sổ chia theo chủ đề</strong> — sổ "màu đỏ", sổ "màu xanh". Hỏi "hồ sơ màu đỏ"? Mở đúng một cuốn là xong. Nhưng bỏ thêm một tờ hồ sơ vào tủ thì phải đi sửa mấy cuốn sổ cùng lúc, nên người ta hay sửa sổ sau — và trong lúc đó sổ hơi cũ so với tủ. Nhớ nhé: sổ chung thì tra nhanh, nhưng ghi mệt và sổ dễ trễ.</p>
+          <p class="en-only" lang="en">The second approach inverts everything: instead of each data partition keeping its own index, you build an index <strong>covering all the data</strong> and then partition that index — by <em>term</em>, the indexed value itself. All the "red" entries live in one index partition, all the "blue" ones in another. Reads become tidy: ask only the partition holding your term. But writes get expensive and complicated, because writing <em>one</em> document may touch <em>several</em> index partitions — one per term. So in practice global indexes are usually updated asynchronously, which means the index can lag behind the data<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Ở đâu bạn gặp nó</strong>Trong thế giới quan hệ, đây chính là chỉ mục <em lang="en">global partitioned</em> của Oracle: chỉ mục được phân mảnh độc lập với cách phân mảnh của bảng, trong khi chỉ mục <em lang="en">local</em> được gắn tự động theo bảng<span class="cite"><a href="#ref-22">22</a></span>.</div>
+            <div class="easy-only"><strong>Ở đâu bạn gặp nó</strong>Các cơ sở dữ liệu lớn dùng cho báo cáo hay có kiểu "sổ chung" này, bên cạnh kiểu "mỗi ngăn một sổ".</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In the relational world this is Oracle's <em>global partitioned</em> index: partitioned independently of the table's own partitioning, while a <em>local</em> index is automatically linked to it<span class="cite"><a href="#ref-22">22</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Lời khuyên của Oracle trùng với lý thuyết</h4>
+              <p>Tài liệu Oracle nói thẳng: nói chung nên dùng chỉ mục toàn cục cho ứng dụng OLTP và chỉ mục cục bộ cho kho dữ liệu hoặc hệ hỗ trợ quyết định (DSS)<span class="cite"><a href="#ref-22">22</a></span>. Đọc kỹ thì đó chính là phát biểu của Kleppmann bằng từ vựng khác: OLTP cần thời gian phản hồi ngắn nên trả giá ở đường ghi; DSS quan tâm thông lượng nên chấp nhận quét rộng. Cùng một đánh đổi, hai cộng đồng, hai bộ thuật ngữ.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao trễ là chấp nhận được</h4>
+              <p>Cập nhật chỉ mục toàn cục đồng bộ sẽ đòi hỏi một giao dịch phân tán trên mọi mảnh chỉ mục liên quan cho <em>mỗi</em> lần ghi — một cái giá rất ít hệ sẵn sàng trả. Chấp nhận cập nhật bất đồng bộ nghĩa là chấp nhận một cửa sổ thời gian mà chỉ mục chưa thấy bản ghi mới nhất. Với tìm kiếm và báo cáo, cửa sổ ấy thường vô hại; với "vừa ghi xong phải đọc thấy ngay", nó là một cái bẫy thật.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The trade-off, not the right answer</div>
+          <h3><span class="vi-only">Không có cách đúng, chỉ có chỗ trả giá</span><span class="en-only" lang="en">No right answer, only where you pay</span></h3>
+          <p class="standard-copy">Hai cách trên là một cặp phản chiếu hoàn hảo, và cấu trúc của nó lặp lại đúng cấu trúc đã gặp ở Chương 1 giữa <em lang="en">fan-out on write</em> và <em lang="en">fan-out on read</em>: bạn có thể làm việc lúc ghi hoặc làm việc lúc đọc, nhưng tổng công việc thì không biến mất. Chọn cái nào phụ thuộc vào tỉ lệ đọc/ghi thật của hệ bạn và vào việc bạn chịu được bao nhiêu độ trễ của chỉ mục. Đó là một quyết định về <em>tải</em>, không phải một quyết định về <em>công nghệ</em>.</p>
+          <p class="easy-only">Hai cách trên giống hệt hai kiểu làm việc nhà: dọn dẹp ngay khi bày ra, hay để đó rồi dọn một lần lúc cần dùng. Cách nào cũng phải dọn — chỉ khác là dọn lúc nào. Nhớ nhé: đừng hỏi "cách nào đúng", hãy hỏi "hệ của mình đọc nhiều hay ghi nhiều".</p>
+          <p class="en-only" lang="en">The two approaches are a perfect mirror pair, and the structure repeats what Chapter 1 showed between <em>fan-out on write</em> and <em>fan-out on read</em>: you can do the work at write time or at read time, but the total work doesn't vanish. Which to choose depends on your system's real read/write ratio and on how much index staleness you can live with. That's a decision about <em>load</em>, not about <em>technology</em>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Câu hỏi thực dụng</strong>Hệ của bạn đọc theo chỉ mục phụ bao nhiêu lần cho mỗi lần ghi? Nếu tỉ lệ đó lớn, cái giá của scatter/gather sẽ lớn theo đúng tỉ lệ ấy — và chỉ khi đó, sự phức tạp của chỉ mục toàn cục mới đáng.</div>
+            <div class="easy-only"><strong>Câu hỏi thực dụng</strong>Bạn tra cứu nhiều hơn hay cất hồ sơ nhiều hơn? Trả lời được câu đó là chọn được cách.</div>
+            <div class="en-only" lang="en"><strong>The practical question</strong>How many secondary-index reads does your system do per write? If that ratio is large, the cost of scatter/gather scales with it — and only then does a global index's complexity earn its keep.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Một chi tiết dễ bỏ sót</h4>
+              <p>Đánh đổi này không cố định theo thời gian. Một hệ bắt đầu ở tỉ lệ ghi cao rồi dần chuyển sang đọc cao khi có người dùng thật; lựa chọn đúng của năm ngoái có thể là lựa chọn sai của năm nay. Vì thế điều đáng ghi lại trong tài liệu kiến trúc không phải là "chúng tôi dùng chỉ mục cục bộ" mà là "chúng tôi dùng chỉ mục cục bộ <em>vì</em> tỉ lệ đọc/ghi hiện là X" — để người sau biết khi nào nên xem lại.</p>
+            </div>
+            <div class="info-block">
+              <h4>Nối với chương sau</h4>
+              <p>Câu "cập nhật chỉ mục toàn cục một cách đồng bộ đòi hỏi giao dịch phân tán" không phải một câu nói cho qua — nó là cửa ngõ sang Chương 7 và Chương 9. Cái giá của tính nhất quán xuyên mảnh chính là chủ đề mà phần còn lại của Part II dành để bóc tách.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Nối sang phần sau</strong>
+      <strong class="easy-only">Tiếp theo là gì</strong>
+      <strong class="en-only" lang="en">Where this leads</strong>
+      <div class="standard-copy">Hai trục đầu đều giả định ranh giới đã được vẽ và đứng yên. Đời thật thì không: thông lượng tăng, dữ liệu phình, máy chết. Phần sau hỏi câu khó nhất của chương — dời ranh giới thế nào mà không phải dời cả thế giới.</div>
+      <div class="easy-only">Hai phần trên đều coi như các ngăn đã chia xong và không đổi nữa. Thực tế thì tủ đầy lên, có lúc phải mua thêm tủ. Phần sau nói về việc dọn lại mà không phải xáo tung mọi thứ.</div>
+      <div class="en-only" lang="en">Both axes so far assume the boundaries are drawn and standing still. Real life doesn't: throughput grows, datasets swell, machines die. The next part asks the chapter's hardest question — how to move the boundaries without moving the world.</div>
+    </aside>
+  </section>
+
+  <section class="section" id="rebalancing" aria-labelledby="rebalancing-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Rebalancing partitions</span></span><span class="en-only" lang="en">Axis 3 · Rebalancing partitions</span></div>
+        <h2 id="rebalancing-title"><span class="vi-only">Dời mảnh mà không dời cả thế giới</span><span class="en-only" lang="en">Moving partitions without moving the world</span></h2>
+      </div>
+      <p class="standard-copy">Mọi thứ đều đổi: thông lượng truy vấn tăng nên cần thêm CPU, dữ liệu phình nên cần thêm đĩa, máy hỏng nên máy khác phải gánh việc của nó. Việc chuyển tải và dữ liệu từ node này sang node khác gọi là <strong>tái cân bằng</strong>, và Kleppmann đặt ra ba yêu cầu tối thiểu cho nó: sau khi xong, tải phải được chia công bằng; trong lúc đang chạy, cơ sở dữ liệu phải tiếp tục nhận đọc và ghi; và không được dời nhiều dữ liệu hơn mức cần thiết<span class="cite"><a href="#ref-1">1</a></span>. Yêu cầu thứ ba nghe hiển nhiên, nhưng chính nó loại thẳng cách làm mà ai cũng nghĩ ra đầu tiên.</p>
+      <p class="easy-only">Tủ hồ sơ không đứng yên: hồ sơ ngày một nhiều, có hôm một cái tủ gãy chân. Lúc đó phải <strong>dọn lại</strong> — chuyển bớt hồ sơ sang tủ mới. Dọn thì phải: chia lại cho đều, vẫn cho người ta tra hồ sơ trong lúc dọn, và đừng bê nhiều hơn mức cần thiết. Nhớ nhé: cái khó không phải là dọn, mà là dọn ít nhất có thể.</p>
+      <p class="en-only" lang="en">Everything changes: query throughput grows so you need more CPU, the dataset swells so you need more disk, a machine fails so another must take over its work. Moving load and data from one node to another is called <strong>rebalancing</strong>, and Kleppmann sets three minimum requirements for it: afterwards the load must be fairly shared; while it runs the database must keep accepting reads and writes; and no more data than necessary should move<span class="cite"><a href="#ref-1">1</a></span>. The third sounds obvious, but it's precisely what rules out the approach everyone thinks of first.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Rebalancing · the three minimum requirements</div>
+        <p class="definition standard-copy">Tái cân bằng là việc dời <em>phân mảnh</em> giữa các node, chứ không phải việc tính lại xem <em>khoá nào</em> thuộc mảnh nào. Mọi chiến lược tốt trong chương đều tuân theo cùng một nguyên tắc: giữ nguyên ánh xạ khoá → mảnh, chỉ đổi ánh xạ mảnh → node.</p>
+        <p class="definition easy-only">Dọn tủ là bê nguyên <strong>cả ngăn</strong> sang tủ mới, chứ không phải lôi từng tờ ra xếp lại. Nhớ nhé: dời ngăn, đừng dời từng tờ.</p>
+        <p class="definition en-only" lang="en">Rebalancing moves <em>partitions</em> between nodes; it does not recompute <em>which key</em> belongs to which partition. Every good strategy in the chapter follows the same principle: keep the key → partition mapping fixed, and change only the partition → node mapping.</p>
+        <p class="deep-only">Nguyên tắc ấy là chìa khoá để hiểu vì sao <code>hash mod N</code> hỏng còn các chiến lược khác thì không. <code>hash mod N</code> gắn chặt việc <em>chọn mảnh</em> vào số node — nên đổi số node là đổi luôn ánh xạ khoá → mảnh, và mọi khoá phải đi tìm nhà mới. Bốn chiến lược còn lại đều chèn một tầng gián tiếp vào giữa: khoá ánh xạ tới một mảnh cố định, mảnh ánh xạ tới một node có thể đổi. Đây là phiên bản phân tán của một câu cũ trong khoa học máy tính — thêm một tầng gián tiếp thì giải được gần như mọi bài toán.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba yêu cầu của tái cân bằng">
+        <div class="equation-row">
+          <b>Sau: công bằng</b>
+          <span>Tải và dữ liệu phải được chia đều giữa các node sau khi tái cân bằng xong.</span>
+        </div>
+        <div class="equation-row">
+          <b>Trong: vẫn phục vụ</b>
+          <span>Cơ sở dữ liệu phải tiếp tục nhận đọc và ghi trong suốt quá trình dời.</span>
+        </div>
+        <div class="equation-row">
+          <b>Tối thiểu: dời ít</b>
+          <span>Không dời nhiều dữ liệu hơn mức cần thiết — tiêu chí loại thẳng <code>hash mod N</code>.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ khi dọn tủ">
+        <div class="equation-row">
+          <b>Dọn xong phải đều</b>
+          <span>Không tủ nào còn nặng hơn hẳn tủ khác.</span>
+        </div>
+        <div class="equation-row">
+          <b>Dọn mà vẫn tra được</b>
+          <span>Người ta vẫn lấy và cất hồ sơ trong lúc bạn đang dọn.</span>
+        </div>
+        <div class="equation-row">
+          <b>Bê càng ít càng tốt</b>
+          <span>Chỉ bê những ngăn thật sự cần chuyển chỗ.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three requirements of rebalancing">
+        <div class="equation-row">
+          <b>After: fair</b>
+          <span>Load and data must be shared evenly between nodes once rebalancing finishes.</span>
+        </div>
+        <div class="equation-row">
+          <b>During: still serving</b>
+          <span>The database must keep accepting reads and writes throughout the move.</span>
+        </div>
+        <div class="equation-row">
+          <b>Minimal: move little</b>
+          <span>No more data than necessary should move — the criterion that rules out <code>hash mod N</code>.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Why <span lang="en">hash mod N</span> is a trap</div>
+          <h3><span class="vi-only">Cái bẫy mang tên <span lang="en">hash mod N</span></span><span class="en-only" lang="en">The trap called <span lang="en">hash mod N</span></span></h3>
+          <p class="standard-copy">Cách hiển nhiên nhất để chia khoá cho N máy là lấy <code>hash(key) mod N</code>. Nó hỏng đúng vào lúc ta cần nó nhất: <strong>N đổi thì gần như mọi khoá phải dời</strong>. Kleppmann đưa một ví dụ đếm được: giả sử <code>hash(key) = 123456</code>. Với 10 node, khoá nằm ở node 6, vì 123456 mod 10 = 6. Tăng lên 11 node, nó phải sang node 3 (123456 mod 11 = 3). Tăng tiếp lên 12 node, nó lại phải sang node 0 (123456 mod 12 = 0)<span class="cite"><a href="#ref-1">1</a></span>. Việc di chuyển dư thừa ấy vi phạm thẳng yêu cầu thứ ba, và làm cho tái cân bằng đắt tới mức không dùng được.</p>
+          <p class="easy-only">Cách dễ nghĩ nhất: đếm số tủ rồi chia. Có 10 tủ thì hồ sơ này vào tủ 6. Mua thêm một tủ nữa thành 11 tủ — phép chia đổi, hồ sơ đó phải sang tủ 3. Mua thêm nữa thành 12 — lại phải sang tủ 0. Mỗi lần mua thêm một cái tủ là <strong>gần như cả kho phải bê đi bê lại</strong>. Nhớ nhé: cách dễ nghĩ nhất ở đây lại là cách tệ nhất.</p>
+          <p class="en-only" lang="en">The obvious way to split keys across N machines is <code>hash(key) mod N</code>. It fails exactly when you need it most: <strong>if N changes, almost every key has to move</strong>. Kleppmann gives a countable example: say <code>hash(key) = 123456</code>. With 10 nodes the key sits on node 6, because 123456 mod 10 = 6. Grow to 11 nodes and it must move to node 3 (123456 mod 11 = 3). Grow to 12 and it must move again, to node 0 (123456 mod 12 = 0)<span class="cite"><a href="#ref-1">1</a></span>. That excess movement violates the third requirement outright and makes rebalancing unusably expensive.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bài học rút ra</strong>Đừng để số node xuất hiện trong công thức chọn mảnh. Mọi chiến lược tốt phía dưới đều tách hai việc ra: khoá thuộc mảnh nào là chuyện cố định; mảnh nằm ở node nào là chuyện có thể đổi.</div>
+            <div class="easy-only"><strong>Bài học</strong>Đừng chọn ngăn bằng cách "đếm xem có mấy tủ". Ngăn cứ giữ nguyên, chỉ đổi chỗ đặt ngăn.</div>
+            <div class="en-only" lang="en"><strong>The lesson</strong>Never let the node count appear in the partition-choosing formula. Every good strategy below splits the two: which partition a key belongs to is fixed; which node a partition sits on can change.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao lỗi này hay tái diễn</h4>
+              <p><code>mod N</code> là cách chuẩn để chọn ô trong một bảng băm <em>cục bộ</em>, nơi việc rehash toàn bộ khi bảng lớn lên là chuyện rẻ và trong bộ nhớ. Sai lầm nằm ở việc mang nguyên phản xạ ấy sang một cụm máy, nơi "rehash" nghĩa là đẩy hàng terabyte qua mạng. Đây là một trường hợp cụ thể của điều Kleppmann đã cảnh báo trong bài viết về hàm băm: cùng một phép toán nhưng hai mục đích khác nhau đòi hỏi hai thiết kế khác nhau<span class="cite"><a href="#ref-6">6</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Không phải mọi mod đều xấu</h4>
+              <p>Bản thân phép chia dư không có tội — vấn đề là chia dư cho <em>số node</em>. Elasticsearch chẳng hạn vẫn băm rồi phân giải tài liệu về một nhóm nhân bản<span class="cite"><a href="#ref-21">21</a></span>, nhưng số shard chính là một hằng số của chỉ mục, không phải số máy trong cụm. Chia dư cho một hằng số thì an toàn; chia dư cho một biến thay đổi theo cụm thì không.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Fixed number of partitions</div>
+          <h3><span class="vi-only">Số phân mảnh cố định: tạo dư ngay từ đầu</span><span class="en-only" lang="en">A fixed number of partitions: over-provision up front</span></h3>
+          <p class="standard-copy">Chiến lược đơn giản nhất mà vẫn đúng: tạo <strong>nhiều hơn hẳn</strong> số mảnh so với số node, rồi giao vài mảnh cho mỗi node. Thêm một node? Nó "ăn bớt" vài mảnh từ mỗi node hiện có cho tới khi cân bằng lại. Chỉ có <em>mảnh</em> di chuyển, còn việc khoá nào thuộc mảnh nào thì không đổi. Riak làm đúng thế: vòng ring được chia sẵn thành các partition, mỗi node chạy khoảng <code>(số partition)/(số node)</code> vnode, và các node đều cố giữ số vnode xấp xỉ bằng nhau<span class="cite"><a href="#ref-17">17</a></span>. Couchbase thì nói thẳng ra ràng buộc: số vBucket được ấn định lúc tạo bucket và <strong>không đổi</strong> sau đó<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <p class="easy-only">Mẹo: ngay từ đầu chia tủ thành <strong>thật nhiều ngăn nhỏ</strong>, nhiều hơn hẳn số tủ bạn có. Mỗi tủ giữ vài chục ngăn. Mua tủ mới? Chỉ việc bê vài ngăn từ mỗi tủ cũ sang tủ mới — không phải mở ngăn ra xếp lại tờ nào cả. Nhớ nhé: chia sẵn nhiều ngăn nhỏ thì sau này dọn rất nhẹ.</p>
+          <p class="en-only" lang="en">The simplest strategy that still works: create <strong>many more</strong> partitions than nodes, then assign several to each node. Adding a node? It steals a few partitions from every existing node until things balance again. Only <em>partitions</em> move; which key belongs to which partition never changes. Riak does exactly this: the ring is pre-divided into partitions, each node runs roughly <code>(number of partitions)/(number of nodes)</code> vnodes, and nodes each try to run about the same number<span class="cite"><a href="#ref-17">17</a></span>. Couchbase spells out the constraint: the number of vBuckets is fixed when the bucket is created and <strong>does not change</strong> afterwards<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cái giá</strong>Con số chọn lúc đầu là một cái trần. Chọn quá ít thì sau này không chia nhỏ thêm được; chọn quá nhiều thì mỗi mảnh mang chi phí quản lý riêng. Và vì nó cố định, đây là quyết định khó sửa nhất trong cả chương.</div>
+            <div class="easy-only"><strong>Cái giá</strong>Số ngăn chọn lúc đầu là cố định. Chia ít quá thì sau này chật, chia nhiều quá thì rối. Phải đoán trước.</div>
+            <div class="en-only" lang="en"><strong>The price</strong>The number you pick up front is a ceiling. Too few and you can't subdivide later; too many and each partition carries its own management overhead. And because it's fixed, this is the hardest decision in the chapter to undo.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Con số thật, hôm nay</h4>
+              <p>Tài liệu Couchbase hiện thời cho một ví dụ cụ thể về việc con số ấy không phải một hằng số vũ trụ mà là một lựa chọn kỹ thuật: bucket dùng storage engine Couchstore có 1024 vBucket trên Linux và Windows, bucket dùng Magma có thể chọn 128 hoặc 1024, còn trên macOS thì mọi bucket đều có 64 vBucket bất kể storage engine<span class="cite"><a href="#ref-19">19</a></span>. Đây là hành vi của bản hiện tại, không phải con số trong khung trình bày của sách năm 2017.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao nó chống được <code>mod N</code></h4>
+              <p>Vì phép băm chia dư cho <em>số mảnh</em> — một hằng số — chứ không cho số node. Couchbase băm khoá bằng CRC32 để ánh xạ vào vBucket<span class="cite"><a href="#ref-19">19</a></span>; Riak băm cặp bucket/key thành 160 bit rồi đặt lên vòng<span class="cite"><a href="#ref-17">17</a></span>. Trong cả hai trường hợp, thêm hay bớt máy không hề đụng tới phép tính ấy — chỉ đụng tới bảng "mảnh nào ở máy nào".</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Dynamic partitioning</div>
+          <h3><span class="vi-only">Phân mảnh động: tách khi phình, gộp khi teo</span><span class="en-only" lang="en">Dynamic partitioning: split when big, merge when small</span></h3>
+          <p class="standard-copy">Với phân mảnh theo dải khoá, một số mảnh cố định là ý tồi: ranh giới đặt sai thì có mảnh rỗng, có mảnh chứa tất cả. Vì thế các hệ theo dải khoá thường <strong>tự điều chỉnh</strong>: mảnh vượt ngưỡng thì tách đôi, mảnh teo xuống thì gộp lại với hàng xóm. HBase là ví dụ kinh điển, và câu chuyện khởi động của nó rất đáng nhớ: khi một bảng vừa được tạo, HBase mặc định chỉ cấp cho nó <strong>một</strong> region, nên mọi yêu cầu trong giai đoạn nạp dữ liệu đầu tiên đều dồn về một region server bất kể cụm có bao nhiêu máy<span class="cite"><a href="#ref-15">15</a></span>.</p>
+          <p class="easy-only">Với tủ chia theo bảng chữ cái thì cố định số ngăn là dở: ngăn "A" luôn đầy còn ngăn "X" luôn trống. Nên người ta để tủ <strong>tự chia</strong>: ngăn nào đầy quá thì cắt làm đôi, ngăn nào trống quá thì nhập với ngăn bên cạnh. Có điều tủ mới tinh thì chỉ có đúng một ngăn, nên lúc đầu mọi tờ hồ sơ đều đổ vào một chỗ. Nhớ nhé: ngăn tự chia thì tiện, nhưng lúc mới bắt đầu vẫn phải đẩy nó một tay.</p>
+          <p class="en-only" lang="en">With key-range partitioning, a fixed partition count is a bad idea: get the boundaries wrong and some partitions are empty while one holds everything. So range-partitioned systems usually <strong>adjust themselves</strong>: a partition over a threshold splits in two, one that shrinks merges with a neighbour. HBase is the classic example, and its start-up story is memorable: when a table is first created HBase by default allocates it just <strong>one</strong> region, so every request during the initial data-loading phase goes to a single region server regardless of how many machines the cluster has<span class="cite"><a href="#ref-15">15</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cách chữa</strong>HBase gọi nó là <em lang="en">pre-splitting</em>: bạn tự cung cấp các điểm tách ngay lúc tạo bảng, để lần nạp dữ liệu đầu tiên phân bố đều khắp cụm. Tài liệu nói rõ vì sao hệ không tự làm hộ: nó không thể đoán điểm tách, vì việc đó phụ thuộc nặng vào phân bố khoá trong dữ liệu của bạn<span class="cite"><a href="#ref-15">15</a></span>.</div>
+            <div class="easy-only"><strong>Cách chữa</strong>Lúc đóng tủ mới thì tự chia sẵn vài ngăn theo kinh nghiệm của mình, đừng để tủ chỉ có một ngăn.</div>
+            <div class="en-only" lang="en"><strong>The fix</strong>HBase calls it <em>pre-splitting</em>: you supply the split points at table-creation time so the initial load spreads across the cluster. The docs say plainly why the system can't guess: split points depend heavily on the distribution of keys in your data<span class="cite"><a href="#ref-15">15</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Tách theo chính sách cắm được</h4>
+              <p>Bài viết kỹ thuật của Hortonworks (nay thuộc Cloudera) mô tả rằng bất kể có pre-split hay không, một region vượt quá ngưỡng sẽ tự động tách làm đôi, và thời điểm cũng như cách tính điểm tách được quyết định bởi API <code>RegionSplitPolicy</code> cắm được — bài viết liệt kê <code>ConstantSizeRegionSplitPolicy</code>, <code>IncreasingToUpperBoundRegionSplitPolicy</code> và <code>KeyPrefixRegionSplitPolicy</code><span class="cite"><a href="#ref-15">15</a></span>. <strong>Lưu ý phiên bản:</strong> bài viết ấy mô tả HBase 0.94 ở thời điểm 2013 và bản thân trang blog cũng ghi rằng nó được đăng trước khi Hortonworks sáp nhập vào Cloudera; ngưỡng và chính sách mặc định hiện thời phải tra ở HBase Reference Guide bản hiện hành<span class="cite"><a href="#ref-16">16</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Không chỉ dành cho dải khoá</h4>
+              <p>Phân mảnh động cũng dùng được cho dữ liệu phân mảnh theo băm — mỗi mảnh khi đó giữ một dải của <em>không gian băm</em> thay vì một dải của không gian khoá, và cơ chế tách/gộp vẫn y nguyên. Ưu điểm chung là số mảnh tự bám theo lượng dữ liệu: kho nhỏ thì ít mảnh nên ít chi phí thừa, kho lớn thì mảnh tự sinh thêm.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Partitioning proportionally to nodes</div>
+          <h3><span class="vi-only">Tỉ lệ theo số node: cố định mảnh trên mỗi máy</span><span class="en-only" lang="en">Proportional to nodes: fix partitions per machine</span></h3>
+          <p class="standard-copy">Chiến lược thứ ba đứng giữa hai cái trên: cố định số mảnh <strong>trên mỗi node</strong>. Số node tăng thì tổng số mảnh tăng theo, còn kích thước mỗi mảnh giữ tương đối ổn định. Cassandra là hiện thân của cách này qua cơ chế vnode: tài liệu Cassandra giải thích rằng một vòng với đúng một token mỗi node vật lý rất khó mở rộng từng bước, vì với ít máy và token cách đều thì không có vị trí token nào cho máy mới mà vẫn giữ được cân bằng — nên Cassandra gán <strong>nhiều token</strong> cho mỗi node vật lý, cho phép một máy chiếm nhiều vị trí trên vòng<span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <p class="easy-only">Cách thứ ba: quy định mỗi tủ luôn giữ đúng, ví dụ, 16 ngăn. Mua tủ mới thì tổng số ngăn tăng lên, còn mỗi ngăn vẫn to như cũ. Nhớ nhé: giữ cho mỗi tủ một số ngăn cố định thì kho lớn lên mà không ngăn nào phình.</p>
+          <p class="en-only" lang="en">The third strategy sits between the two: fix the number of partitions <strong>per node</strong>. Add nodes and the total partition count rises, while each partition's size stays roughly constant. Cassandra embodies this through vnodes: its documentation explains that a ring with exactly one token per physical node is hard to scale incrementally, because with few machines and evenly spaced tokens there's no token position for a new node that leaves the ring balanced — so Cassandra assigns <strong>multiple tokens</strong> to each physical node, letting one machine occupy several ring positions<span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Ràng buộc ngầm</strong>Vì node mới chọn ranh giới một cách ngẫu nhiên, chiến lược này đòi hỏi phân mảnh phải dựa trên băm — chỉ khi đó các ranh giới mới có thể được rút ra từ không gian số một cách công bằng. Đây cũng là chỗ gần nhất mà thực tiễn CSDL chạm tới thuật toán gốc mang tên "consistent hashing".</div>
+            <div class="easy-only"><strong>Điều kiện</strong>Cách này chỉ chạy được khi ta chia ngăn theo kiểu bốc thăm, chứ không theo bảng chữ cái.</div>
+            <div class="en-only" lang="en"><strong>The hidden constraint</strong>Because a new node picks boundaries at random, this strategy requires hash-based partitioning — only then can boundaries be drawn fairly from the number space. It's also the closest database practice gets to the original algorithm named "consistent hashing".</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao Dynamo cần vnode</h4>
+              <p>Tài liệu Cassandra dựng lại lập luận rất rõ: trong một cụm tám node với token cách đều, không có cách nào chèn token thứ chín mà không gây mất cân bằng — muốn cân bằng thì phải chèn thẳng tám token vào giữa các dải hiện có<span class="cite"><a href="#ref-13">13</a></span>. Node ảo giải bài toán ấy bằng cách cho một máy giữ nhiều token, để việc thêm một lượng nhỏ năng lực cũng có chỗ đặt vừa vặn.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cân bằng token không miễn phí</h4>
+              <p>Nhiều token mỗi node làm cho việc phân bố dải khoá mượt hơn, nhưng cũng nhân số dải mà mỗi thao tác quản trị phải xử lý và làm tăng chi phí phối hợp. Con số token mỗi node vì thế là một tham số vận hành thật sự, không phải một hằng số — và nó thuộc loại nên tra ở tài liệu phiên bản mình đang chạy chứ không nên nhớ theo trí nhớ.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Automatic or manual rebalancing?</div>
+          <h3><span class="vi-only">Tự động hay để người bấm nút?</span><span class="en-only" lang="en">Automatic, or a human pressing the button?</span></h3>
+          <p class="standard-copy">Câu hỏi cuối của trục này không phải kỹ thuật mà là vận hành. Tái cân bằng hoàn toàn tự động thì tiện, nhưng Kleppmann cảnh báo rằng nó nguy hiểm vì có thể cộng hưởng với cơ chế phát hiện lỗi: một node đang quá tải phản hồi chậm, các node khác tưởng nó chết và bắt đầu dời dữ liệu khỏi nó — việc dời ấy làm mạng và các node còn lại nặng thêm, khiến thêm node bị tưởng là chết. Một vòng xoáy tự khuếch đại. Vì thế ông nghiêng về việc <strong>để con người trong vòng lặp</strong>: hệ tự đề xuất kế hoạch tái cân bằng, nhưng phải có người duyệt trước khi nó chạy<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Câu cuối không phải chuyện máy móc mà là chuyện con người. Nếu tủ tự động dọn mỗi khi thấy một tủ "có vẻ yếu", có khi nó dọn nhầm lúc tủ ấy chỉ đang bận — và việc dọn lại làm cả kho bận hơn, rồi nó lại tưởng tủ khác yếu, cứ thế. Nhớ nhé: máy đề xuất, người bấm nút.</p>
+          <p class="en-only" lang="en">The last question on this axis isn't technical but operational. Fully automatic rebalancing is convenient, but Kleppmann warns it's dangerous because it can resonate with failure detection: an overloaded node responds slowly, others assume it's dead and start moving data off it — the move loads the network and the remaining nodes further, making more nodes look dead. A self-amplifying spiral. So he leans toward <strong>keeping a human in the loop</strong>: let the system propose a rebalancing plan, but require someone to approve it before it runs<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nối với Chương 1</strong>Đây là lập luận về lỗi-con-người của Chương 1 nhìn từ chiều ngược lại: không phải mọi việc tự động hoá đều giảm rủi ro. Tự động hoá một hành động <em>đắt và khó đảo ngược</em> trong khi tín hiệu kích hoạt nó vốn đã mơ hồ thì là nhân rủi ro lên, không phải chia nó xuống.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Không phải cứ tự động là an toàn hơn. Việc càng nặng và càng khó làm lại thì càng nên có người xem trước.</div>
+            <div class="en-only" lang="en"><strong>Back to Chapter 1</strong>This is Chapter 1's human-error argument seen from the other side: not every automation reduces risk. Automating an <em>expensive, hard-to-undo</em> action on an already-ambiguous trigger multiplies risk rather than dividing it.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao tín hiệu lại mơ hồ</h4>
+              <p>Vấn đề nằm ở chỗ "chậm" và "chết" trông giống hệt nhau từ phía bên kia của một đường mạng. Đây chính là bài toán mà Chương 8 sẽ đặt tên đầy đủ — không có cách nào phân biệt chắc chắn giữa một node đã chết, một node chậm, và một mạng bị nghẽn. Tái cân bằng tự động là một trong những nơi mà sự bất khả ấy chuyển hoá thành một sự cố có thật.</p>
+            </div>
+            <div class="info-block">
+              <h4>Nửa tự động là lựa chọn thật</h4>
+              <p>Không phải chọn giữa "hoàn toàn tự động" và "hoàn toàn thủ công". Nhiều hệ sinh kế hoạch tự động rồi chờ lệnh xác nhận, hoặc chạy tự động nhưng có hạn mức băng thông và giới hạn số mảnh dời cùng lúc. Điểm chung là đặt một cái van giữa việc <em>phát hiện</em> và việc <em>hành động</em> — đủ để một vòng xoáy không kịp hình thành.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Nối sang phần sau</strong>
+      <strong class="easy-only">Tiếp theo là gì</strong>
+      <strong class="en-only" lang="en">Where this leads</strong>
+      <div class="standard-copy">Ranh giới vừa dịch chuyển. Nhưng client đang cầm một yêu cầu cho khoá <code>X</code> thì làm sao biết <code>X</code> vừa chuyển sang máy nào? Phần cuối trả lời câu hỏi ấy — và hoá ra nó là một thể hiện của bài toán khám phá dịch vụ nói chung.</div>
+      <div class="easy-only">Dọn xong rồi thì người đi tra hồ sơ làm sao biết tờ của mình giờ ở tủ nào? Phần cuối nói về tấm bản đồ chỉ đường, và ai là người giữ bản đồ ấy.</div>
+      <div class="en-only" lang="en">The boundaries just moved. But a client holding a request for key <code>X</code> — how does it know which machine <code>X</code> just moved to? The last part answers that, and it turns out to be an instance of the general service-discovery problem.</div>
+    </aside>
+  </section>
+
+  <section class="section" id="request-routing" aria-labelledby="request-routing-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · <span lang="en">Request routing</span></span><span class="en-only" lang="en">Axis 4 · Request routing</span></div>
+        <h2 id="request-routing-title"><span class="vi-only">Mảnh đã dời — giờ tìm dữ liệu ở đâu?</span><span class="en-only" lang="en">The partition moved — so where is the data now?</span></h2>
+      </div>
+      <p class="standard-copy">Khi client muốn đọc hoặc ghi khoá <code>X</code>, nó phải nối tới máy nào? Vì các phân mảnh liên tục được gán lại sau mỗi lần tái cân bằng, câu trả lời thay đổi theo thời gian. Kleppmann chỉ ra rằng đây chỉ là một trường hợp riêng của bài toán tổng quát hơn — <em lang="en">service discovery</em> — và rằng chỉ có <strong>ba</strong> hình dạng kiến trúc để trả lời, khác nhau ở chỗ đặt tri thức về bản đồ phân mảnh<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Dọn tủ xong thì hồ sơ đổi chỗ. Người đến tra hỏi: "tờ của tôi giờ ở tủ nào?" Có ba cách trả lời: hỏi đại một tủ rồi nó chỉ đường, hỏi một anh thủ thư đứng giữa, hoặc tự mình giữ một tấm bản đồ. Nhớ nhé: điều khác nhau duy nhất là <em>ai giữ tấm bản đồ</em>.</p>
+      <p class="en-only" lang="en">When a client wants to read or write key <code>X</code>, which machine should it connect to? Because partitions keep getting reassigned after every rebalance, the answer changes over time. Kleppmann points out this is a special case of a more general problem — <em>service discovery</em> — and that there are only <strong>three</strong> architectural shapes for answering it, differing in where the knowledge of the partition map lives<span class="cite"><a href="#ref-1">1</a></span>.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Request routing · who holds the map?</div>
+        <p class="definition standard-copy">Định tuyến yêu cầu không phải bài toán "chuyển tiếp thế nào" mà là bài toán "<strong>ai biết sự thật, và biết lúc nào</strong>". Ba kiến trúc khác nhau ở chỗ đặt tri thức ấy — trong node dữ liệu, trong một tầng định tuyến riêng, hay trong chính client.</p>
+        <p class="definition easy-only">Câu hỏi thật không phải "chỉ đường kiểu gì" mà là "ai giữ bản đồ": mỗi cái tủ, anh thủ thư đứng giữa, hay chính người đi tra.</p>
+        <p class="definition en-only" lang="en">Request routing isn't a question of "how do we forward" but of "<strong>who knows the truth, and when</strong>". The three architectures differ in where that knowledge sits — in the data nodes, in a separate routing tier, or in the client itself.</p>
+        <p class="deep-only">Chỗ đặt tri thức quyết định luôn chế độ hỏng của hệ. Đặt trong node dữ liệu thì không có thành phần nào thêm để hỏng, nhưng các node phải nói chuyện với nhau liên tục để đồng bộ bản đồ. Đặt trong một tầng định tuyến thì client đơn giản nhất, nhưng tầng ấy trở thành một thành phần phải vận hành, giám sát và nhân bản. Đặt trong client thì độ trễ thấp nhất — bớt được một chặng mạng — nhưng mọi client phải được cập nhật khi bản đồ đổi, và một client cũ mang bản đồ cũ là một nguồn lỗi tinh vi.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba kiến trúc định tuyến yêu cầu">
+        <div class="equation-row">
+          <b>Hỏi node nào cũng được</b>
+          <span>Client nối tới một node bất kỳ; node nào giữ mảnh thì trả lời, không thì chuyển tiếp hộ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Tầng định tuyến</b>
+          <span>Mọi yêu cầu đi qua một proxy biết phân mảnh; nó chỉ làm mỗi việc chuyển tiếp đúng chỗ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Client tự biết</b>
+          <span>Client giữ bản đồ phân mảnh và nối thẳng tới node đúng, không qua trung gian nào.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba cách chỉ đường">
+        <div class="equation-row">
+          <b>Hỏi đại một tủ</b>
+          <span>Tủ nào có thì đưa, không có thì chỉ sang tủ đúng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Hỏi thủ thư</b>
+          <span>Có một người đứng giữa, ai hỏi gì cũng chỉ đúng chỗ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Tự cầm bản đồ</b>
+          <span>Người đi tra tự biết đường, đi thẳng tới tủ.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three request-routing architectures">
+        <div class="equation-row">
+          <b>Ask any node</b>
+          <span>The client connects to any node; if it holds the partition it answers, otherwise it forwards.</span>
+        </div>
+        <div class="equation-row">
+          <b>Routing tier</b>
+          <span>All requests go through a partition-aware proxy whose only job is forwarding to the right place.</span>
+        </div>
+        <div class="equation-row">
+          <b>Partition-aware client</b>
+          <span>The client holds the partition map and connects directly to the right node, with no middleman.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Three shapes, one question</div>
+          <h3><span class="vi-only">Ba hình dạng cho cùng một câu hỏi</span><span class="en-only" lang="en">Three shapes for one question</span></h3>
+          <p class="standard-copy">Hình dạng thứ nhất: client nối tới <em>bất kỳ</em> node nào — thường qua một bộ cân bằng tải quay vòng; nếu node ấy tình cờ giữ phân mảnh cần tìm thì nó xử lý luôn, còn không thì nó chuyển tiếp yêu cầu tới node đúng rồi trả kết quả về. Hình dạng thứ hai: mọi yêu cầu đi qua một <strong>tầng định tuyến</strong> — một proxy biết phân mảnh, tự nó không xử lý dữ liệu, chỉ chuyển tiếp. Hình dạng thứ ba: <strong>client tự biết</strong> bản đồ và nối thẳng<span class="cite"><a href="#ref-1">1</a></span>. MongoDB là hiện thân sạch sẽ của hình dạng thứ hai: tài liệu nói <span lang="en">mongos</span> là <em>giao diện duy nhất</em> của một cụm phân mảnh từ góc nhìn ứng dụng, và ứng dụng không bao giờ nối hay giao tiếp trực tiếp với các shard<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <p class="easy-only">Cách một: cứ hỏi đại một cái tủ. Nếu tủ đó có thì đưa luôn; không có thì nó chạy sang tủ đúng lấy hộ. Cách hai: có một anh thủ thư đứng cửa, ai hỏi gì anh cũng biết nó nằm ở tủ nào. Cách ba: người đi tra được phát sẵn một tấm bản đồ, tự đi thẳng tới tủ. Nhớ nhé: ba cách chỉ khác nhau ở chỗ ai phải nhớ đường.</p>
+          <p class="en-only" lang="en">Shape one: the client connects to <em>any</em> node — usually via a round-robin load balancer; if that node happens to hold the partition it handles the request, otherwise it forwards it to the right node and passes the answer back. Shape two: every request goes through a <strong>routing tier</strong> — a partition-aware proxy that handles no data itself and only forwards. Shape three: the <strong>client knows</strong> the map and connects directly<span class="cite"><a href="#ref-1">1</a></span>. MongoDB is a clean instance of shape two: its docs state that <span lang="en">mongos</span> is the <em>only interface</em> to a sharded cluster from an application's perspective, and applications never connect to or communicate with the shards directly<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Điều thật sự khác nhau</strong>Không phải hiệu năng, mà là chỗ đặt sự phức tạp. Client mỏng thì tầng định tuyến dày; client dày thì phải lo việc cập nhật bản đồ cho tất cả client đang chạy ngoài kia.</div>
+            <div class="easy-only"><strong>Điều khác nhau</strong>Ai phải nhớ đường thì người đó phải được cập nhật khi đường thay đổi.</div>
+            <div class="en-only" lang="en"><strong>What actually differs</strong>Not performance, but where the complexity lives. A thin client means a thick routing tier; a thick client means keeping every client out there up to date.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Chuyển tiếp không phải là miễn phí</h4>
+              <p>Hình dạng thứ nhất trông gọn vì không thêm thành phần nào, nhưng nó trả giá bằng một chặng mạng phụ mỗi khi đoán trượt — và với một cụm nhiều mảnh, xác suất đoán trượt là gần như chắc chắn. Nó cũng đòi hỏi mọi node dữ liệu phải giữ một bản sao của bản đồ phân mảnh và đồng bộ nó liên tục với nhau, thường qua một giao thức gossip.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cùng một bài toán ở tầng khác</h4>
+              <p>Ba hình dạng này lặp lại gần như y hệt ba cách làm khám phá dịch vụ ở tầng ứng dụng: để dịch vụ tự chuyển tiếp, đặt một sidecar/proxy ở giữa, hay để client tự phân giải qua một registry. Không phải trùng hợp — cả hai đều là bài toán "ánh xạ một cái tên tới một địa chỉ đang thay đổi", nên không gian lời giải giống nhau.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Coordination service · who holds the truth</div>
+          <h3><span class="vi-only">Ai giữ sự thật về bản đồ?</span><span class="en-only" lang="en">Who holds the truth about the map?</span></h3>
+          <p class="standard-copy">Dù chọn hình dạng nào, vẫn còn một câu hỏi khó hơn: thành phần ra quyết định định tuyến làm sao biết phân mảnh đã đổi chỗ? Nhiều hệ phân tán giao việc ấy cho một <strong>dịch vụ điều phối</strong> riêng, điển hình là ZooKeeper — một dịch vụ điều phối phân tán, mã nguồn mở, phơi ra một tập nguyên thuỷ đơn giản để các ứng dụng phân tán dựng lên các dịch vụ cấp cao hơn như đồng bộ hoá, duy trì cấu hình và đặt tên nhóm; dữ liệu của nó được giữ trong bộ nhớ theo một không gian tên phân cấp gồm các <em lang="en">znode</em>, và thiết kế ưu tiên hiệu năng cao, tính sẵn sàng cao cùng truy cập có thứ tự chặt<span class="cite"><a href="#ref-23">23</a></span>.</p>
+          <p class="easy-only">Dù chọn cách nào thì vẫn có một câu khó: ai là người <strong>cập nhật</strong> tấm bản đồ khi tủ được dọn lại? Nhiều nơi thuê hẳn một "người giữ sổ cái" — mọi thay đổi phải ghi vào đó, và ai cần đường thì hỏi nó. Nhớ nhé: phải có đúng một chỗ giữ sự thật, không thì mỗi người chỉ một đường.</p>
+          <p class="en-only" lang="en">Whichever shape you pick, a harder question remains: how does the component making routing decisions learn that a partition moved? Many distributed systems hand that job to a separate <strong>coordination service</strong>, typically ZooKeeper — a distributed, open-source coordination service that exposes a simple set of primitives distributed applications build higher-level services on, such as synchronization, configuration maintenance, and group naming; its data is kept in memory in a hierarchical namespace of <em>znodes</em>, and the design puts a premium on high performance, high availability and strictly ordered access<span class="cite"><a href="#ref-23">23</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cùng một khuôn, sản phẩm khác</strong>MongoDB không dùng ZooKeeper nhưng dựng đúng khuôn ấy: các <em lang="en">config server</em> giữ siêu dữ liệu của cụm — gồm danh sách chunk trên mỗi shard và các dải định nghĩa những chunk đó — còn <span lang="en">mongos</span> thì <strong>cache</strong> dữ liệu ấy, dùng nó để định tuyến, và cập nhật cache khi siêu dữ liệu thay đổi<span class="cite"><a href="#ref-11">11</a></span><span class="cite"><a href="#ref-12">12</a></span>.</div>
+            <div class="easy-only"><strong>Ví dụ thật</strong>Có hệ để riêng vài "cuốn sổ cái" ghi tủ nào giữ ngăn nào; anh thủ thư chép lại vào sổ tay của mình và chép lại mỗi khi sổ cái đổi.</div>
+            <div class="en-only" lang="en"><strong>Same mould, different product</strong>MongoDB doesn't use ZooKeeper but builds the same shape: <em>config servers</em> store the cluster's metadata — including the list of chunks on every shard and the ranges that define them — while <span lang="en">mongos</span> <strong>caches</strong> that data, uses it to route, and refreshes the cache when the metadata changes<span class="cite"><a href="#ref-11">11</a></span><span class="cite"><a href="#ref-12">12</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cache là con dao hai lưỡi</h4>
+              <p>Việc <span lang="en">mongos</span> cache siêu dữ liệu thay vì hỏi config server cho mỗi yêu cầu là điều khiến định tuyến nhanh — và cũng là điều khiến nó có thể sai trong một khoảng ngắn sau khi chunk vừa dời. Kiến trúc kiểu này vì thế luôn phải có đường phục hồi: node nhận nhầm phải biết nói "tôi không còn giữ dải này nữa" để bên gọi làm mới cache, chứ không được lặng lẽ trả kết quả rỗng.</p>
+            </div>
+            <div class="info-block">
+              <h4>Không phải hệ nào cũng cần dịch vụ ngoài</h4>
+              <p>Có một nhánh thiết kế khác tránh hẳn thành phần điều phối riêng: để các node dữ liệu tự đồn đại trạng thái vòng cho nhau qua giao thức gossip. Tài liệu Cassandra liệt kê đúng gossip là một trong những thứ nó vay từ Dynamo, cùng với phân mảnh bằng băm và nhân bản đa chủ<span class="cite"><a href="#ref-13">13</a></span>. Đổi lại sự đơn giản về vận hành, bạn nhận lấy một trạng thái hội tụ dần thay vì một nguồn sự thật duy nhất.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Parallel query execution · MPP</div>
+          <h3><span class="vi-only">Truy vấn song song: khi một câu lệnh chạy trên mọi mảnh</span><span class="en-only" lang="en">Parallel execution: when one query runs on every partition</span></h3>
+          <p class="standard-copy">Cho tới đây ta mới chỉ nói về đọc và ghi <em>một</em> khoá — cộng thêm scatter/gather cho chỉ mục phụ. Đó là mức độ phức tạp của phần lớn CSDL NoSQL phân tán. Nhưng các CSDL phân tích <strong>song song ồ ạt</strong> (<em lang="en">massively parallel processing</em>, MPP) đi xa hơn nhiều: trình tối ưu bẻ một truy vấn phức tạp thành nhiều giai đoạn và toán tử, rồi cho chúng chạy song song trên các node giữ các mảnh khác nhau<span class="cite"><a href="#ref-1">1</a></span>. Ý tưởng không mới — DeWitt và Gray đã lập luận từ 1992 rằng hệ CSDL song song là tương lai của CSDL hiệu năng cao, chính vì các truy vấn quan hệ vốn rất hợp với thực thi song song<span class="cite"><a href="#ref-24">24</a></span>.</p>
+          <p class="easy-only">Từ đầu tới giờ ta chỉ nói chuyện lấy <em>một</em> tờ hồ sơ. Nhưng có loại câu hỏi lớn hơn nhiều: "tính tổng tất cả hoá đơn năm ngoái". Lúc đó không ai đi lấy từng tờ — mà giao cho <strong>mỗi tủ tự cộng phần của mình</strong>, rồi cộng các kết quả lại. Nhớ nhé: câu hỏi lớn thì chia việc ra cho mọi tủ cùng làm một lúc.</p>
+          <p class="en-only" lang="en">So far we've only discussed reading and writing <em>one</em> key — plus scatter/gather for secondary indexes. That's the level of complexity most distributed NoSQL databases reach. But <strong>massively parallel processing</strong> (MPP) analytic databases go much further: the query optimizer breaks a complex query into stages and operators and runs them in parallel across the nodes holding different partitions<span class="cite"><a href="#ref-1">1</a></span>. The idea is not new — DeWitt and Gray argued in 1992 that parallel database systems were the future of high performance databases, precisely because relational queries suit parallel execution so well<span class="cite"><a href="#ref-24">24</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao nó khép lại chương</strong>Vì nó cho thấy phân mảnh không chỉ là chuyện lưu trữ. Một khi dữ liệu đã nằm trên nhiều máy, chính <em>cách tính toán</em> cũng có thể được phân mảnh — và đó là cây cầu dẫn sang phần xử lý theo mẻ và theo luồng ở cuối sách.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Chia dữ liệu ra nhiều chỗ thì cũng chia luôn được việc tính toán ra nhiều chỗ.</div>
+            <div class="en-only" lang="en"><strong>Why it closes the chapter</strong>Because it shows partitioning isn't only about storage. Once data lives on many machines, the <em>computation</em> can be partitioned too — the bridge to the batch and stream processing parts at the end of the book.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Lập luận gốc năm 1992</h4>
+              <p>Bài báo của DeWitt và Gray trên <em lang="en">Communications of the ACM</em> lập luận rằng các máy CSDL song song dựa trên bộ xử lý phổ thông — chứ không phải phần cứng chuyên dụng đắt tiền — là con đường đi tới hiệu năng cao, vì các toán tử quan hệ hoạt động trên những luồng dữ liệu đồng nhất và có thể ghép nối song song một cách tự nhiên<span class="cite"><a href="#ref-24">24</a></span>. Kleppmann đưa bài này vào danh mục tham chiếu chính thức của Chương 6<span class="cite"><a href="#ref-3">3</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khoảng cách giữa hai thế giới</h4>
+              <p>Điều đáng chú ý là khoảng cách năng lực: một kho khoá–giá trị phân tán coi scatter/gather đã là đỉnh cao của độ phức tạp truy vấn, trong khi một hệ MPP coi đó là bước khởi động. Sự chênh lệch ấy không phải vì bên nào kém hơn, mà vì hai bên tối ưu cho hai loại tải khác nhau — đúng như phân biệt OLTP/OLAP đã dựng ở Chương 3.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận thường gặp về phân mảnh</span><span class="en-only" lang="en">Three common misreadings of partitioning</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“<span lang="en">Consistent hashing</span> là cách tái cân bằng mặc định của CSDL”</span><span class="en-only" lang="en">"Consistent hashing is how databases rebalance by default"</span></h4>
+          <p class="standard-copy">Đây là cái bẫy thuật ngữ lớn nhất của chương. Thuật toán gốc mang tên ấy do Karger và cộng sự đưa ra năm 1997 cho một bài toán khác hẳn: giảm hoặc triệt tiêu điểm nóng trong các mạng caching phân tán trên web, nơi không máy chủ nào có thông tin đầy đủ về trạng thái toàn mạng<span class="cite"><a href="#ref-4">4</a></span>. Kleppmann lưu ý rằng trong ngữ cảnh cơ sở dữ liệu, cụm từ này bị dùng rất lỏng so với định nghĩa gốc, rằng cách tiếp cận nguyên bản thực ra hoạt động không tốt cho CSDL nên hiếm khi được dùng, và ông khuyên gọi thẳng là <em lang="en">hash partitioning</em> cho đỡ nhầm<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>. Bằng chứng cho sự trôi nghĩa ấy nằm ngay trong tài liệu sản phẩm: Cassandra đặt tên mục phân mảnh của mình là “<span lang="en">Dataset Partitioning: Consistent Hashing</span>”<span class="cite"><a href="#ref-13">13</a></span>. Dòng thuật toán gốc thì vẫn sống khoẻ ở chỗ khác — <span lang="en">libketama</span> cho client memcached<span class="cite"><a href="#ref-25">25</a></span> và thuật toán jump consistent hash của Lamping &amp; Veach<span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <p class="en-only" lang="en">This is the chapter's biggest terminological trap. The original algorithm by Karger et al. (1997) addressed a quite different problem: relieving hot spots in distributed web caching networks where no server has complete information about the whole network's state<span class="cite"><a href="#ref-4">4</a></span>. Kleppmann notes that in a database context the phrase is used loosely compared with that original definition, that the original approach actually doesn't work well for databases and is rarely used, and he suggests just saying <em>hash partitioning</em> instead<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>. The evidence of the drift is in product docs: Cassandra titles its partitioning section "Dataset Partitioning: Consistent Hashing"<span class="cite"><a href="#ref-13">13</a></span>. The original algorithmic line lives on elsewhere — <span lang="en">libketama</span> for memcached clients<span class="cite"><a href="#ref-25">25</a></span> and Lamping &amp; Veach's jump consistent hash<span class="cite"><a href="#ref-5">5</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Băm khoá là hết chuyện điểm nóng”</span><span class="en-only" lang="en">"Hashing the key ends hot spots"</span></h4>
+          <p class="standard-copy">Sai, và đây là ngộ nhận tốn kém nhất trong vận hành. Băm rải đều <em>khoá</em> trong không gian số; nó không nói gì về việc <em>bao nhiêu yêu cầu</em> sẽ đổ vào từng khoá. Khi tải lệch tập trung vào một khoá duy nhất, mọi yêu cầu vẫn rơi vào một mảnh, và Kleppmann nói rõ rằng phần lớn hệ dữ liệu hiện chưa tự bù được điều này — cách chữa phải do ứng dụng làm, bằng cách tách khoá nóng ra nhiều khoá con và chịu chi phí gộp lúc đọc<span class="cite"><a href="#ref-1">1</a></span>. Nói cách khác, băm giải bài toán lệch <em>dữ liệu</em>, không giải bài toán lệch <em>tải</em>.</p>
+          <p class="en-only" lang="en">Wrong, and operationally it's the costliest misreading. Hashing spreads <em>keys</em> evenly through the number space; it says nothing about <em>how many requests</em> land on each key. When skew concentrates on a single key, every request still hits one partition, and Kleppmann says plainly that most data systems can't compensate for this automatically — the fix has to come from the application, splitting the hot key into sub-keys and paying a merge cost on read<span class="cite"><a href="#ref-1">1</a></span>. Hashing solves <em>data</em> skew, not <em>load</em> skew.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Có phân mảnh rồi thì khỏi cần nhân bản”</span><span class="en-only" lang="en">"Once you partition, you don't need replication"</span></h4>
+          <p class="standard-copy">Sai: hai thứ giải hai bài toán trực giao nhau và luôn được dùng chồng lên nhau. Phân mảnh giải bài toán dung lượng và thông lượng; nhân bản giải bài toán chịu lỗi và đọc gần. Kafka minh hoạ cấu trúc này gọn gàng: một topic được phân mảnh thành nhiều partition nằm trên các broker khác nhau, một sự kiện mới được <em>nối vào đúng một</em> partition, và các sự kiện cùng khoá luôn vào cùng một partition — trong khi mọi topic đều có thể được nhân bản, và việc nhân bản ấy được thực hiện <strong>ở cấp topic-partition</strong><span class="cite"><a href="#ref-26">26</a></span>. Đúng một mảnh cho mỗi bản ghi; nhiều bản sao cho mỗi mảnh.</p>
+          <p class="en-only" lang="en">Wrong: they solve orthogonal problems and are always stacked. Partitioning solves capacity and throughput; replication solves fault tolerance and local reads. Kafka illustrates the structure neatly: a topic is partitioned across brokers, a new event is <em>appended to exactly one</em> of the topic's partitions, and events with the same key always go to the same partition — while every topic can be replicated, and that replication is performed <strong>at the level of topic-partitions</strong><span class="cite"><a href="#ref-26">26</a></span>. Exactly one partition per record; several copies per partition.</p>
+        </div>
+      </div>
+    </div>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Nối sang chương sau</strong>
+      <strong class="easy-only">Tiếp theo là gì</strong>
+      <strong class="en-only" lang="en">Where this leads</strong>
+      <div class="standard-copy">Chương 6 để lại một món nợ nói thẳng ra mấy lần: cập nhật chỉ mục toàn cục một cách đồng bộ đòi hỏi giao dịch phân tán, và một thao tác chạm nhiều mảnh thì không còn hiển nhiên là "hoặc xong hết hoặc không gì cả". Chương 7 đến để trả món nợ ấy bằng cách hỏi một câu tưởng đơn giản: giao dịch thật ra bảo đảm những gì?</div>
+      <div class="easy-only">Chương này để lại một câu chưa trả lời: nếu một việc phải sửa nhiều ngăn cùng lúc mà nửa chừng bị đứt, thì sao? Chương sau nói về đúng chuyện đó.</div>
+      <div class="en-only" lang="en">Chapter 6 leaves a debt it names out loud more than once: updating a global index synchronously requires a distributed transaction, and an operation touching several partitions no longer obviously means "all or nothing". Chapter 7 comes to pay that debt by asking a deceptively simple question: what does a transaction actually guarantee?</div>
+    </aside>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi cách phân mảnh của chính hệ bạn</span><span class="en-only" lang="en">Test your own system's partitioning</span></h2>
+        <p class="standard-copy">Chương 6 cho một bộ câu hỏi rất dễ áp dụng, vì phần lớn có thể trả lời bằng cách nhìn vào lược đồ và bảng cấu hình chứ không cần đo đạc gì. Chúng không hỏi bạn dùng CSDL nào, mà hỏi bạn đã <em>biết</em> ranh giới của mình nằm ở đâu và ai đang giữ bản đồ hay chưa.</p>
+        <p class="easy-only">Thử soi một hệ thật bằng mấy câu dưới. Phần lớn chỉ cần mở cấu hình ra nhìn là trả lời được. Nhớ nhé: không biết mình chia theo cái gì thì cũng không biết chỗ nào sẽ nóng.</p>
+        <p class="en-only" lang="en">Chapter 6 gives questions that are easy to apply, because most can be answered by looking at a schema and a config file rather than by measuring anything. They don't ask which database you use; they ask whether you <em>know</em> where your boundaries are and who holds the map.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Khoá phân mảnh của bạn là gì, và nó có tăng đơn điệu không?</strong><span class="deep-only">Nếu khoá là dấu thời gian hay một ID tăng dần, mọi lần ghi mới đều rơi vào cùng một mảnh — MongoDB mô tả chính xác cơ chế ấy qua chunk có biên trên <code>MaxKey</code><span class="cite"><a href="#ref-10">10</a></span>. Hãy trả lời trước khi tải tăng, chứ không phải sau khi biểu đồ đã lệch.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn chia theo dải khoá hay theo băm — và bạn đã mất cái gì vì lựa chọn đó?</strong><span class="deep-only">Chia theo dải thì được quét theo dải nhưng mua lấy rủi ro điểm nóng; chia theo băm thì đều hơn nhưng mọi truy vấn theo dải trở thành phát tán toàn cụm. Nếu bạn không gọi tên được cái mình đã mất, rất có thể bạn chưa thật sự chọn — mà chỉ đang dùng mặc định của sản phẩm.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có khoá nào của bạn nóng hơn hẳn phần còn lại không?</strong><span class="deep-only">Không phải mảnh nào to nhất, mà khoá nào bị hỏi nhiều nhất. Đây là hai chỉ số khác nhau và cần hai biểu đồ khác nhau. Nếu có một khoá nóng thật, hãy nhớ rằng băm không cứu được nó — chỉ có việc tách khoá ở tầng ứng dụng, kèm chi phí gộp lúc đọc<span class="cite"><a href="#ref-1">1</a></span>.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Chỉ mục phụ của bạn là cục bộ hay toàn cục, và bạn có biết không?</strong><span class="deep-only">Nếu cục bộ, mỗi truy vấn theo chỉ mục phụ là một lần scatter/gather và độ trễ của nó bằng độ trễ của mảnh chậm nhất. Nếu toàn cục, hãy hỏi tiếp: chỉ mục được cập nhật đồng bộ hay bất đồng bộ, và cửa sổ trễ ấy có ai đo không?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Số phân mảnh của bạn cố định hay tự điều chỉnh?</strong><span class="deep-only">Nếu cố định, con số ấy là một cái trần — Couchbase nói thẳng rằng số vBucket không đổi sau khi tạo bucket<span class="cite"><a href="#ref-19">19</a></span>. Nếu tự điều chỉnh, hãy kiểm tra trạng thái khởi đầu: một bảng HBase mới chỉ có một region, nên lần nạp dữ liệu đầu tiên dồn về một máy nếu bạn không pre-split<span class="cite"><a href="#ref-15">15</a></span>.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu thêm một node, bao nhiêu dữ liệu phải di chuyển?</strong><span class="deep-only">Nếu câu trả lời gần với "gần hết", nghĩa là số node đang nằm trong công thức chọn mảnh — cái bẫy <code>hash mod N</code><span class="cite"><a href="#ref-1">1</a></span>. Một thiết kế lành mạnh phải trả lời được bằng một phân số nhỏ, và phải nói được con số ấy trước khi thực sự thêm máy.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Tái cân bằng của bạn tự động hay có người duyệt?</strong><span class="deep-only">Tự động hoàn toàn có thể cộng hưởng với phát hiện lỗi thành một vòng xoáy: node chậm bị tưởng chết, việc dời dữ liệu làm cụm nặng hơn, thêm node bị tưởng chết<span class="cite"><a href="#ref-1">1</a></span>. Nếu hệ bạn tự động, hãy kiểm tra xem có van nào ở giữa không — hạn mức băng thông, giới hạn số mảnh dời đồng thời, hay một bước xác nhận.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Ai đang giữ bản đồ phân mảnh của bạn, và cập nhật nó mất bao lâu?</strong><span class="deep-only">Node dữ liệu qua gossip, một tầng định tuyến, hay chính client? Và khi bản đồ đổi, khoảng thời gian có một bên cầm bản đồ cũ là bao lâu? Với MongoDB, đó là cửa sổ giữa lúc config server đổi và lúc <span lang="en">mongos</span> làm mới cache của nó<span class="cite"><a href="#ref-12">12</a></span>.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Bạn chia dữ liệu ra các ngăn theo cái gì?</strong><span>Theo thứ tự chữ cái, hay theo bốc thăm? Hai cách cho hai kết quả rất khác nhau.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có tờ hồ sơ nào ai cũng đòi xem không?</strong><span>Nếu có, cái ngăn chứa nó sẽ kẹt — và chia lại ngăn cũng không cứu được.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Mua thêm một cái tủ thì phải bê bao nhiêu hồ sơ?</strong><span>Nếu câu trả lời là "gần hết kho", cách chia của bạn đang sai chỗ nào đó.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Ai giữ tấm bản đồ chỉ xem hồ sơ nằm ở tủ nào?</strong><span>Phải có đúng một chỗ giữ sự thật, và mọi người phải biết khi nó đổi.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>What is your partition key, and does it increase monotonically?</strong><span>If it's a timestamp or an increasing ID, every new write lands on the same partition — MongoDB describes exactly that through the chunk bounded by <code>MaxKey</code>. Answer it before load grows, not after the chart tilts.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Do you partition by key range or by hash — and what did that cost you?</strong><span>Range buys you scans and sells you hot-spot risk; hash buys evenness and sells you range queries. If you can't name what you gave up, you probably haven't chosen — you're on the product default.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is any one of your keys much hotter than the rest?</strong><span>Not which partition is biggest, but which key is asked for most. Two different metrics, two different charts. Hashing won't save a genuinely hot key; only application-level key splitting will, at a merge cost on read.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Are your secondary indexes local or global — and do you know?</strong><span>If local, every secondary-index query is a scatter/gather whose latency equals the slowest partition's. If global, ask next: is it updated synchronously or asynchronously, and does anyone measure the lag window?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is your partition count fixed or self-adjusting?</strong><span>If fixed, that number is a ceiling — Couchbase states outright that the vBucket count doesn't change after bucket creation. If self-adjusting, check the starting state: a new HBase table has one region, so the first load lands on one machine unless you pre-split.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>If you add one node, how much data has to move?</strong><span>If the answer is near "almost all of it", the node count is inside your partition-choosing formula — the <code>hash mod N</code> trap. A healthy design answers with a small fraction, and can state it before the machine is added.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is your rebalancing automatic, or does a human approve it?</strong><span>Full automation can resonate with failure detection into a spiral: a slow node is presumed dead, the data movement loads the cluster further, more nodes look dead. If yours is automatic, check for a valve — bandwidth caps, a limit on concurrent partition moves, or a confirmation step.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Who holds your partition map, and how long does an update take to spread?</strong><span>Data nodes via gossip, a routing tier, or the client itself? And when the map changes, how long is the window in which someone holds a stale copy? For MongoDB, that's the gap between a config-server change and <span lang="en">mongos</span> refreshing its cache.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Phân mảnh không phải là kỹ thuật làm cho hệ lớn hơn, mà là kỷ luật <span class="closing-accent">vẽ ranh giới</span> — và mọi ranh giới đều thu tiền ở một đầu nào đó. Chia theo dải thì rẻ khi quét nhưng dễ nóng; chia theo băm thì đều nhưng mất thứ tự; chỉ mục cục bộ thì ghi gọn mà đọc tán, chỉ mục toàn cục thì ngược lại. Điều chương này thật sự dạy là một phản xạ: khi nghe một khẩu hiệu kiến trúc, hãy hỏi ngay <span class="closing-accent">nó thu tiền ở đâu</span>. Và khi ranh giới phải dịch chuyển, đừng để số máy lọt vào công thức — hãy giữ <span class="closing-accent">khoá thuộc mảnh nào là cố định</span>, chỉ đổi mảnh nằm ở máy nào.</span><span class="easy-only">Chia dữ liệu ra nhiều ngăn không phải để "làm cho to hơn", mà là học cách <span class="closing-accent">vẽ ranh giới</span>. Cách nào cũng được cái này mất cái kia: chia theo thứ tự thì tra dải nhanh mà dễ kẹt một ngăn; chia theo bốc thăm thì đều mà mất thứ tự. Nhớ nhé: nghe ai khoe một cách chia, hãy hỏi ngay <span class="closing-accent">"thế mất gì?"</span> — và khi dọn tủ, hãy <span class="closing-accent">bê nguyên cả ngăn</span> chứ đừng xếp lại từng tờ.</span><span class="en-only" lang="en">Partitioning isn't a technique for making systems bigger; it's the discipline of <span class="closing-accent">drawing boundaries</span> — and every boundary charges you somewhere. Range is cheap to scan but easy to overheat; hash is even but loses order; local indexes make writes tidy and reads scattered, global indexes the reverse. What the chapter really teaches is a reflex: when you hear an architectural slogan, ask immediately <span class="closing-accent">where it charges you</span>. And when boundaries must move, never let the machine count into the formula — keep <span class="closing-accent">which partition a key belongs to fixed</span>, and change only which machine holds the partition.</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-5-replication.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 5 · Nhân bản</span><span class="en-only" lang="en">Chapter 5 · Replication</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="chapter-7-transactions.html">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 7 · Giao dịch</span><span class="en-only" lang="en">Chapter 7 · Transactions</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 6 <span lang="en">“Partitioning”</span><span class="cite"><a href="#ref-27">27</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (tủ hồ sơ, ngăn kéo, anh thủ thư, tấm bản đồ…) là minh họa do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. Các hành vi sản phẩm được trích dẫn từ tài liệu <em>hiện hành</em> của Cassandra, MongoDB, HBase, Riak, Couchbase, Elasticsearch, Oracle, ZooKeeper và Kafka mô tả trạng thái hôm nay, không phải trạng thái năm 2017 khi sách xuất bản; những chỗ chênh lệch phiên bản được ghi rõ trong các khối Đầy đủ.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 6 “Partitioning”<span class="cite"><a href="#ref-27">27</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (filing cabinets, drawers, a librarian, a map…) are illustrations added by this companion, not examples from the book. Product behaviours are cited from the <em>current</em> documentation of Cassandra, MongoDB, HBase, Riak, Couchbase, Elasticsearch, Oracle, ZooKeeper and Kafka and describe today's state, not the 2017 state at publication; version gaps are flagged inside the Đầy đủ blocks.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 6 “Partitioning”.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách</a></li>
+        <li id="ref-3"><a href="https://github.com/ept/ddia-references/blob/master/chapter-06-refs.md" target="_blank" rel="noopener noreferrer">Martin Kleppmann, <em>ept/ddia-references</em> — danh mục tham chiếu chính thức của Chương 6</a></li>
+        <li id="ref-4"><a href="https://www.cs.princeton.edu/courses/archive/fall09/cos518/papers/chash.pdf" target="_blank" rel="noopener noreferrer">David Karger, Eric Lehman, Tom Leighton, et al., “Consistent Hashing and Random Trees: Distributed Caching Protocols for Relieving Hot Spots on the World Wide Web”, ACM STOC 1997 (bản PDF lưu tại Princeton)</a> <em>(bản chính thức trên dl.acm.org, doi:10.1145/258533.258660, chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-5"><a href="https://arxiv.org/pdf/1406.2294" target="_blank" rel="noopener noreferrer">John Lamping &amp; Eric Veach, “A Fast, Minimal Memory, Consistent Hash Algorithm”, arXiv, 2014</a></li>
+        <li id="ref-6"><a href="https://martin.kleppmann.com/2012/06/18/java-hashcode-unsafe-for-distributed-systems.html" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “Java's hashCode Is Not Safe for Distributed Systems”, 2012</a></li>
+        <li id="ref-7"><a href="http://ikaisays.com/2011/01/25/app-engine-datastore-tip-monotonically-increasing-values-are-bad/" target="_blank" rel="noopener noreferrer">Ikai Lan, “App Engine Datastore Tip: Monotonically Increasing Values Are Bad”, 2011</a></li>
+        <li id="ref-8"><a href="https://www.mongodb.com/docs/manual/core/ranged-sharding/" target="_blank" rel="noopener noreferrer">MongoDB Manual — Ranged Sharding</a></li>
+        <li id="ref-9"><a href="https://www.mongodb.com/docs/manual/core/hashed-sharding/" target="_blank" rel="noopener noreferrer">MongoDB Manual — Hashed Sharding</a></li>
+        <li id="ref-10"><a href="https://www.mongodb.com/docs/manual/core/sharding-choose-a-shard-key/" target="_blank" rel="noopener noreferrer">MongoDB Manual — Choose a Shard Key (Monotonically Changing Shard Keys)</a></li>
+        <li id="ref-11"><a href="https://www.mongodb.com/docs/manual/core/sharded-cluster-config-servers/" target="_blank" rel="noopener noreferrer">MongoDB Manual — Config Servers</a></li>
+        <li id="ref-12"><a href="https://www.mongodb.com/docs/manual/core/sharded-cluster-query-router/" target="_blank" rel="noopener noreferrer">MongoDB Manual — Routing with mongos</a></li>
+        <li id="ref-13"><a href="https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html" target="_blank" rel="noopener noreferrer">Apache Cassandra — Architecture: Dynamo (dataset partitioning, token ring, vnodes, gossip)</a></li>
+        <li id="ref-14"><a href="https://cassandra.apache.org/doc/latest/cassandra/developing/cql/ddl.html" target="_blank" rel="noopener noreferrer">Apache Cassandra — CQL Data Definition (partition key &amp; clustering columns)</a></li>
+        <li id="ref-15"><a href="https://www.cloudera.com/blog/technical/apache-hbase-region-splitting-and-merging.html" target="_blank" rel="noopener noreferrer">Enis Soztutar, “Apache HBase Region Splitting and Merging”, Hortonworks/Cloudera, 2013</a></li>
+        <li id="ref-16"><a href="https://hbase.apache.org/book.html" target="_blank" rel="noopener noreferrer">The Apache HBase Reference Guide (bản hiện hành)</a></li>
+        <li id="ref-17"><a href="https://docs.riak.com/riak/kv/latest/learn/concepts/clusters/index.html" target="_blank" rel="noopener noreferrer">Riak KV Docs — Clusters &amp; The Ring (partitions, vnodes)</a></li>
+        <li id="ref-18"><a href="https://docs.riak.com/riak/kv/latest/developing/usage/secondary-indexes/index.html" target="_blank" rel="noopener noreferrer">Riak KV Docs — Using Secondary Indexes (2i)</a></li>
+        <li id="ref-19"><a href="https://docs.couchbase.com/server/current/learn/buckets-memory-and-storage/vbuckets.html" target="_blank" rel="noopener noreferrer">Couchbase Server Docs — vBuckets (số vBucket cố định, CRC32)</a></li>
+        <li id="ref-20"><a href="https://www.elastic.co/blog/customizing-your-document-routing/" target="_blank" rel="noopener noreferrer">Zachary Tong, “Customizing Your Document Routing”, elastic.co, 2013</a> <em>(elastic.co gặp sự cố tạm thời tại thời điểm kiểm — máy chủ trả 502 và hiện trang “Temporary outage — We’re on it!” của chính Elastic; URL vẫn hợp lệ, đây không phải chặn bot)</em></li>
+        <li id="ref-21"><a href="https://www.elastic.co/docs/deploy-manage/distributed-architecture/reading-and-writing-documents" target="_blank" rel="noopener noreferrer">Elasticsearch Docs — Reading and writing documents (mô hình ghi: routing → replication group; mô hình đọc: coordinating node gom kết quả từ nhiều shard)</a></li>
+        <li id="ref-22"><a href="https://docs.oracle.com/en/database/oracle/oracle-database/23/vldbg/partition-concepts.html" target="_blank" rel="noopener noreferrer">Oracle Database VLDB and Partitioning Guide — Indexing on Partitioned Tables (local vs global)</a></li>
+        <li id="ref-23"><a href="https://zookeeper.apache.org/doc/current/zookeeperOver.html" target="_blank" rel="noopener noreferrer">Apache ZooKeeper — Overview: A Distributed Coordination Service</a></li>
+        <li id="ref-24"><a href="https://www.cs.cmu.edu/~pavlo/courses/fall2013/static/papers/dewittgray92.pdf" target="_blank" rel="noopener noreferrer">David J. DeWitt &amp; Jim N. Gray, “Parallel Database Systems: The Future of High Performance Database Systems”, CACM 35(6), 1992</a></li>
+        <li id="ref-25"><a href="https://www.metabrew.com/article/libketama-consistent-hashing-algo-memcached-clients" target="_blank" rel="noopener noreferrer">Richard Jones, “libketama: Consistent Hashing Library for Memcached Clients”, 2007</a></li>
+        <li id="ref-26"><a href="https://kafka.apache.org/intro" target="_blank" rel="noopener noreferrer">Apache Kafka — Introduction (topics partitioned across brokers; replication at topic-partition level)</a></li>
+        <li id="ref-27"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O'Reilly — trang sách chính thức (mục lục, định danh chương)</a> <em>(oreilly.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-28"><a href="https://www.elastic.co/docs/reference/elasticsearch/mapping-reference/mapping-routing-field" target="_blank" rel="noopener noreferrer">Elasticsearch Docs — trường <span lang="en">_routing</span> (công thức chọn shard, định tuyến mặc định theo <span lang="en">_id</span>, định tuyến tuỳ biến để khỏi phát tán tới mọi shard)</a></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-5-replication.html">Chương 5 — Nhân bản</a> · <a href="chapter-7-transactions.html">Chương 7 — Giao dịch</a>.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-5-replication.html">Chapter 5 — Replication</a> · <a href="chapter-7-transactions.html">Chapter 7 — Transactions</a>.</p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

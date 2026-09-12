@@ -1,0 +1,2040 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 9 &quot;Consistency and Consensus&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: khả tuyến tính hoá (linearizability) và chỗ nó khác khả tuần tự hoá, định lý CAP được phát biểu đúng phạm vi, thứ tự nhân quả và total order broadcast, 2PC/XA và đồng thuận chịu lỗi (Paxos, Raft, Zab, VSR).">
+<title>Consistency and Consensus</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 09";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 9</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 9</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 9</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 9 · Nhất quán &amp; đồng thuận</span><span class="easy-only">DDIA · Chương 9 · Nhất quán &amp; đồng thuận</span><span class="en-only" lang="en">DDIA · Chapter 9 · Consistency and Consensus</span></div>
+      <h1 id="page-title"><span class="standard-copy">Làm sao nhiều máy cùng <span class="hero-title-accent">chốt một sự thật</span></span><span class="easy-only">Nhiều máy mà nói cùng một chuyện</span><span class="en-only" lang="en">How many machines agree on <span class="hero-title-accent">one truth</span></span></h1>
+      <p class="standard-copy">Chương 8 để lại một bãi đổ nát: mạng trễ và mất gói, đồng hồ nói dối, tiến trình bị treo giữa chừng, và không nút nào biết chắc nút khác còn sống hay đã chết. Chương 9 hỏi câu tiếp theo — <strong>với nền móng bất định như thế, ta vẫn dựng được những trừu tượng có bảo đảm mạnh hay không?</strong><span class="cite"><a href="#ref-1">1</a></span> Câu trả lời của Kleppmann là có, nhưng phải trả giá; và đỉnh của các trừu tượng ấy mang một cái tên: <em lang="en">consensus</em> — làm cho mọi nút cùng quyết định một điều, và không nút nào rút lại được<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Ở chương trước, ta đã thấy máy móc trong hệ phân tán hay "nói dối": thư đi lạc, đồng hồ chạy sai, có máy im lặng mà chẳng biết nó ngủ hay chết. Vậy nhiều máy như thế có thể cùng đồng ý một chuyện không? Chương này trả lời: được, nhưng phải chịu chậm hơn và phức tạp hơn. Nhớ nhé: muốn chắc chắn thì phải chờ nhau.</p>
+      <p class="en-only" lang="en">Chapter 8 left behind a wreck: networks that delay and drop packets, clocks that lie, processes paused mid-step, and no node ever certain whether another is alive or dead. Chapter 9 asks the next question — <strong>on foundations that unreliable, can we still build abstractions with strong guarantees?</strong><span class="cite"><a href="#ref-1">1</a></span> Kleppmann's answer is yes, but at a price; and the summit of those abstractions has a name: <em>consensus</em> — getting all nodes to decide one thing, irrevocably<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Có cả một <em>phổ</em> bảo đảm nhất quán, và ta nên chọn đúng nấc thay vì mặc định lấy nấc mạnh nhất. Ở đầu mạnh là <em lang="en">linearizability</em> — hệ <strong>trông như chỉ có một bản sao duy nhất</strong> — thứ mà một số ít việc (bầu leader, khoá, ràng buộc duy nhất) thật sự cần, còn phần lớn việc thì không, vì nó tốn đồng bộ và bị giới hạn bởi độ trễ mạng<span class="cite"><a href="#ref-13">13</a></span>. Ở giữa là các bảo đảm về <strong>thứ tự</strong>: nhân quả cho ta một thứ tự <em>bộ phận</em>, còn <em lang="en">total order broadcast</em> cho ta một thứ tự <em>toàn phần</em> — và thứ tự toàn phần ấy, hoá ra, <strong>tương đương với bài toán đồng thuận</strong><span class="cite"><a href="#ref-23">23</a></span>.</p>
+          <p class="easy-only">Không phải hệ nào cũng cần "chắc chắn tuyệt đối". Có nhiều mức "đúng" khác nhau, và mức mạnh nhất thì chậm và đắt. Vài việc buộc phải dùng mức mạnh: chọn ra một người chỉ huy, giữ một cái khoá, hay bảo đảm hai người không cùng lấy một tên. Nhớ nhé: chọn mức vừa đủ cho việc của mình, đừng lúc nào cũng chọn mức đắt nhất.</p>
+          <p class="en-only" lang="en">There is a whole <em>spectrum</em> of consistency guarantees, and we should pick the right rung rather than default to the strongest. At the strong end sits <em>linearizability</em> — making a system <strong>look as if there were only a single copy of the data</strong> — which a few jobs (leader election, locks, uniqueness constraints) genuinely need and most do not, because it costs coordination and is bounded by network delay<span class="cite"><a href="#ref-13">13</a></span>. In between are <strong>ordering</strong> guarantees: causality gives a <em>partial</em> order, while <em>total order broadcast</em> gives a <em>total</em> one — and that total order turns out to be <strong>equivalent to the consensus problem</strong><span class="cite"><a href="#ref-23">23</a></span>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Ba trục của Chương 9: khả tuyến tính hoá, bảo đảm thứ tự, và đồng thuận / The three axes of Chapter 9: linearizability, ordering guarantees, and consensus">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">NHIỀU BẢN SAO<br>MỘT SỰ THẬT?</span><span class="en-only" lang="en">MANY REPLICAS<br>ONE TRUTH?</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Linearizability</span><span class="en-only" lang="en">Linearizability</span></b>
+        <small class="standard-copy">Hệ trông như chỉ có một bản sao duy nhất</small>
+        <small class="easy-only">Làm như chỉ có một cuốn sổ duy nhất.</small>
+        <small class="en-only" lang="en">The system looks like a single copy of the data</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Ordering</span><span class="en-only" lang="en">Ordering</span></b>
+        <small class="standard-copy">Nhân quả: thứ tự bộ phận; broadcast: toàn phần</small>
+        <small class="easy-only">Chuyện nào xảy ra trước chuyện nào.</small>
+        <small class="en-only" lang="en">Causality is partial; broadcast is total</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Consensus</span><span class="en-only" lang="en">Consensus</span></b>
+        <small class="standard-copy">Mọi nút chốt cùng một quyết định, không rút lại</small>
+        <small class="easy-only">Cả nhóm chốt một câu trả lời chung.</small>
+        <small class="en-only" lang="en">All nodes decide the same thing, irrevocably</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#linearizability"><span><span class="vi-only">Trục 1</span><span class="en-only" lang="en">Axis 1</span></span><b class="standard-copy">Khả tuyến tính hoá — và chỗ nó khác khả tuần tự hoá</b><b class="easy-only">Làm như chỉ có một cuốn sổ</b><b class="en-only" lang="en">Linearizability — and how it differs from serializability</b></a>
+    <a href="#cost-of-linearizability"><span><span class="vi-only">Trục 2</span><span class="en-only" lang="en">Axis 2</span></span><b class="standard-copy">Nơi thật sự cần nó, cách làm, và cái giá</b><b class="easy-only">Khi nào cần, và tốn gì</b><b class="en-only" lang="en">Where it's needed, how it's built, what it costs</b></a>
+    <a href="#ordering-and-causality"><span><span class="vi-only">Trục 3</span><span class="en-only" lang="en">Axis 3</span></span><b class="standard-copy">Thứ tự, nhân quả và phát sóng theo thứ tự toàn phần</b><b class="easy-only">Chuyện nào trước, chuyện nào sau</b><b class="en-only" lang="en">Ordering, causality and total order broadcast</b></a>
+    <a href="#consensus"><span><span class="vi-only">Trục 4</span><span class="en-only" lang="en">Axis 4</span></span><b class="standard-copy">Giao dịch phân tán, 2PC và đồng thuận chịu lỗi</b><b class="easy-only">Cả nhóm chốt một câu trả lời</b><b class="en-only" lang="en">Distributed transactions, 2PC and fault-tolerant consensus</b></a>
+    <a href="#diagnostic"><span><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></span><b class="standard-copy">Soi nhu cầu đồng bộ trong hệ của bạn</b><b class="easy-only">Câu hỏi tự hỏi mình</b><b class="en-only" lang="en">Audit the coordination your system really needs</b></a>
+  </nav>
+
+  <section class="section" id="linearizability" aria-labelledby="linearizability-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">Linearizability</span></span><span class="en-only" lang="en">Axis 1 · Linearizability</span></div>
+        <h2 id="linearizability-title"><span class="vi-only">Ảo giác “chỉ có một bản sao”</span><span class="en-only" lang="en">The illusion of a single copy</span></h2>
+      </div>
+      <p class="standard-copy">Khi dữ liệu được nhân bản, người dùng có thể thấy những phiên bản khác nhau tuỳ họ hỏi bản sao nào. <em lang="en">Linearizability</em> — khả tuyến tính hoá, còn gọi là <em lang="en">atomic consistency</em> — xoá bỏ điều đó bằng một lời hứa duy nhất: <strong>làm cho hệ trông như thể chỉ tồn tại một bản sao dữ liệu duy nhất, và mọi thao tác trên nó là tức thời</strong><span class="cite"><a href="#ref-5">5</a></span>. Kleppmann phát biểu ý đó một cách trực giác: nếu thao tác B bắt đầu <em>sau khi</em> thao tác A đã hoàn tất, thì B phải thấy hệ ở đúng trạng thái A để lại, hoặc mới hơn<span class="cite"><a href="#ref-9">9</a></span>. Vì thế nó là một <strong>bảo đảm về tính mới</strong> (<span lang="en">recency guarantee</span>), không phải một bảo đảm về giao dịch.</p>
+      <p class="easy-only">Tưởng tượng cả lớp cùng ghi điểm vào <strong>nhiều cuốn sổ</strong> đặt ở nhiều phòng. Hỏi phòng này ra một con số, hỏi phòng kia ra con số khác — vì có sổ chưa kịp chép. "Khả tuyến tính hoá" nghĩa là: dù thật ra có nhiều cuốn sổ, ai hỏi ở đâu cũng thấy y như <strong>chỉ có một cuốn sổ duy nhất</strong>, và cuốn đó luôn mới nhất. Nhớ nhé: nhiều sổ mà xem như một sổ.</p>
+      <p class="en-only" lang="en">When data is replicated, users may see different versions depending on which replica they ask. <em>Linearizability</em> — also called <em>atomic consistency</em> — abolishes that with a single promise: <strong>make the system look as though only one copy of the data exists, and every operation on it is instantaneous</strong><span class="cite"><a href="#ref-5">5</a></span>. Kleppmann states it intuitively: if operation B starts <em>after</em> operation A has completed, then B must see the system in the state A left it in, or a newer one<span class="cite"><a href="#ref-9">9</a></span>. It is therefore a <strong>recency guarantee</strong>, not a guarantee about transactions.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Linearizability — a recency guarantee on a single object</div>
+        <p class="definition standard-copy">Định nghĩa hình thức thuộc về Herlihy &amp; Wing (1990): mỗi thao tác đồng thời <em>tỏ ra</em> như diễn ra tức thời tại một thời điểm nào đó nằm giữa lúc nó được gọi và lúc nó trả về<span class="cite"><a href="#ref-5">5</a></span>. Hệ quả rất thực dụng: một khi giá trị mới đã được đọc thấy, mọi lần đọc sau đó không được quay lại giá trị cũ — không có chuyện "lùi thời gian".</p>
+        <p class="definition easy-only">Nói gọn: mỗi việc <em>coi như</em> xảy ra trong một khoảnh khắc, và một khi ai đó đã thấy giá trị mới thì không ai được thấy lại giá trị cũ nữa. Nhớ nhé: đã mới rồi thì không lùi về cũ.</p>
+        <p class="definition en-only" lang="en">The formal definition belongs to Herlihy &amp; Wing (1990): each concurrent operation <em>appears</em> to take effect instantaneously at some point between its invocation and its response<span class="cite"><a href="#ref-5">5</a></span>. The practical consequence: once a newer value has been read, no later read may go back to the older one — no time travel.</p>
+        <p class="deep-only">Điểm tinh tế mà Kleppmann nhấn: khả tuyến tính hoá là một tính chất <em>có thể ghép</em> (<span lang="en">composable</span>, hay "local") — nếu từng đối tượng trong hệ đều khả tuyến tính hoá thì toàn hệ cũng vậy<span class="cite"><a href="#ref-6">6</a></span>. Đây chính là chỗ nó khác hẳn khả tuần tự hoá, vốn <em>không</em> ghép được. Tính ghép được là lý do khả tuyến tính hoá là bảo đảm tự nhiên cho những "nguyên thuỷ" nhỏ như thanh ghi, khoá, bộ đếm — và cũng là lý do nó đắt: mỗi đối tượng đều phải trả phí đồng bộ riêng của nó.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba mệnh đề nền tảng về khả tuyến tính hoá">
+        <div class="equation-row">
+          <b>Một bản sao</b>
+          <span>Dù có bao nhiêu bản sao vật lý, hệ phải <em>trông như</em> chỉ có một bản duy nhất.</span>
+        </div>
+        <div class="equation-row">
+          <b>Tính mới, không phải cô lập</b>
+          <span>Nó nói về việc đọc được giá trị mới nhất, không nói gì về gộp nhiều thao tác thành giao dịch.</span>
+        </div>
+        <div class="equation-row">
+          <b>Thời gian thực</b>
+          <span>Thứ tự phải khớp với thời gian tường: xong trước thì phải được thấy trước.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về khả tuyến tính hoá">
+        <div class="equation-row">
+          <b>Như một cuốn sổ</b>
+          <span>Nhiều sổ nhưng ai xem cũng thấy giống hệt nhau.</span>
+        </div>
+        <div class="equation-row">
+          <b>Luôn mới nhất</b>
+          <span>Đã thấy số mới thì không được thấy lại số cũ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Theo đồng hồ thật</b>
+          <span>Việc xong trước thì phải được nhìn thấy trước.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about linearizability">
+        <div class="equation-row">
+          <b>A single copy</b>
+          <span>However many physical replicas exist, the system must <em>look</em> like just one.</span>
+        </div>
+        <div class="equation-row">
+          <b>Recency, not isolation</b>
+          <span>It is about reading the latest value, and says nothing about grouping operations into transactions.</span>
+        </div>
+        <div class="equation-row">
+          <b>Real time</b>
+          <span>The order must match wall-clock order: finished earlier must be visible earlier.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The recency guarantee, precisely</div>
+          <h3><span class="vi-only">Không lùi về giá trị cũ</span><span class="en-only" lang="en">No going back to a stale value</span></h3>
+          <p class="standard-copy">Khả tuyến tính hoá ràng buộc <strong>thứ tự thực</strong> chứ không chỉ thứ tự logic. Tài liệu của etcd diễn đạt hệ quả này rất gọn: nếu một client hoàn tất một lần ghi tại thời điểm <em>t1</em>, thì một lần đọc khởi phát tại <em>t2 &gt; t1</em> phải trả về giá trị ít nhất mới bằng lần ghi đó<span class="cite"><a href="#ref-31">31</a></span>. Điều này buộc mọi bản sao phải phối hợp với nhau: không bản sao nào được phép trả lời bằng dữ liệu tụt hậu.</p>
+          <p class="easy-only">Bạn vừa nộp bài lúc 9 giờ. Bạn của bạn hỏi lúc 9 giờ 01 thì phải nghe "đã nộp rồi", chứ không được nghe "chưa nộp". Nhớ nhé: chuyện đã xong rồi thì không ai được nói là chưa.</p>
+          <p class="en-only" lang="en">Linearizability constrains <strong>real-time order</strong>, not merely logical order. etcd's documentation puts the consequence crisply: if a client completes a write at <em>t1</em>, a read issued at <em>t2 &gt; t1</em> must return a value at least as recent as that write<span class="cite"><a href="#ref-31">31</a></span>. That forces every replica to coordinate: no replica may answer from stale data.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Bất cứ khi nào bạn nói "đọc-sau-khi-ghi phải thấy được", bạn đang đòi một mẩu khả tuyến tính hoá — và đang đòi một khoản đồng bộ đi kèm.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Mỗi khi bạn muốn "vừa lưu là phải thấy ngay", bạn đang đòi điều này.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Whenever you say "a read after a write must see it," you are asking for a slice of linearizability — and for the coordination that comes with it.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cơ chế</h4>
+              <p>Vì thứ tự phải khớp thời gian thực, một hiện thực khả tuyến tính hoá không thể chỉ dựa vào bộ nhớ đệm cục bộ. Mọi lần đọc hoặc phải đi qua một điểm tuần tự hoá duy nhất (leader), hoặc phải hỏi đủ một quorum rồi sửa lại các bản tụt hậu trước khi trả lời<span class="cite"><a href="#ref-14">14</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Kiểm chứng khó</h4>
+              <p>Kiểm tra một hệ có khả tuyến tính hoá hay không là việc tốn kém: phải ghi lại dấu thời gian gọi/trả của mọi thao tác rồi tìm xem có tồn tại một thứ tự hợp lệ nào không<span class="cite"><a href="#ref-9">9</a></span>. Đó là bài toán tìm kiếm, không phải phép kiểm tra cục bộ — nên vi phạm thường chỉ lộ ra dưới tải nặng và lỗi mạng.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Linearizability ≠ Serializability</div>
+          <h3><span class="vi-only">Hai chữ “nhất quán” không cùng nghĩa</span><span class="en-only" lang="en">Two different words that both sound like “consistency”</span></h3>
+          <p class="standard-copy">Đây là cặp bị trộn lẫn nhiều nhất trong ngành, và Kleppmann tách bạch rất rõ<span class="cite"><a href="#ref-1">1</a></span>. <strong>Khả tuyến tính hoá</strong> là bảo đảm về <em>tính mới</em> cho <strong>một thao tác trên một đối tượng</strong>, có ràng buộc thời gian thực. <strong>Khả tuần tự hoá</strong> (Chương 7) là bảo đảm về <em>cô lập giao dịch</em> cho <strong>nhóm thao tác trên nhiều đối tượng</strong>, chỉ đòi kết quả tương đương <em>một</em> thứ tự tuần tự nào đó — và <strong>không</strong> ràng buộc thứ tự ấy phải khớp thời gian thực<span class="cite"><a href="#ref-6">6</a></span>. Ghép cả hai lại mới ra <em lang="en">strict serializability</em><span class="cite"><a href="#ref-7">7</a></span>.</p>
+          <p class="easy-only">Hai điều nghe giống nhau nhưng khác hẳn. Điều thứ nhất: "ai hỏi cũng thấy con số mới nhất" — nói về <strong>một ô dữ liệu</strong>. Điều thứ hai: "nhiều việc làm cùng lúc mà kết quả giống như làm lần lượt" — nói về <strong>cả nhóm việc</strong>. Nhớ nhé: một cái lo dữ liệu có mới không, cái kia lo các việc có giẫm chân nhau không.</p>
+          <p class="en-only" lang="en">This is the industry's most-confused pair, and Kleppmann keeps them apart<span class="cite"><a href="#ref-1">1</a></span>. <strong>Linearizability</strong> is a <em>recency</em> guarantee for <strong>a single operation on a single object</strong>, with a real-time constraint. <strong>Serializability</strong> (Chapter 7) is a <em>transaction isolation</em> guarantee for <strong>groups of operations over many objects</strong>, requiring only that the result be equivalent to <em>some</em> serial order — and <strong>not</strong> requiring that order to match real time<span class="cite"><a href="#ref-6">6</a></span>. Combining the two yields <em>strict serializability</em><span class="cite"><a href="#ref-7">7</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bằng chứng chúng tách rời</strong><span lang="en">PostgreSQL</span> với <span lang="en">Serializable Snapshot Isolation</span> cho khả tuần tự hoá nhưng <em>không</em> cho khả tuyến tính hoá — nhãn “ACID” không hề kéo theo nghĩa “nhất quán” của CAP<span class="cite"><a href="#ref-9">9</a></span>.</div>
+            <div class="easy-only"><strong>Bằng chứng</strong>Có cơ sở dữ liệu làm tốt việc "không giẫm chân nhau" mà vẫn cho đọc ra số cũ. Hai điều đó độc lập với nhau.</div>
+            <div class="en-only" lang="en"><strong>Proof they come apart</strong>PostgreSQL under Serializable Snapshot Isolation provides serializability but <em>not</em> linearizability — the “ACID” label does not imply CAP's sense of “consistency”<span class="cite"><a href="#ref-9">9</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Quan hệ hình thức</h4>
+              <p>Herlihy &amp; Wing nhận xét rằng khả tuyến tính hoá có thể xem là <em>trường hợp riêng</em> của <span lang="en">strict serializability</span>, khi mỗi giao dịch bị thu lại thành đúng một thao tác trên đúng một đối tượng<span class="cite"><a href="#ref-6">6</a></span>. Vì vậy nói "linearizable nên serializable" là sai chiều: nó chỉ đúng cho giao dịch một-thao-tác.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ghép được hay không</h4>
+              <p>Khả tuyến tính hoá <em>ghép được</em>: ghép các đối tượng khả tuyến tính hoá lại vẫn được một hệ khả tuyến tính hoá. Khả tuần tự hoá thì <em>không</em> — hai hệ con cùng khả tuần tự hoá vẫn có thể sinh ra một lịch sử chung không khả tuần tự hoá<span class="cite"><a href="#ref-6">6</a></span>. Đây là khác biệt kỹ thuật, không phải chuyện chữ nghĩa.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">“Eventual consistency” is a very weak promise</div>
+          <h3><span class="vi-only">“Rồi sẽ nhất quán” — nhưng bao giờ?</span><span class="en-only" lang="en">“Eventually consistent” — but when?</span></h3>
+          <p class="standard-copy">Ở đầu kia của phổ là <em lang="en">eventual consistency</em>: nếu ngừng ghi một lúc, cuối cùng mọi bản sao sẽ hội tụ về cùng giá trị. Kleppmann gọi đây là một bảo đảm <strong>rất yếu</strong>, vì nó không nói gì về <em>bao giờ</em> — và "cuối cùng" là một mệnh đề không có giới hạn thời gian. Bailis &amp; Ghodsi cũng lập luận rằng cái tên dễ gây hiểu lầm và một tên chính xác hơn sẽ là <em lang="en">convergence</em>, sự hội tụ<span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <p class="easy-only">"Rồi sẽ giống nhau" nghe thì yên tâm, nhưng không ai hứa là bao lâu: một giây, một phút, hay tới khi bạn đã đi ngủ? Nhớ nhé: một lời hứa không kèm thời hạn thì gần như không phải lời hứa.</p>
+          <p class="en-only" lang="en">At the other end of the spectrum sits <em>eventual consistency</em>: stop writing for a while and all replicas will converge on the same value. Kleppmann calls this a <strong>very weak</strong> guarantee, because it says nothing about <em>when</em> — and "eventually" carries no time bound. Bailis &amp; Ghodsi likewise argue the name misleads, and that a more accurate one would be <em>convergence</em><span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả khi lập trình</strong>Với nhất quán cuối, mọi lần đọc đều có thể là dữ liệu cũ. Lỗi sinh ra từ đó thường chỉ lộ ra khi mạng trục trặc hoặc tải cao — đúng lúc bạn ít muốn gặp nó nhất.</div>
+            <div class="easy-only"><strong>Hệ quả</strong>Bạn phải luôn chuẩn bị cho việc đọc ra số cũ, và chỉ khi hệ "bận" bạn mới thấy vấn đề.</div>
+            <div class="en-only" lang="en"><strong>What it means for your code</strong>Under eventual consistency any read may be stale. The bugs that follow tend to surface only under network trouble or heavy load — exactly when you least want them.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Phổ, không phải công tắc</h4>
+              <p>Giữa hai đầu còn nhiều nấc: đọc-thấy-cái-mình-ghi, đọc đơn điệu, tiền tố nhất quán, nhất quán nhân quả. Kleppmann dựng cả chương quanh ý niệm <em>phổ</em> này thay vì một công tắc bật/tắt<span class="cite"><a href="#ref-1">1</a></span> — và mục tiêu kỹ thuật là chọn nấc rẻ nhất còn đủ cho bài toán.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao vẫn phổ biến</h4>
+              <p>Vì nó cho phép mỗi bản sao trả lời ngay mà không hỏi ai, nên chịu được phân vùng mạng và có độ trễ thấp. Cái giá nằm ở chỗ gánh nặng xử lý xung đột và dữ liệu cũ bị đẩy sang tầng ứng dụng<span class="cite"><a href="#ref-8">8</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ định nghĩa sang hoá đơn</strong>
+      <strong class="en-only" lang="en">From the definition to the bill</strong>
+      <span class="standard-copy">Định nghĩa thì đẹp; câu hỏi kỹ thuật là ai thật sự cần nó, dựng bằng gì, và phải trả bao nhiêu. Ba câu ấy dẫn thẳng tới định lý CAP — và tới một định lý khác, ít nổi tiếng hơn nhưng cũng nghiêm khắc không kém, về độ trễ.</span>
+      <span class="easy-only">Định nghĩa xong rồi, giờ hỏi tiếp: việc nào bắt buộc phải dùng mức mạnh này, và dùng nó thì tốn gì?</span>
+      <span class="en-only" lang="en">The definition is elegant; the engineering questions are who actually needs it, what it is built from, and what it costs. Those three lead straight to the CAP theorem — and to another, less famous but no less strict, result about latency.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="cost-of-linearizability" aria-labelledby="cost-of-linearizability-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · <span lang="en">Where it's needed &amp; what it costs</span></span><span class="en-only" lang="en">Axis 2 · Where it's needed &amp; what it costs</span></div>
+        <h2 id="cost-of-linearizability-title"><span class="vi-only">Vài việc thật sự cần nó — và hoá đơn đi kèm</span><span class="en-only" lang="en">A few jobs genuinely need it — and the bill that follows</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann không khuyên dùng khả tuyến tính hoá ở khắp nơi; ông khoanh lại một danh sách ngắn những chỗ mà thiếu nó là hệ <em>sai</em>, chứ không chỉ là chậm cập nhật: <strong>bầu leader và khoá phân tán</strong>, <strong>ràng buộc duy nhất</strong>, và <strong>phụ thuộc thời gian xuyên kênh</strong><span class="cite"><a href="#ref-1">1</a></span>. Ở mọi chỗ còn lại, cái giá — đồng bộ, độ trễ, và khả năng phục vụ khi mạng đứt — thường không đáng.</p>
+      <p class="easy-only">Không phải chỗ nào cũng cần mức chắc chắn nhất. Nhưng có vài việc mà thiếu nó là <strong>sai hẳn</strong>, không phải chỉ chậm: chọn ra đúng một người chỉ huy, giữ đúng một cái khoá, và bảo đảm hai người không cùng lấy một cái tên hay một chỗ ngồi. Nhớ nhé: chỉ vài việc mới đáng trả giá đắt.</p>
+      <p class="en-only" lang="en">Kleppmann does not recommend linearizability everywhere; he fences off a short list of places where its absence makes a system <em>wrong</em>, not merely slow to update: <strong>leader election and distributed locks</strong>, <strong>uniqueness constraints</strong>, and <strong>cross-channel timing dependencies</strong><span class="cite"><a href="#ref-1">1</a></span>. Everywhere else the bill — coordination, latency and the ability to serve while the network is broken — is usually not worth paying.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">The cost is not optional — it is a theorem</div>
+        <p class="definition standard-copy">Hai kết quả hình thức đóng khung cái giá. Thứ nhất, định lý CAP: khi có phân vùng mạng, một hệ không thể vừa khả tuyến tính hoá vừa khả dụng theo nghĩa hình thức<span class="cite"><a href="#ref-11">11</a></span>. Thứ hai, và ít được nhắc hơn: ngay cả khi mạng hoàn toàn lành, thời gian phản hồi của các thao tác đọc/ghi khả tuyến tính hoá vẫn <strong>tỉ lệ với độ bất định của độ trễ mạng</strong><span class="cite"><a href="#ref-13">13</a></span>.</p>
+        <p class="definition easy-only">Có hai điều đã được chứng minh chắc chắn. Một: khi đường dây bị đứt, không thể vừa "luôn đúng nhất" vừa "luôn trả lời được". Hai: kể cả lúc đường dây tốt, muốn "luôn đúng nhất" thì vẫn phải chờ — càng chờ lâu nếu đường truyền càng thất thường. Nhớ nhé: cái giá này không né được.</p>
+        <p class="definition en-only" lang="en">Two formal results frame the cost. First, the CAP theorem: under a network partition a system cannot be both linearizable and available in the formal sense<span class="cite"><a href="#ref-11">11</a></span>. Second, and less often quoted: even on a perfectly healthy network, the response time of linearizable reads and writes is necessarily <strong>proportional to the uncertainty of delays in the network</strong><span class="cite"><a href="#ref-13">13</a></span>.</p>
+        <p class="deep-only">Kết quả thứ hai đáng chú ý vì nó bác bỏ cách đọc CAP quen thuộc: người ta hay nghĩ đánh đổi chỉ xuất hiện khi có sự cố. Attiya &amp; Welch chỉ ra đánh đổi tồn tại <em>mọi lúc</em>, dưới dạng độ trễ<span class="cite"><a href="#ref-13">13</a></span>. Kleppmann còn dẫn một minh hoạ gần gũi hơn: ngay cả CPU trong máy của bạn cũng không cho truy cập RAM một cách khả tuyến tính hoá — mỗi lõi có bộ nhớ đệm riêng, và muốn có bảo đảm mạnh thì phải chèn chỉ thị <span lang="en">memory barrier</span><span class="cite"><a href="#ref-9">9</a></span>. Nói cách khác, việc từ bỏ khả tuyến tính hoá vì hiệu năng là quyết định mà cả phần cứng lẫn phần mềm đều đã chọn từ lâu.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nơi thật sự cần khả tuyến tính hoá">
+        <div class="equation-row">
+          <b>Khoá &amp; leader</b>
+          <span>Phải có đúng một người giữ khoá; hai người cùng tin mình giữ khoá là <span lang="en">split brain</span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Ràng buộc duy nhất</b>
+          <span>Tên đăng nhập, số ghế, số dư không âm — đều cần một điểm quyết định duy nhất.</span>
+        </div>
+        <div class="equation-row">
+          <b>Xuyên kênh</b>
+          <span>Khi hai bên còn liên lạc qua kênh khác (lời nói, hàng đợi), dữ liệu cũ trở thành mâu thuẫn thấy được.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba nơi bắt buộc phải chắc chắn">
+        <div class="equation-row">
+          <b>Một chỉ huy</b>
+          <span>Không được có hai người cùng tưởng mình chỉ huy.</span>
+        </div>
+        <div class="equation-row">
+          <b>Một chỗ ngồi</b>
+          <span>Không được bán cùng một ghế cho hai người.</span>
+        </div>
+        <div class="equation-row">
+          <b>Có người mách</b>
+          <span>Khi bạn nghe tin từ người khác rồi mới đi xem, xem ra số cũ là lộ ngay.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three places that genuinely need linearizability">
+        <div class="equation-row">
+          <b>Locks &amp; leaders</b>
+          <span>Exactly one holder; two nodes each believing they hold the lock is split brain.</span>
+        </div>
+        <div class="equation-row">
+          <b>Uniqueness</b>
+          <span>Usernames, seat numbers, non-negative balances — all need a single point of decision.</span>
+        </div>
+        <div class="equation-row">
+          <b>Cross-channel</b>
+          <span>When two parties also talk over another channel, staleness becomes a visible contradiction.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Locking and leader election</div>
+          <h3><span class="vi-only">Đúng một leader, đúng một người giữ khoá</span><span class="en-only" lang="en">Exactly one leader, exactly one lock holder</span></h3>
+          <p class="standard-copy">Sao chép một-leader đòi hỏi <strong>đúng một</strong> nút là leader; nếu hai nút cùng tin mình là leader, dữ liệu sẽ phân nhánh và mất mát. Vì thế bầu leader thường được giao cho một dịch vụ điều phối như <span lang="en">ZooKeeper</span> hay <span lang="en">etcd</span>, và cái khoá mà các ứng viên tranh nhau phải là một khoá <em>khả tuyến tính hoá</em>: mọi nút phải đồng ý ai đang giữ<span class="cite"><a href="#ref-28">28</a></span>.</p>
+          <p class="easy-only">Trong một trò chơi, chỉ được có một đội trưởng. Nếu hai bạn cùng tưởng mình là đội trưởng thì cả đội sẽ nhận hai mệnh lệnh trái nhau. Nhớ nhé: cái "gậy chỉ huy" phải là thứ mà ai nhìn vào cũng thấy đang ở trong tay đúng một người.</p>
+          <p class="en-only" lang="en">Single-leader replication requires <strong>exactly one</strong> leader; if two nodes each believe they are leader, data forks and is lost. So leader election is usually delegated to a coordination service such as ZooKeeper or etcd, and the lock the candidates contend for must be a <em>linearizable</em> one: every node must agree on who holds it<span class="cite"><a href="#ref-28">28</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mọi khoá phân tán, mọi hàng rào "chỉ một tiến trình được chạy tác vụ này", mọi cơ chế chống <span lang="en">split brain</span> đều là khả tuyến tính hoá đội lốt.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Bất cứ chỗ nào cần "chỉ một người được làm việc này tại một lúc".</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every distributed lock, every "only one process may run this job" fence, every anti-split-brain mechanism is linearizability in disguise.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Khoá thôi chưa đủ</h4>
+              <p>Kleppmann lập luận riêng ở một bài khác rằng ngay cả khoá khả tuyến tính hoá cũng chưa đủ nếu tài nguyên được bảo vệ không kiểm tra gì: một tiến trình bị treo dài (<span lang="en">GC pause</span>) có thể tỉnh dậy sau khi khoá đã hết hạn và vẫn ghi đè. Lời giải là <em lang="en">fencing token</em> — một số tăng đơn điệu cấp kèm khoá, và kho lưu trữ từ chối mọi ghi mang số cũ hơn<span class="cite"><a href="#ref-15">15</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao là dịch vụ riêng</h4>
+              <p>Bầu leader là bài toán đồng thuận thu nhỏ. Thay vì mỗi hệ tự cài một thuật toán đồng thuận (dễ sai), thực tiễn phổ biến là "thuê ngoài": đẩy phần khó sang một cụm ZooKeeper/etcd nhỏ và để ứng dụng chỉ gọi API<span class="cite"><a href="#ref-28">28</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Uniqueness &amp; cross-channel timing dependencies</div>
+          <h3><span class="vi-only">Khi người dùng có một “kênh phụ”</span><span class="en-only" lang="en">When users have a side channel</span></h3>
+          <p class="standard-copy">Ràng buộc duy nhất — một tên đăng nhập, một ghế, một số dư không âm — bản chất là một quyết định phải được chốt tại một điểm duy nhất, tức là một dạng đồng thuận. Tinh vi hơn là <strong>phụ thuộc thời gian xuyên kênh</strong>: Kleppmann kể chuyện Alice và Bob cùng xem kết quả chung kết World Cup 2014; Alice tải lại trang, thấy kết quả và reo lên; Bob nghe thấy rồi mới bấm tải lại, nhưng request của anh rơi vào một bản sao đang tụt hậu và màn hình báo trận đấu <em>vẫn đang diễn ra</em><span class="cite"><a href="#ref-9">9</a></span>. Cái làm cho dữ liệu cũ trở thành <em>sai</em> chính là kênh liên lạc thứ hai — tiếng nói giữa hai người.</p>
+          <p class="easy-only">Bạn và bạn cùng bàn xem cùng một trận bóng trên hai điện thoại. Bạn ấy thấy kết quả và hét lên; bạn bấm xem ngay sau đó nhưng máy bạn vẫn báo "đang đá". Nếu bạn ấy im lặng thì bạn chẳng thấy gì lạ. Nhớ nhé: dữ liệu cũ chỉ thành chuyện lớn khi có một đường tin khác chạy nhanh hơn.</p>
+          <p class="en-only" lang="en">A uniqueness constraint — one username, one seat, one non-negative balance — is at bottom a decision that must be settled at a single point, which is a form of consensus. Subtler is the <strong>cross-channel timing dependency</strong>: Kleppmann tells of Alice and Bob watching the 2014 World Cup final; Alice reloads, sees the result and exclaims; Bob only then hits reload, but his request lands on a lagging replica and his screen says the match is <em>still in progress</em><span class="cite"><a href="#ref-9">9</a></span>. What turns staleness into <em>wrongness</em> is that second channel — the two of them talking.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thiết kế</strong>Khi xây một kho dữ liệu, bạn không biết client của mình có những kênh phụ nào. Muốn an toàn trước mọi kênh phụ, bạn buộc phải làm hệ trông như chỉ có một bản sao<span class="cite"><a href="#ref-9">9</a></span>.</div>
+            <div class="easy-only"><strong>Bài học</strong>Bạn không đoán được người dùng còn nói chuyện với nhau bằng cách nào — nên hoặc chấp nhận rủi ro, hoặc làm cho mọi nơi luôn giống nhau.</div>
+            <div class="en-only" lang="en"><strong>Design consequence</strong>When you build a datastore you cannot know what back channels your clients have. To be safe against all of them you must make the system look as though there were a single copy<span class="cite"><a href="#ref-9">9</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Chính tài liệu ZooKeeper cũng cảnh báo</h4>
+              <p>Tài liệu ZooKeeper nêu đúng tình huống này như một ngộ nhận thường gặp: ZooKeeper <em>không</em> hứa rằng hai client bất kỳ luôn thấy cùng một ảnh chụp tại cùng một khoảnh khắc. Nếu client A ghi <code>/a</code> từ 0 thành 1 rồi bảo client B đọc, B vẫn có thể đọc ra 0 tuỳ nó đang nối tới máy chủ nào; muốn chắc, B phải gọi <code>sync()</code> trước khi đọc<span class="cite"><a href="#ref-30">30</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cùng một hình dạng</h4>
+              <p>Ví dụ Alice/Bob và ví dụ A/B của ZooKeeper là <strong>một</strong> bài toán: thông tin đi vòng qua một kênh nhanh hơn đường sao chép dữ liệu. Nhận ra hình dạng này trong hệ của mình (hàng đợi tin nhắn, webhook, một người dùng gọi điện cho người kia) thường quan trọng hơn là thuộc lòng định nghĩa.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">How linearizable systems are actually built</div>
+          <h3><span class="vi-only">Ba cách hiện thực, hai cái có bẫy</span><span class="en-only" lang="en">Three implementations, two with traps</span></h3>
+          <p class="standard-copy">Cách chắc chắn nhất là <strong>đồng thuận</strong>: mọi thao tác đi qua một nhật ký được sắp thứ tự toàn phần, như ZooKeeper hay etcd làm<span class="cite"><a href="#ref-31">31</a></span>. <strong>Sao chép một-leader</strong> có <em>tiềm năng</em> khả tuyến tính hoá nếu mọi lần đọc đều đi qua leader — nhưng chỉ khi leader biết chắc mình vẫn là leader, điều mà Chương 8 đã cho thấy là không hiển nhiên. <strong>Quorum</strong> (đọc và ghi đều hỏi đa số) có thể khả tuyến tính hoá nếu kèm <em lang="en">read repair</em> đồng bộ<span class="cite"><a href="#ref-14">14</a></span>; nhưng với các hệ kiểu Dynamo dùng <span lang="en">sloppy quorum</span>, Kleppmann khuyên <strong>đừng trông cậy</strong> vào điều đó<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="easy-only">Có ba cách làm cho "nhiều cuốn sổ giống như một cuốn". Một: mọi người chỉ được ghi vào một cuốn chính. Hai: hỏi ý quá nửa số cuốn rồi mới trả lời. Ba: dùng một dịch vụ chuyên làm việc này. Nhớ nhé: cách nào cũng phải hỏi người khác trước khi trả lời — nên chậm hơn.</p>
+          <p class="en-only" lang="en">The surest route is <strong>consensus</strong>: every operation passes through a totally-ordered log, as ZooKeeper and etcd do<span class="cite"><a href="#ref-31">31</a></span>. <strong>Single-leader replication</strong> is <em>potentially</em> linearizable if all reads go through the leader — but only if the leader truly knows it is still the leader, which Chapter 8 showed is not obvious. <strong>Quorums</strong> (majority reads and writes) can be linearizable with synchronous <em>read repair</em><span class="cite"><a href="#ref-14">14</a></span>; but for Dynamo-style stores with sloppy quorums Kleppmann advises <strong>not</strong> to rely on it<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc kỹ cấu hình</strong>Cùng một sản phẩm có thể khả tuyến tính hoá ở chế độ này và không ở chế độ kia. Câu hỏi đúng không phải "cơ sở dữ liệu X có nhất quán không" mà "thao tác này, ở cấu hình này, bảo đảm gì".</div>
+            <div class="easy-only"><strong>Nhớ hỏi</strong>Đừng hỏi "phần mềm này có chắc không", hãy hỏi "việc cụ thể này, cài đặt như thế này, chắc tới đâu".</div>
+            <div class="en-only" lang="en"><strong>Read the configuration</strong>The same product can be linearizable in one mode and not another. The right question is not "is database X consistent?" but "what does <em>this</em> operation, in <em>this</em> configuration, guarantee?"</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao quorum vẫn có thể hỏng</h4>
+              <p>Kleppmann liệt kê những tổ hợp tính năng khiến quorum mất tính khả tuyến tính hoá: <span lang="en">sloppy quorum</span> ghi tạm sang nút khác, <span lang="en">read repair</span> làm sống lại dữ liệu đã xoá, hoặc số bản sao trôi lệch khỏi <em>N</em> ban đầu khiến điều kiện <em>w + r &gt; n</em> không còn đúng<span class="cite"><a href="#ref-9">9</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Bản sao bất đồng bộ thì chắc chắn không</h4>
+              <p>Sao chép đa-leader và sao chép không đồng bộ không thể khả tuyến tính hoá: mỗi bên chấp nhận ghi mà không hỏi bên kia, nên tồn tại những lịch sử không thể xếp vào một trật tự thời gian thực duy nhất<span class="cite"><a href="#ref-9">9</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The CAP theorem, stated precisely</div>
+          <h3><span class="vi-only">CAP: một định lý hẹp bị dùng quá rộng</span><span class="en-only" lang="en">CAP: a narrow theorem used far too broadly</span></h3>
+          <p class="standard-copy">Phát biểu hình thức của CAP — do Gilbert &amp; Lynch chứng minh năm 2002 từ phỏng đoán của Brewer — <strong>rất hẹp</strong><span class="cite"><a href="#ref-11">11</a></span>. Kleppmann liệt kê từng ràng buộc<span class="cite"><a href="#ref-1">1</a></span>: “nhất quán” ở đây <em>chỉ</em> có nghĩa là khả tuyến tính hoá, không phải chữ C trong ACID; “khả dụng” nghĩa là <em>mọi</em> nút còn sống phải trả lời không-lỗi cho <em>mọi</em> yêu cầu; mô hình hệ chỉ là <strong>một thanh ghi đọc-ghi duy nhất</strong>; lỗi duy nhất được xét là <strong>phân vùng mạng</strong>; và định lý <strong>không nói gì về độ trễ</strong><span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="easy-only">Có một câu nói nổi tiếng: "chọn 2 trong 3". Nhưng câu gốc của các nhà toán học chặt chẽ hơn nhiều, và chỉ áp dụng cho <strong>một tình huống rất hẹp</strong>: khi đường dây giữa các máy bị đứt. Lúc bình thường thì chẳng phải chọn gì cả. Nhớ nhé: nghe một câu khẩu hiệu ngắn gọn thì hãy hỏi câu gốc nói gì.</p>
+          <p class="en-only" lang="en">CAP's formal statement — proved by Gilbert &amp; Lynch in 2002 from Brewer's conjecture — is <strong>very narrow</strong><span class="cite"><a href="#ref-11">11</a></span>. Kleppmann enumerates each constraint<span class="cite"><a href="#ref-1">1</a></span>: "consistency" here means <em>only</em> linearizability, not the C in ACID; "availability" means <em>every</em> non-failing node must return a non-error response to <em>every</em> request; the system model is <strong>a single read-write register</strong>; the only fault considered is a <strong>network partition</strong>; and the theorem <strong>says nothing about latency</strong><span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc cho đúng</strong>“Chọn 2 trong 3” là cách diễn đạt gây hiểu lầm. Phân vùng mạng không phải thứ ta chọn — nó xảy ra. Lựa chọn thật chỉ xuất hiện <em>khi đang có phân vùng</em>, và khi mạng lành thì không phải chọn gì<span class="cite"><a href="#ref-9">9</a></span>.</div>
+            <div class="easy-only"><strong>Nói cho đúng</strong>Không ai "chọn" chuyện đường dây bị đứt. Chỉ khi nó đứt thì mới phải chọn: trả lời có thể sai, hay không trả lời.</div>
+            <div class="en-only" lang="en"><strong>How to read it</strong>"Pick 2 of 3" is a misleading formulation. Partitions are not something you choose — they happen. The real choice appears only <em>while</em> a partition is in progress; when the network is healthy there is nothing to choose<span class="cite"><a href="#ref-9">9</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao gán nhãn “CP”/“AP” là sai</h4>
+              <p>Kleppmann chỉ ra rằng rất nhiều hệ thực tế <strong>không</strong> thuộc nhóm nào: sao chép một-leader với follower bất đồng bộ vừa không khả dụng theo nghĩa CAP (client bị ngăn khỏi leader thì không ghi được) vừa không khả tuyến tính hoá (đọc từ follower có thể ra dữ liệu cũ). Ông viết thẳng rằng cách nói "hai trong ba" thậm chí cho phép chọn <em>một</em> trong ba, hay <em>không</em> cái nào<span class="cite"><a href="#ref-9">9</a></span>. Đó là lý do ông đề nghị ngừng gọi cơ sở dữ liệu là “CP” hay “AP” và dùng thuật ngữ chính xác hơn<span class="cite"><a href="#ref-10">10</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Chính các tác giả cũng đã đính chính</h4>
+              <p>Mười năm sau bài chứng minh, Gilbert &amp; Lynch quay lại viết “Perspectives on the CAP Theorem”, đặt CAP vào đúng chỗ của nó: một trường hợp riêng của đánh đổi rộng hơn giữa an toàn và sống động trong hệ không tin cậy, chứ không phải một bảng phân loại sản phẩm<span class="cite"><a href="#ref-12">12</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The latency price, paid every day</div>
+          <h3><span class="vi-only">Cái giá thường trực: độ trễ</span><span class="en-only" lang="en">The standing price: latency</span></h3>
+          <p class="standard-copy">Lý do thật khiến nhiều hệ đa-trung-tâm-dữ-liệu từ bỏ khả tuyến tính hoá thường <strong>không</strong> phải để chịu được phân vùng, mà là <strong>độ trễ của mạng diện rộng</strong><span class="cite"><a href="#ref-9">9</a></span>. Attiya &amp; Welch đã chứng minh giới hạn này: thời gian phản hồi của thao tác khả tuyến tính hoá tỉ lệ với độ bất định của độ trễ mạng — mạng càng thất thường, thao tác càng phải chờ lâu<span class="cite"><a href="#ref-13">13</a></span>. Đây là hoá đơn trả hằng ngày, không phải chỉ trong sự cố.</p>
+          <p class="easy-only">Muốn chắc chắn thì phải hỏi ý người ở xa, mà hỏi người ở xa thì phải chờ. Đường truyền càng lúc nhanh lúc chậm thì càng phải chờ lâu cho chắc. Nhớ nhé: chắc chắn thì chậm — đó là luật, không phải lỗi phần mềm.</p>
+          <p class="en-only" lang="en">The real reason many multi-datacenter systems give up linearizability is usually <strong>not</strong> partition tolerance but <strong>wide-area network latency</strong><span class="cite"><a href="#ref-9">9</a></span>. Attiya &amp; Welch proved the bound: the response time of a linearizable operation is proportional to the uncertainty of network delay — the more erratic the network, the longer each operation must wait<span class="cite"><a href="#ref-13">13</a></span>. This is a bill paid daily, not only during incidents.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Khi nào đáng trả</strong>Trả khi sai là mất tiền hoặc mất dữ liệu (khoá, ghế, số dư). Không trả khi chỉ là hiển thị đếm lượt thích hay dòng thời gian — nơi dữ liệu cũ vài giây chẳng hại ai.</div>
+            <div class="easy-only"><strong>Khi nào nên chờ</strong>Chờ khi sai sẽ mất tiền hay mất chỗ. Đừng chờ khi chỉ là hiển thị con số cho vui.</div>
+            <div class="en-only" lang="en"><strong>When it's worth paying</strong>Pay when being wrong costs money or data (locks, seats, balances). Don't pay for like counts or timelines, where a few seconds of staleness harms no one.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Không chỉ chuyện mạng</h4>
+              <p>Ngay cả trong một máy, các lõi CPU không cho truy cập RAM theo kiểu khả tuyến tính hoá: mỗi lõi giữ bộ nhớ đệm riêng, và lập trình viên phải dùng <span lang="en">memory barrier</span> khi cần bảo đảm mạnh<span class="cite"><a href="#ref-9">9</a></span>. Lý do y hệt: đồng bộ tốn tiền, và phần lớn thời gian thì không cần.</p>
+            </div>
+            <div class="info-block">
+              <h4>Hướng thoát</h4>
+              <p>Kleppmann kết phần này bằng một gợi ý<span class="cite"><a href="#ref-1">1</a></span>: nếu ta chấp nhận bảo đảm yếu hơn <em>nhưng vẫn đủ dùng</em> — chẳng hạn nhất quán nhân quả — thì có thể tránh phần lớn chi phí đồng bộ mà không rơi xuống mức "rồi sẽ nhất quán" mơ hồ. Đó chính là trục tiếp theo của chương.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Nếu không cần mạnh nhất, thì cần gì?</strong>
+      <strong class="en-only" lang="en">If not the strongest, then what?</strong>
+      <span class="standard-copy">Khả tuyến tính hoá đắt vì nó đòi một thứ tự <em>toàn phần</em> khớp với thời gian thực. Nhưng phần lớn lỗi mà ta thật sự sợ không đến từ việc mất thứ tự toàn phần — chúng đến từ việc mất <strong>quan hệ nhân quả</strong>: câu trả lời hiện ra trước câu hỏi, tin nhắn thứ hai tới trước tin nhắn thứ nhất. Trục tiếp theo hỏi: giữ nhân quả thì cần bao nhiêu, và rẻ hơn bao nhiêu.</span>
+      <span class="easy-only">Mức mạnh nhất thì đắt. Nhưng thứ ta thật sự sợ thường chỉ là chuyện <strong>lộn ngược thứ tự</strong>: câu trả lời hiện ra trước câu hỏi. Phần sau nói về cách giữ đúng thứ tự trước-sau.</span>
+      <span class="en-only" lang="en">Linearizability is expensive because it demands a <em>total</em> order matching real time. But most of the bugs we actually fear do not come from losing a total order — they come from losing <strong>causality</strong>: the answer appearing before the question, the second message arriving before the first. The next axis asks how much it takes to preserve causality, and how much cheaper that is.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="ordering-and-causality" aria-labelledby="ordering-and-causality-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Ordering &amp; causality</span></span><span class="en-only" lang="en">Axis 3 · Ordering &amp; causality</span></div>
+        <h2 id="ordering-and-causality-title"><span class="vi-only">Nhân quả là thứ tự bộ phận, không phải toàn phần</span><span class="en-only" lang="en">Causality is a partial order, not a total one</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann nối thứ tự với nhân quả<span class="cite"><a href="#ref-1">1</a></span>: nếu một thao tác <em>biết về</em> thao tác khác — đọc được giá trị nó ghi, trả lời tin nhắn nó gửi — thì hai thao tác ấy có quan hệ nhân quả và bắt buộc phải giữ đúng trước-sau. Nhưng hai thao tác <strong>không</strong> biết gì về nhau thì <em>đồng thời</em>, và ta không cần ép chúng vào một thứ tự nào cả. Vì thế nhân quả cho một <strong>thứ tự bộ phận</strong>: một số cặp so sánh được, một số cặp thì không — khác hẳn thứ tự <strong>toàn phần</strong> mà khả tuyến tính hoá áp đặt.</p>
+      <p class="easy-only">Có những việc rõ ràng phải xảy ra theo thứ tự: hỏi trước, trả lời sau. Nhưng có những việc chẳng liên quan gì nhau — hai bạn ở hai lớp cùng giơ tay lúc 9 giờ — thì xếp ai trước cũng được. Nhớ nhé: chỉ cần giữ thứ tự cho những việc có liên quan, không cần xếp hàng tất cả.</p>
+      <p class="en-only" lang="en">Kleppmann ties ordering to causality<span class="cite"><a href="#ref-1">1</a></span>: if one operation <em>knows about</em> another — it read the value that one wrote, or replied to the message it sent — then the two are causally related and their order must be preserved. But two operations that know nothing of each other are <em>concurrent</em>, and need not be forced into any order at all. So causality gives a <strong>partial order</strong>: some pairs are comparable, some are not — quite unlike the <strong>total order</strong> that linearizability imposes.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Happens-before: Lamport's partial order</div>
+        <p class="definition standard-copy">Nền tảng là bài báo 1978 của Leslie Lamport, nơi ông định nghĩa quan hệ <em lang="en">happens-before</em> và chỉ ra rằng trong hệ phân tán, thứ tự "xảy ra trước" chỉ là một thứ tự bộ phận, còn mọi thứ tự toàn phần đều do ta <em>áp đặt</em> thêm<span class="cite"><a href="#ref-16">16</a></span>. Đây là bài mà toàn bộ phần thứ tự của Chương 9 dựng trên.</p>
+        <p class="definition easy-only">Từ năm 1978 người ta đã chứng minh: trong một nhóm máy, chỉ có thể nói chắc "việc này xảy ra trước việc kia" với <em>một số</em> cặp việc thôi. Muốn xếp <em>tất cả</em> thành một hàng thì phải tự đặt thêm luật. Nhớ nhé: hàng dọc không tự nhiên mà có.</p>
+        <p class="definition en-only" lang="en">The foundation is Leslie Lamport's 1978 paper, which defines the <em>happens-before</em> relation and shows that in a distributed system "happened earlier" is only a partial order — any total order is one we <em>impose</em><span class="cite"><a href="#ref-16">16</a></span>. It is the paper the whole ordering half of Chapter 9 rests on.</p>
+        <p class="deep-only">Kleppmann dùng sự phân biệt bộ phận/toàn phần này để xếp hạng các mô hình nhất quán<span class="cite"><a href="#ref-1">1</a></span>: khả tuyến tính hoá cho thứ tự toàn phần (và do đó đắt), còn nhất quán nhân quả chỉ giữ thứ tự bộ phận. Điều đáng chú ý là nhân quả gần như là mức mạnh nhất còn khả thi khi mạng có sự cố: Mahajan, Alvisi &amp; Dahlin chứng minh không hệ nào vừa luôn khả dụng, vừa hội tụ, lại cho bảo đảm mạnh hơn nhất quán nhân quả<span class="cite"><a href="#ref-17">17</a></span>. Nói cách khác, nhân quả là "trần" của phần rẻ tiền — vượt qua nó là bước vào lãnh địa đồng thuận.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba mệnh đề về thứ tự và nhân quả">
+        <div class="equation-row">
+          <b>Bộ phận</b>
+          <span>Nhân quả chỉ sắp thứ tự các cặp có liên hệ; cặp đồng thời để tự do.</span>
+        </div>
+        <div class="equation-row">
+          <b>Toàn phần</b>
+          <span>Khả tuyến tính hoá xếp mọi thao tác vào một hàng duy nhất khớp thời gian thực.</span>
+        </div>
+        <div class="equation-row">
+          <b>Bắc cầu</b>
+          <span>Total order broadcast là cây cầu: một thứ tự toàn phần được mọi nút giao đúng như nhau.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về thứ tự">
+        <div class="equation-row">
+          <b>Việc liên quan</b>
+          <span>Hỏi trước, trả lời sau — thứ tự này phải giữ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Việc rời nhau</b>
+          <span>Không liên quan thì xếp ai trước cũng được.</span>
+        </div>
+        <div class="equation-row">
+          <b>Xếp một hàng</b>
+          <span>Nếu muốn tất cả một hàng, phải có người đọc số thứ tự cho cả nhóm.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three claims about ordering and causality">
+        <div class="equation-row">
+          <b>Partial</b>
+          <span>Causality orders only related pairs; concurrent pairs are left free.</span>
+        </div>
+        <div class="equation-row">
+          <b>Total</b>
+          <span>Linearizability puts every operation in one queue matching real time.</span>
+        </div>
+        <div class="equation-row">
+          <b>The bridge</b>
+          <span>Total order broadcast is the bridge: one total order delivered identically to every node.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Causal consistency: strong, and surprisingly cheap</div>
+          <h3><span class="vi-only">Mức mạnh nhất mà mạng đứt vẫn phục vụ được</span><span class="en-only" lang="en">The strongest model that survives a partition</span></h3>
+          <p class="standard-copy">Nhất quán nhân quả giữ đúng mọi quan hệ "biết về", nhưng không đòi một thứ tự toàn phần — nên mỗi bản sao có thể trả lời ngay mà không cần hỏi ai, miễn là nó đã nhận đủ những gì đứng trước. Kết quả lý thuyết đi kèm rất mạnh: không có hệ nào vừa luôn khả dụng, vừa hội tụ, mà lại cho bảo đảm chặt hơn nhân quả<span class="cite"><a href="#ref-17">17</a></span>. Nói cách khác, đây là mức tốt nhất mà ta giữ được mà không phải trả phí đồng thuận.</p>
+          <p class="easy-only">Có một mức "đủ đúng" rất tốt: chỉ cần bảo đảm câu trả lời không bao giờ hiện ra trước câu hỏi. Mức này không cần hỏi ý ai ở xa, nên vẫn chạy được khi đường dây trục trặc. Nhớ nhé: giữ đúng thứ tự trước-sau đã giải quyết phần lớn chuyện khó hiểu.</p>
+          <p class="en-only" lang="en">Causal consistency preserves every "knows about" relation but demands no total order — so each replica can answer immediately without asking anyone, as long as it has received everything that precedes. The accompanying theory is strong: no system can be always available, convergent, and offer a guarantee stricter than causal consistency<span class="cite"><a href="#ref-17">17</a></span>. It is the best we can hold without paying for consensus.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mọi lỗi kiểu "thấy câu trả lời trước câu hỏi", "thấy bình luận trước bài viết", "thấy thông báo trước dữ liệu" đều là vi phạm nhân quả — và thường là thứ người dùng thật sự phàn nàn.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi bạn thấy lời bình luận mà chưa thấy bài viết nó bình luận — đó chính là lỗi này.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every "answer before question", "comment before post", "notification before data" bug is a causality violation — and usually what users actually complain about.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Theo dõi nhân quả tốn gì</h4>
+              <p>Để giữ nhân quả, hệ phải biết thao tác nào "đã thấy" thao tác nào trước đó — thường bằng số phiên bản hoặc vector phiên bản, như Chương 5 đã dựng cho việc phát hiện ghi đồng thời. Chi phí nằm ở siêu dữ liệu phải mang theo, chứ không phải ở việc chờ quorum.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao chưa phổ biến</h4>
+              <p>Kleppmann nhận xét đây vẫn là lĩnh vực nghiên cứu đang mở: giữ nhân quả đầy đủ trong một hệ lớn với nhiều phân mảnh là bài toán khó, và ít cơ sở dữ liệu thương mại cung cấp nó như một bảo đảm đầu bảng<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Lamport timestamps — and where they stop</div>
+          <h3><span class="vi-only">Đánh số thì dễ, quyết định ngay mới khó</span><span class="en-only" lang="en">Numbering is easy; deciding now is hard</span></h3>
+          <p class="standard-copy">Đồng hồ logic của Lamport là một cặp <em>(bộ đếm, mã nút)</em>: mỗi nút tăng bộ đếm của mình, và mỗi khi nhận tin nhắn thì nâng bộ đếm lên ít nhất bằng giá trị nhận được; so sánh thì so bộ đếm trước, hoà thì so mã nút<span class="cite"><a href="#ref-16">16</a></span>. Cách này cho một <strong>thứ tự toàn phần nhất quán với nhân quả</strong> — và rẻ. Nhưng Kleppmann chỉ ra chỗ nó <strong>không đủ</strong><span class="cite"><a href="#ref-1">1</a></span>: với một ràng buộc duy nhất, bạn phải trả lời "tên này có bị lấy chưa" <em>ngay lúc này</em>, trong khi thứ tự Lamport chỉ hoàn chỉnh <em>sau khi</em> đã gom hết mọi thao tác từ mọi nút.</p>
+          <p class="easy-only">Có một mẹo đánh số rất gọn để xếp mọi việc thành một hàng. Nhưng muốn biết "mình có phải người đầu tiên lấy cái tên này không", bạn phải đợi nghe tin từ tất cả mọi người — mà chờ tất cả thì đâu còn nhanh nữa. Nhớ nhé: xếp hàng được sau đó không có nghĩa là quyết định được ngay bây giờ.</p>
+          <p class="en-only" lang="en">Lamport's logical clock is a pair <em>(counter, node id)</em>: each node increments its own counter, and on receiving a message raises its counter to at least the received value; comparison goes by counter first, node id as tie-break<span class="cite"><a href="#ref-16">16</a></span>. This yields a <strong>total order consistent with causality</strong> — cheaply. But Kleppmann points at where it <strong>falls short</strong><span class="cite"><a href="#ref-1">1</a></span>: a uniqueness constraint must answer "is this name taken?" <em>right now</em>, whereas a Lamport order is only complete <em>after</em> collecting every operation from every node.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Ranh giới cần nhớ</strong>Đánh số thứ tự giải quyết bài toán <em>sắp xếp lại</em>; nó không giải quyết bài toán <em>quyết định ngay</em>. Ranh giới này chính là chỗ đồng thuận bắt đầu cần thiết.</div>
+            <div class="easy-only"><strong>Ranh giới</strong>Đánh số giúp xếp lại cho đúng về sau; nó không giúp bạn trả lời ngay lập tức.</div>
+            <div class="en-only" lang="en"><strong>The boundary</strong>Sequence numbers solve <em>reordering</em>; they do not solve <em>deciding now</em>. That boundary is exactly where consensus becomes necessary.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Khác với vector clock</h4>
+              <p>Lamport timestamp cho thứ tự toàn phần nhưng <em>mất</em> thông tin về tính đồng thời: nhìn hai dấu thời gian, ta không phân biệt được "A thật sự xảy ra trước B" với "A và B đồng thời, chỉ là bị xếp trước". Vector clock giữ được thông tin ấy nhưng tốn siêu dữ liệu hơn và chỉ cho thứ tự bộ phận<span class="cite"><a href="#ref-16">16</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao "quyết định ngay" khó</h4>
+              <p>Vì để chắc chắn không ai khác đang tuyên bố cùng một tên, nút của bạn phải biết trạng thái hiện thời của mọi nút khác — kể cả nút vừa sập. Nếu một nút im lặng, bạn không thể phân biệt "nó chưa tuyên bố gì" với "nó đã tuyên bố mà tin chưa tới". Đó chính là bài toán Chương 8 để lại.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Total order broadcast</div>
+          <h3><span class="vi-only">Phát sóng theo thứ tự toàn phần</span><span class="en-only" lang="en">Broadcasting in one agreed order</span></h3>
+          <p class="standard-copy">Thứ ta thật sự cần là <em lang="en">total order broadcast</em> (còn gọi là <span lang="en">atomic broadcast</span>): một giao thức trao đổi tin nhắn giữa các nút với hai bảo đảm — <strong>giao hàng tin cậy</strong> (không tin nhắn nào bị mất; đã tới một nút thì tới mọi nút) và <strong>giao hàng theo thứ tự toàn phần</strong> (mọi nút nhận tin nhắn theo đúng cùng một thứ tự)<span class="cite"><a href="#ref-18">18</a></span>. Đây chính là hình dạng của một nhật ký sao chép: mọi bản sao phát lại cùng một chuỗi sự kiện thì cùng đi tới một trạng thái — kỹ thuật <em lang="en">state machine replication</em><span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <p class="easy-only">Hãy hình dung một người phát loa cho cả trường: mọi lớp nghe <strong>cùng một câu, theo cùng một thứ tự</strong>. Nếu ai cũng làm theo lần lượt từng câu, cuối buổi cả trường sẽ ở cùng một trạng thái. Nhớ nhé: cùng nghe một thứ tự thì cùng ra một kết quả.</p>
+          <p class="en-only" lang="en">What we actually need is <em>total order broadcast</em> (also called atomic broadcast): a protocol for exchanging messages between nodes with two guarantees — <strong>reliable delivery</strong> (no message is lost; if it reaches one node it reaches all) and <strong>totally ordered delivery</strong> (every node receives messages in the same order)<span class="cite"><a href="#ref-18">18</a></span>. This is exactly the shape of a replication log: replay the same sequence of events on every replica and they all reach the same state — the state machine replication technique<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Nhật ký sao chép của cơ sở dữ liệu, nhật ký phân vùng của một hệ nhắn tin, sổ ghi của một dịch vụ điều phối — tất cả đều là total order broadcast dưới những cái tên khác nhau.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Mọi "cuốn nhật ký" mà các máy lần lượt chép lại theo đúng thứ tự.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>A database replication log, a messaging system's partition log, a coordination service's journal — all are total order broadcast under different names.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Chốt thứ tự, không sửa lại</h4>
+              <p>Điểm mạnh nằm ở chỗ thứ tự được <strong>chốt tại lúc giao</strong>: một khi tin nhắn đã được giao, vị trí của nó trong dãy là cố định, và các tin nhắn tới sau không được chen vào trước. Đây chính là điều Lamport timestamp không cho — nó chỉ sắp xếp <em>hậu kiểm</em><span class="cite"><a href="#ref-18">18</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Dựng khả tuyến tính hoá từ nó</h4>
+              <p>Kleppmann chỉ ra cách bắc cầu ngược lại<span class="cite"><a href="#ref-1">1</a></span>: muốn một ràng buộc duy nhất khả tuyến tính hoá, hãy phát một tin nhắn "tôi nhận tên X" qua total order broadcast, rồi đọc lại nhật ký; nếu tin nhắn đầu tiên nhận tên X là của bạn thì bạn thắng, ngược lại thì bạn thua. Ghi trở nên khả tuyến tính hoá, còn đọc thì cần thêm một bước đồng bộ để bảo đảm đã theo kịp nhật ký.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Cây cầu cuối cùng</strong>
+      <strong class="en-only" lang="en">The final bridge</strong>
+      <span class="standard-copy">Nhưng ai quyết định thứ tự toàn phần ấy? Nếu là một nút duy nhất, thì nút đó sập là hết — và việc chọn nút thay thế lại chính là một quyết định phải được mọi người đồng ý. Vòng lặp này đưa ta tới trục cuối: đồng thuận, và hoá ra <strong>total order broadcast và đồng thuận là hai cách nói của cùng một bài toán</strong>.</span>
+      <span class="easy-only">Nhưng ai là người cầm loa? Nếu người đó nghỉ thì phải chọn người khác — mà chọn ai lại là một việc cả nhóm phải đồng ý. Phần cuối nói về chuyện đó.</span>
+      <span class="en-only" lang="en">But who decides that total order? If it is a single node, its failure ends everything — and choosing a replacement is itself a decision everyone must agree on. That loop leads to the last axis: consensus, and the discovery that <strong>total order broadcast and consensus are two statements of the same problem</strong>.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="consensus" aria-labelledby="consensus-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · <span lang="en">Distributed transactions &amp; consensus</span></span><span class="en-only" lang="en">Axis 4 · Distributed transactions &amp; consensus</span></div>
+        <h2 id="consensus-title"><span class="vi-only">Từ 2PC đến đồng thuận chịu lỗi</span><span class="en-only" lang="en">From 2PC to fault-tolerant consensus</span></h2>
+      </div>
+      <p class="standard-copy">Đồng thuận nghe đơn giản: "làm cho vài nút cùng đồng ý một điều". Kleppmann gọi đây là <strong>một trong những bài toán quan trọng và nền tảng nhất</strong> của tính toán phân tán — và cũng là một trong những bài toán tinh vi nhất<span class="cite"><a href="#ref-1">1</a></span>. Ta bắt đầu từ hình thức quen thuộc nhất của nó — <em lang="en">atomic commit</em> qua giao thức hai pha — rồi thấy vì sao nó chưa chịu được lỗi, và cuối cùng gặp lớp thuật toán thật sự chịu lỗi: Paxos, Raft, Zab, VSR.</p>
+      <p class="easy-only">Phần cuối nói về chuyện khó nhất: làm sao cả nhóm máy cùng chốt một quyết định và không ai đổi ý. Ta xem thử cách cũ (hỏi từng người rồi mới chốt) hỏng ở đâu, rồi xem cách mới sửa nó thế nào. Nhớ nhé: chốt xong là không ai được đổi ý.</p>
+      <p class="en-only" lang="en">Consensus sounds simple: "get several nodes to agree on something". Kleppmann calls it <strong>one of the most important and fundamental problems</strong> in distributed computing — and one of the subtlest<span class="cite"><a href="#ref-1">1</a></span>. We start from its most familiar form — atomic commit via the two-phase protocol — see why it is not yet fault-tolerant, and finally meet the algorithms that are: Paxos, Raft, Zab, VSR.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Consensus: agree on one value, irrevocably</div>
+        <p class="definition standard-copy">Bài toán đồng thuận đòi bốn tính chất: <strong>thống nhất</strong> (không hai nút quyết định khác nhau), <strong>toàn vẹn</strong> (không nút nào quyết định hai lần), <strong>hợp lệ</strong> (giá trị được quyết định phải do một nút nào đó đề xuất) và <strong>kết thúc</strong> (mọi nút không sập cuối cùng đều quyết định)<span class="cite"><a href="#ref-1">1</a></span>. Ba tính chất đầu là về <em>an toàn</em>; tính chất thứ tư — kết thúc — là chỗ mọi khó khăn nằm ở đó.</p>
+        <p class="definition easy-only">Muốn gọi là "cả nhóm đã chốt", cần bốn điều: ai cũng chốt giống nhau, mỗi người chỉ chốt một lần, điều được chốt phải do ai đó đề nghị, và cuối cùng mọi người còn khoẻ đều chốt được. Nhớ nhé: ba điều đầu dễ, điều cuối mới khó.</p>
+        <p class="definition en-only" lang="en">The consensus problem demands four properties: <strong>uniform agreement</strong> (no two nodes decide differently), <strong>integrity</strong> (no node decides twice), <strong>validity</strong> (the decided value was proposed by some node) and <strong>termination</strong> (every non-crashed node eventually decides)<span class="cite"><a href="#ref-1">1</a></span>. The first three are <em>safety</em>; the fourth — termination — is where all the difficulty lives.</p>
+        <p class="deep-only">Vì sao "kết thúc" khó đến thế? Vì nó buộc thuật toán phải <em>tiến lên</em> ngay cả khi một số nút đã chết mà không ai biết chắc. Nếu ta chỉ cần an toàn, một thuật toán không bao giờ quyết định gì cả đã là "đúng". Đây cũng chính là điểm mà định lý FLP cắm mốc: trong mô hình bất đồng bộ tất định, không thuật toán nào bảo đảm được cả an toàn lẫn kết thúc nếu có dù chỉ một nút có thể sập<span class="cite"><a href="#ref-22">22</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nấc của bài toán đồng thuận">
+        <div class="equation-row">
+          <b>2PC</b>
+          <span>Chốt nguyên tử trên nhiều nút, nhưng dừng lại khi điều phối viên chết.</span>
+        </div>
+        <div class="equation-row">
+          <b>Đồng thuận</b>
+          <span>Chốt được cả khi một thiểu số nút chết, nhờ quorum và đánh số epoch.</span>
+        </div>
+        <div class="equation-row">
+          <b>Tương đương</b>
+          <span>Đồng thuận và total order broadcast quy về nhau được<span class="cite"><a href="#ref-23">23</a></span>.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba nấc cần nhớ">
+        <div class="equation-row">
+          <b>Cách cũ</b>
+          <span>Hỏi từng người rồi mới chốt — người hỏi mà nghỉ thì cả nhóm treo.</span>
+        </div>
+        <div class="equation-row">
+          <b>Cách mới</b>
+          <span>Quá nửa đồng ý là chốt; thiếu vài người vẫn xong.</span>
+        </div>
+        <div class="equation-row">
+          <b>Cùng một việc</b>
+          <span>"Chốt một điều" và "phát loa đúng thứ tự" thật ra là một bài toán.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three rungs of the consensus problem">
+        <div class="equation-row">
+          <b>2PC</b>
+          <span>Atomic commit across nodes, but it stalls when the coordinator dies.</span>
+        </div>
+        <div class="equation-row">
+          <b>Consensus</b>
+          <span>Decides even when a minority of nodes dies, via quorums and epoch numbers.</span>
+        </div>
+        <div class="equation-row">
+          <b>Equivalent</b>
+          <span>Consensus and total order broadcast reduce to each other<span class="cite"><a href="#ref-23">23</a></span>.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Two-phase commit and the coordinator's death</div>
+          <h3><span class="vi-only">Điểm chết của điều phối viên</span><span class="en-only" lang="en">The coordinator's single point of death</span></h3>
+          <p class="standard-copy">2PC chia việc chốt làm hai pha: điều phối viên hỏi mọi bên "sẵn sàng chưa?" rồi mới ra lệnh chốt. Bí mật nằm ở chỗ <strong>một khi đã trả lời "sẵn sàng", bên tham gia mất quyền tự quyết</strong>: nó đã hứa sẽ chốt được, nên không được phép tự huỷ nữa. Nếu điều phối viên sập <em>sau</em> khi thu đủ lời hứa nhưng <em>trước</em> khi gửi quyết định, các bên rơi vào trạng thái <em lang="en">in doubt</em> — không dám chốt, không dám huỷ, và vẫn <strong>giữ khoá</strong> cho tới khi điều phối viên sống lại<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Muốn cả nhóm cùng làm một việc, người điều phối hỏi vòng quanh: "ai cũng sẵn sàng chứ?" Ai gật rồi thì không được rút lời. Nhưng nếu người điều phối đột nhiên biến mất sau khi mọi người đã gật, cả nhóm chỉ biết đứng chờ — không ai dám làm, cũng không ai dám bỏ. Nhớ nhé: hứa xong mà người ra lệnh biến mất là kẹt cứng.</p>
+          <p class="en-only" lang="en">2PC splits committing into two phases: the coordinator asks everyone "are you ready?" and only then orders the commit. The secret is that <strong>once a participant answers "yes" it gives up the right to decide</strong>: it has promised it can commit, so it may no longer abort unilaterally. If the coordinator crashes <em>after</em> gathering the promises but <em>before</em> sending the decision, participants are left <em>in doubt</em> — unable to commit, unable to abort, still <strong>holding their locks</strong> until the coordinator returns<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao gọi là “blocking”</strong>Vì sự tiến triển của toàn hệ bị treo vào một nút duy nhất. Skeen đã phân tích chính xác tính chất này và đề xuất 3PC như một giao thức không-treo<span class="cite"><a href="#ref-20">20</a></span>.</div>
+            <div class="easy-only"><strong>Vì sao gọi là “kẹt”</strong>Vì cả nhóm phải chờ đúng một người quay lại mới đi tiếp được.</div>
+            <div class="en-only" lang="en"><strong>Why it's called “blocking”</strong>Because the whole system's progress hangs on one node. Skeen analysed exactly this property and proposed 3PC as a non-blocking alternative<span class="cite"><a href="#ref-20">20</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao 3PC không cứu được</h4>
+              <p>3PC chỉ không-treo dưới giả định mạng có độ trễ <em>có giới hạn</em> và nút phản hồi trong thời hạn <em>biết trước</em> — tức là cần một bộ phát hiện lỗi hoàn hảo<span class="cite"><a href="#ref-20">20</a></span>. Chương 8 đã cho thấy mạng thật không cho ta điều đó, nên Kleppmann kết luận 2PC vẫn được dùng dù mang tiếng xấu<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Nhật ký điều phối viên là trạng thái</h4>
+              <p>Điều phối viên phải ghi quyết định xuống đĩa <em>trước</em> khi công bố, và nhật ký ấy là trạng thái không thể mất. Điều đó biến điều phối viên thành một thành phần <em>có trạng thái</em>, khó nhân bản và khó đưa vào kiến trúc không-chia-sẻ — một trong những lý do khiến giao dịch phân tán khó sống chung với microservice.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">XA and the bad reputation of distributed transactions</div>
+          <h3><span class="vi-only">Vì sao giao dịch phân tán mang tiếng xấu</span><span class="en-only" lang="en">Why distributed transactions got a bad name</span></h3>
+          <p class="standard-copy">Trong thực tế, giao dịch phân tán liên-hệ-thống thường đi qua <strong>XA</strong> — chuẩn <em lang="en">Distributed Transaction Processing: The XA Specification</em> do X/Open công bố năm 1991, định nghĩa giao diện giữa một điều phối viên giao dịch và các tài nguyên biết nói 2PC<span class="cite"><a href="#ref-21">21</a></span>. Nó được cài trong nhiều cơ sở dữ liệu và trình môi giới tin nhắn. Vấn đề là mọi nhược điểm của 2PC được thừa kế nguyên vẹn, cộng thêm việc chuẩn còn cho phép <em lang="en">heuristic decision</em> — bên tham gia tự ý chốt hoặc huỷ khi kẹt quá lâu, <strong>phá vỡ đúng tính nguyên tử mà 2PC sinh ra để bảo vệ</strong><span class="cite"><a href="#ref-21">21</a></span>.</p>
+          <p class="easy-only">Người ta có sẵn một bộ luật chung để nhiều hệ thống khác nhau cùng chơi trò "hứa rồi mới chốt". Nhưng bộ luật ấy có một điều khoản nguy hiểm: nếu chờ quá lâu, một bên được tự quyết. Thế là điều mà cả trò chơi muốn bảo vệ — "hoặc tất cả cùng làm, hoặc không ai làm" — lại bị chính điều khoản đó phá. Nhớ nhé: luật có lối thoát hiểm thì lời hứa hết chắc.</p>
+          <p class="en-only" lang="en">In practice, cross-system distributed transactions usually go through <strong>XA</strong> — the <em>Distributed Transaction Processing: The XA Specification</em> published by X/Open in 1991, defining the interface between a transaction coordinator and resources that speak 2PC<span class="cite"><a href="#ref-21">21</a></span>. It is implemented in many databases and message brokers. The trouble is that every weakness of 2PC is inherited intact, plus the standard's allowance for <em>heuristic decisions</em> — a participant unilaterally committing or aborting when stuck too long, <strong>breaking exactly the atomicity 2PC exists to protect</strong><span class="cite"><a href="#ref-21">21</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc cho công bằng</strong>Kleppmann không nói "đừng bao giờ dùng"; ông tách hai thứ hay bị gộp: giao dịch phân tán <em>trong cùng một cơ sở dữ liệu</em> (thường chạy tốt) và giao dịch <em>không đồng nhất</em> qua XA (nơi sinh ra tiếng xấu)<span class="cite"><a href="#ref-1">1</a></span>.</div>
+            <div class="easy-only"><strong>Công bằng mà nói</strong>Không phải cái nào cũng tệ: trong cùng một hệ thì ổn; nối nhiều hệ khác loại với nhau mới là chỗ hay hỏng.</div>
+            <div class="en-only" lang="en"><strong>Read it fairly</strong>Kleppmann does not say "never use them"; he separates two things people conflate: distributed transactions <em>inside one database</em> (usually fine) and <em>heterogeneous</em> transactions over XA (where the bad name comes from)<span class="cite"><a href="#ref-1">1</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Giao dịch mồ côi</h4>
+              <p>Khi điều phối viên mất nhật ký của mình, các giao dịch đang treo trở thành <em>mồ côi</em>: không cách nào biết chúng nên chốt hay huỷ một cách tự động, nên quản trị viên phải vào tận nơi quyết định bằng tay — và mọi lựa chọn đều có thể làm hai hệ lệch nhau vĩnh viễn<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khoá bị giữ lâu</h4>
+              <p>Vì bên tham gia phải giữ khoá suốt thời gian "nghi ngờ", một điều phối viên chết có thể làm nghẽn cả những giao dịch chẳng liên quan. Chi phí này không xuất hiện trong sơ đồ giao thức nhưng là thứ đội vận hành cảm nhận rõ nhất.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Fault-tolerant consensus: epochs and quorums</div>
+          <h3><span class="vi-only">Paxos, Raft, Zab, VSR — một gia đình</span><span class="en-only" lang="en">Paxos, Raft, Zab, VSR — one family</span></h3>
+          <p class="standard-copy">Bốn thuật toán nổi tiếng nhất — Paxos<span class="cite"><a href="#ref-24">24</a></span>, Raft<span class="cite"><a href="#ref-25">25</a></span>, Zab (nền của ZooKeeper)<span class="cite"><a href="#ref-26">26</a></span> và Viewstamped Replication<span class="cite"><a href="#ref-27">27</a></span> — có một hình dạng chung. Chúng không quyết định <em>một</em> giá trị mà quyết định một <strong>chuỗi</strong> giá trị, tức là chúng hiện thực total order broadcast. Cơ chế chung gồm hai mảnh: <strong>đánh số epoch</strong> (Paxos gọi là <span lang="en">ballot number</span>, Raft gọi là <span lang="en">term</span>, Zab gọi là <span lang="en">epoch</span>, VSR gọi là <span lang="en">view number</span>) và <strong>bỏ phiếu theo quorum</strong>: trong mỗi epoch chỉ có tối đa một leader, và mọi quyết định đều cần đa số<span class="cite"><a href="#ref-25">25</a></span>.</p>
+          <p class="easy-only">Nhóm bầu ra một người cầm loa. Mỗi lần bầu lại thì ghi thêm một số "lần bầu thứ mấy" — số càng lớn càng mới, ai cầm số cũ thì bị bỏ qua. Và muốn chốt bất cứ điều gì, phải có <strong>quá nửa</strong> nhóm gật. Nhớ nhé: hai nhóm "quá nửa" luôn có ít nhất một người chung, nên không thể có hai quyết định trái nhau.</p>
+          <p class="en-only" lang="en">The four best-known algorithms — Paxos<span class="cite"><a href="#ref-24">24</a></span>, Raft<span class="cite"><a href="#ref-25">25</a></span>, Zab (the basis of ZooKeeper)<span class="cite"><a href="#ref-26">26</a></span> and Viewstamped Replication<span class="cite"><a href="#ref-27">27</a></span> — share one shape. They decide not <em>a</em> value but a <strong>sequence</strong> of values, which is to say they implement total order broadcast. Two pieces do the work: <strong>epoch numbering</strong> (Paxos calls it a ballot number, Raft a term, Zab an epoch, VSR a view number) and <strong>quorum voting</strong>: within each epoch there is at most one leader, and every decision needs a majority<span class="cite"><a href="#ref-25">25</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao an toàn</strong>Vì hai quorum đa số bắt buộc giao nhau, một quyết định đã được một quorum chấp nhận sẽ luôn được nhìn thấy bởi quorum của epoch sau — nên leader mới không thể xoá quyết định cũ<span class="cite"><a href="#ref-25">25</a></span>.</div>
+            <div class="easy-only"><strong>Vì sao chắc</strong>Vì hai nhóm quá nửa luôn có người chung, nên chuyện đã chốt không thể bị người sau xoá.</div>
+            <div class="en-only" lang="en"><strong>Why it's safe</strong>Because two majority quorums must overlap, a decision accepted by one quorum is always visible to the next epoch's quorum — so a new leader cannot erase an older decision<span class="cite"><a href="#ref-25">25</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Hai vòng bỏ phiếu, không phải một</h4>
+              <p>Kleppmann nhấn một điểm dễ bỏ qua: có <em>hai</em> lượt bỏ phiếu — một để bầu leader, một để chấp nhận từng đề xuất của leader ấy. Leader không được tin vào chức vụ của chính mình; trước khi chốt, nó phải hỏi lại quorum xem có ai biết về một epoch mới hơn không. Nếu có, nó thoái vị<span class="cite"><a href="#ref-25">25</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khác biệt giữa các thành viên gia đình</h4>
+              <p>Zab và Raft nghiêng về mô hình leader mạnh với nhật ký nối tiếp; Paxos nguyên bản tổng quát hơn nhưng khó hiện thực hơn — chính vì thế Ongaro &amp; Ousterhout đặt tên bài báo là "đi tìm một thuật toán đồng thuận <em>dễ hiểu</em>"<span class="cite"><a href="#ref-25">25</a></span>, còn VSR là hướng tiếp cận độc lập từ 1988 mà sau này được thấy là rất gần Paxos<span class="cite"><a href="#ref-27">27</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The limits of consensus — and outsourcing it</div>
+          <h3><span class="vi-only">Giới hạn, FLP, và chuyện “thuê ngoài”</span><span class="en-only" lang="en">Limits, FLP, and outsourcing the hard part</span></h3>
+          <p class="standard-copy">Đồng thuận không miễn phí. Việc bỏ phiếu là một dạng sao chép <em>đồng bộ</em>, nên đắt về độ trễ; số nút tham gia thường cố định, thay đổi thành viên cần cơ chế riêng; và toàn bộ kiến trúc dựa vào <strong>timeout</strong> để đoán nút nào đã chết — trong mạng có độ trễ thất thường, điều này sinh ra những vòng bầu lại liên tục khiến hệ còn tệ hơn<span class="cite"><a href="#ref-1">1</a></span>. Vì thế lời khuyên thực dụng là <strong>đừng tự viết</strong>: giao phần khó cho ZooKeeper, etcd hay Chubby và chỉ gọi API<span class="cite"><a href="#ref-28">28</a></span>.</p>
+          <p class="easy-only">Cách này tốt nhưng không rẻ: phải chờ quá nửa nhóm trả lời, và nhóm phải đoán ai đã nghỉ bằng cách "đợi một lúc không thấy trả lời". Nếu đường truyền lúc nhanh lúc chậm, nhóm sẽ cứ bầu đi bầu lại. Nhớ nhé: phần khó này đã có sẵn phần mềm chuyên làm — đừng tự viết lại.</p>
+          <p class="en-only" lang="en">Consensus is not free. The voting is a form of <em>synchronous</em> replication, so it costs latency; the set of nodes is usually fixed, and changing membership needs its own mechanism; and the whole design leans on <strong>timeouts</strong> to guess which node has died — on a network with erratic delays this produces repeated leader elections that make things worse<span class="cite"><a href="#ref-1">1</a></span>. Hence the pragmatic advice: <strong>don't write your own</strong>; hand the hard part to ZooKeeper, etcd or Chubby and just call the API<span class="cite"><a href="#ref-28">28</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dịch vụ điều phối cho gì</strong>Không chỉ đồng thuận: thao tác nguyên tử khả tuyến tính hoá (so-sánh-rồi-đặt), thứ tự toàn phần cho mọi thao tác, phát hiện lỗi qua phiên và nhịp tim, và thông báo thay đổi<span class="cite"><a href="#ref-30">30</a></span>.</div>
+            <div class="easy-only"><strong>Dịch vụ ấy làm gì</strong>Giữ khoá, đánh số thứ tự, biết ai còn sống, và báo cho bạn khi có gì đổi.</div>
+            <div class="en-only" lang="en"><strong>What a coordination service gives</strong>Not just consensus: linearizable atomic operations (compare-and-set), a total ordering of operations, failure detection via sessions and heartbeats, and change notifications<span class="cite"><a href="#ref-30">30</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>FLP nói gì — và không nói gì</h4>
+              <p>Fischer, Lynch &amp; Paterson (1985) chứng minh rằng trong <strong>mô hình bất đồng bộ tất định</strong> — không đồng hồ, không timeout, thuật toán không được dùng ngẫu nhiên — không thuật toán nào luôn đạt đồng thuận nếu có dù chỉ <strong>một</strong> nút có thể sập<span class="cite"><a href="#ref-22">22</a></span>. Điều đó <em>không</em> có nghĩa đồng thuận là bất khả trong thực tế: hệ thật <strong>được phép dùng timeout</strong>, tức là mô hình bán-đồng-bộ. Chandra &amp; Toueg hình thức hoá chính lối thoát này bằng khái niệm bộ phát hiện lỗi không tin cậy, và chứng minh đồng thuận giải được với chúng<span class="cite"><a href="#ref-23">23</a></span>; Raft thì dùng thời hạn bầu cử ngẫu nhiên để tránh hai ứng viên khoá nhau mãi<span class="cite"><a href="#ref-25">25</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Lý thuyết đúng chưa đủ để chạy</h4>
+              <p>Chandra, Griesemer &amp; Redstone kể lại kinh nghiệm dựng một cơ sở dữ liệu chịu lỗi bằng Paxos tại Google và ghi nhận rằng dù tài liệu học thuật đã có sẵn, việc xây dựng nó <strong>hoá ra không hề tầm thường</strong><span class="cite"><a href="#ref-29">29</a></span>. Khoảng cách giữa một bài báo đúng và một hệ chạy được là lý do chính đáng nhất để dùng lại phần mềm đã được kiểm chứng.</p>
+            </div>
+            <div class="info-block">
+              <h4>Hành vi sản phẩm hôm nay (muộn hơn sách 2017)</h4>
+              <p>Tài liệu etcd hiện hành phát biểu bảo đảm của nhóm API KV là <span lang="en">strict serializability</span>, khả tuyến tính hoá mặc định cho mọi thao tác, và cho phép client chọn chế độ đọc <code>serializable</code> để bỏ vòng đồng thuận, đổi lấy độ trễ thấp nhưng có thể đọc dữ liệu cũ<span class="cite"><a href="#ref-31">31</a></span>. Tài liệu ZooKeeper thì liệt kê bảo đảm của nó là nhất quán tuần tự, nguyên tử, "ảnh chụp hệ thống duy nhất", tin cậy và kịp thời — đọc có thể ra dữ liệu cũ trừ khi gọi <code>sync()</code> trước<span class="cite"><a href="#ref-30">30</a></span>. Đây là nội dung tài liệu hiện thời, không phải trích từ bản in 2017.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận lớn nhất của chương này</span><span class="en-only" lang="en">The three biggest misreadings of this chapter</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“CAP: chọn 2 trong 3”</span><span class="en-only" lang="en">"CAP: pick 2 of 3"</span></h4>
+          <p class="standard-copy">Sai. Định lý chỉ nói về khả tuyến tính hoá, chỉ trong mô hình một thanh ghi đọc-ghi, và chỉ khi <em>đang</em> có phân vùng mạng — thứ ta không chọn mà phải chịu<span class="cite"><a href="#ref-9">9</a></span>. Khi mạng lành thì không phải đánh đổi gì; và rất nhiều hệ thực tế chẳng phải “CP” lẫn “AP”.</p>
+          <p class="en-only" lang="en">Wrong. The theorem is about linearizability only, in a single read-write register model only, and only <em>during</em> a network partition — which we do not choose but suffer<span class="cite"><a href="#ref-9">9</a></span>. With a healthy network there is no trade-off to make; and many real systems are neither "CP" nor "AP".</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Linearizable tức là serializable”</span><span class="en-only" lang="en">"Linearizable means serializable"</span></h4>
+          <p class="standard-copy">Sai. Một cái là bảo đảm về <em>tính mới</em> trên một đối tượng đơn; cái kia là bảo đảm về <em>cô lập giao dịch</em> trên nhóm thao tác, và không ràng buộc thời gian thực. Ghép cả hai mới thành <span lang="en">strict serializability</span><span class="cite"><a href="#ref-6">6</a></span>.</p>
+          <p class="en-only" lang="en">Wrong. One is a <em>recency</em> guarantee on a single object; the other is a <em>transaction isolation</em> guarantee over groups of operations, with no real-time constraint. Only their combination is strict serializability<span class="cite"><a href="#ref-6">6</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“FLP chứng minh đồng thuận là bất khả”</span><span class="en-only" lang="en">"FLP proves consensus is impossible"</span></h4>
+          <p class="standard-copy">Sai. FLP chỉ đúng trong mô hình bất đồng bộ <em>tất định</em>, nơi thuật toán không được dùng đồng hồ hay timeout<span class="cite"><a href="#ref-22">22</a></span>. Hệ thật được phép dùng timeout và ngẫu nhiên, nên đồng thuận vẫn giải được — đó là lý do Paxos và Raft tồn tại<span class="cite"><a href="#ref-23">23</a></span>.</p>
+          <p class="en-only" lang="en">Wrong. FLP holds in the <em>deterministic</em> asynchronous model, where the algorithm may use no clocks or timeouts<span class="cite"><a href="#ref-22">22</a></span>. Real systems may use timeouts and randomisation, so consensus is achievable — which is why Paxos and Raft exist<span class="cite"><a href="#ref-23">23</a></span>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi nhu cầu đồng bộ trong hệ của bạn</span><span class="en-only" lang="en">Audit the coordination your system really needs</span></h2>
+        <p class="standard-copy">Chương 9 cho ta một bộ câu hỏi sắc bén để soi bất kỳ hệ nào: chỗ nào đang <em>đòi</em> bảo đảm mạnh, chỗ nào đang <em>trả tiền</em> cho bảo đảm mà nó không cần, và chỗ nào đang <em>giả định</em> một bảo đảm mà hệ không hề có.</p>
+        <p class="easy-only">Thử soi một hệ thật bằng mấy câu dưới. Mục tiêu không phải khoe hệ chắc chắn, mà để biết chỗ nào <em>cần</em> chắc chắn và chỗ nào chỉ đang tốn công vô ích. Nhớ nhé: hỏi đúng chỗ trước khi sửa.</p>
+        <p class="en-only" lang="en">Chapter 9 hands us a sharp set of questions for any system: where it <em>demands</em> a strong guarantee, where it <em>pays</em> for one it doesn't need, and where it <em>assumes</em> one it never had.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Chỗ nào trong hệ của bạn thật sự cần khả tuyến tính hoá?</strong><span class="deep-only">Hãy kể tên cụ thể: một cái khoá, một ràng buộc duy nhất, một cuộc bầu leader. Nếu danh sách dài hơn ba dòng, nhiều khả năng bạn đang trả tiền cho đồng bộ ở những chỗ chỉ cần nhất quán nhân quả.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có đang nhầm “khả tuyến tính hoá” với “khả tuần tự hoá” không?</strong><span class="deep-only">Cơ sở dữ liệu của bạn có thể cho mức cô lập serializable mà vẫn trả về dữ liệu cũ khi đọc từ bản sao. Hai bảo đảm này bật/tắt độc lập, và tài liệu sản phẩm thường dùng chung một chữ "consistency" cho cả hai.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Người dùng của bạn có kênh phụ nào không?</strong><span class="deep-only">Một hàng đợi tin nhắn, một webhook, một cuộc gọi điện thoại giữa hai nhân viên — bất kỳ đường nào truyền tin nhanh hơn đường sao chép dữ liệu đều biến "hơi cũ" thành "sai rõ ràng". Hãy vẽ các kênh ấy ra trước khi chọn mô hình nhất quán.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Khi có phân vùng mạng, bạn muốn nhánh thiểu số làm gì?</strong><span class="deep-only">Đây mới là câu hỏi CAP thật sự, và nó chỉ có ý nghĩa <em>trong lúc</em> phân vùng. Hai lựa chọn: từ chối phục vụ để giữ tính đúng đắn, hay tiếp tục phục vụ với dữ liệu có thể cũ. Hãy trả lời cho từng chức năng, đừng trả lời cho cả hệ.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn đang trả bao nhiêu độ trễ cho việc đồng bộ, và trả ở đâu?</strong><span class="deep-only">Thời gian phản hồi của thao tác khả tuyến tính hoá tỉ lệ với độ bất định của độ trễ mạng<span class="cite"><a href="#ref-13">13</a></span>. Nếu quorum của bạn trải qua nhiều vùng địa lý, con số ấy nằm trong p99 của bạn mỗi ngày, không chỉ khi có sự cố.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có chỗ nào trong hệ hiện ra “sau” trước “trước” không?</strong><span class="deep-only">Bình luận hiện trước bài viết, thông báo tới trước dữ liệu, câu trả lời xuất hiện trước câu hỏi — đó là vi phạm nhân quả, và thường là thứ người dùng phàn nàn trước cả khi bạn kịp nghĩ tới CAP.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu điều phối viên giao dịch của bạn chết ngay bây giờ, ai đang giữ khoá?</strong><span class="deep-only">Với 2PC, các bên đã bỏ phiếu "sẵn sàng" sẽ treo ở trạng thái nghi ngờ và giữ khoá tới khi điều phối viên trở lại<span class="cite"><a href="#ref-20">20</a></span>. Bạn có biết thời gian phục hồi của nó, và có quy trình xử lý giao dịch mồ côi chưa?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn đang tự viết đồng thuận, hay đang dùng lại?</strong><span class="deep-only">Nếu trong mã của bạn có chỗ nào tự bầu leader bằng timeout và cờ trong cơ sở dữ liệu, gần như chắc chắn bạn đang viết một thuật toán đồng thuận sai. Ngay cả Google cũng thấy việc hiện thực Paxos là không tầm thường<span class="cite"><a href="#ref-29">29</a></span>.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Chỗ nào trong hệ của bạn bắt buộc phải "chỉ một người được làm"?</strong><span>Đó là chỗ cần mức chắc chắn cao nhất. Những chỗ khác thì không cần.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có chỗ nào hiện ra lộn thứ tự không?</strong><span>Ví dụ thấy lời bình luận mà chưa thấy bài viết. Đó là lỗi thứ tự trước-sau.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu đường dây giữa các máy bị đứt, bạn muốn máy bên kia làm gì?</strong><span>Im lặng chờ cho chắc, hay cứ trả lời dù có thể trả lời số cũ? Chọn theo từng việc.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Ai đang là "người cầm loa" trong hệ của bạn?</strong><span>Nếu người đó nghỉ, nhóm có tự chọn được người khác không, hay treo luôn?</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>Where does your system genuinely need linearizability?</strong><span>Name them: a lock, a uniqueness constraint, a leader election. If the list runs past three lines, you are probably paying for coordination where causal consistency would do.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Are you confusing "linearizable" with "serializable"?</strong><span>Your database can offer serializable isolation and still return stale reads from a replica. The two guarantees toggle independently, and product docs often use one word "consistency" for both.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>What side channels do your users have?</strong><span>A message queue, a webhook, one colleague phoning another — any path faster than replication turns "slightly stale" into "plainly wrong". Draw those channels before choosing a consistency model.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>During a partition, what should the minority side do?</strong><span>This is the real CAP question, and it only means anything <em>while</em> the partition lasts. Refuse service to stay correct, or keep serving possibly-stale data. Answer per feature, not per system.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How much latency are you paying for coordination, and where?</strong><span>The response time of linearizable operations is proportional to network delay uncertainty<span class="cite"><a href="#ref-13">13</a></span>. If your quorum spans regions, that cost sits in your p99 every day, not only during incidents.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Does anything in your system show "after" before "before"?</strong><span>A comment before its post, a notification before the data, an answer before the question — these are causality violations, and usually what users complain about long before CAP comes up.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>If your transaction coordinator died right now, who holds the locks?</strong><span>Under 2PC, participants that voted "yes" hang in doubt and hold their locks until the coordinator returns<span class="cite"><a href="#ref-20">20</a></span>. Do you know its recovery time, and do you have a runbook for orphaned transactions?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Are you writing consensus yourself, or reusing it?</strong><span>If your code elects a leader with a timeout and a flag in a database, you are almost certainly writing a broken consensus algorithm. Even Google found implementing Paxos non-trivial<span class="cite"><a href="#ref-29">29</a></span>.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Nhất quán không phải một công tắc mà là một <span class="closing-accent">phổ có giá</span>. Khả tuyến tính hoá bán cho bạn ảo giác <span class="closing-accent">chỉ có một bản sao</span>, và thu tiền bằng độ trễ mỗi ngày cùng khả năng phục vụ khi mạng đứt — nên chỉ nên mua cho khoá, bầu leader và ràng buộc duy nhất. Nhân quả rẻ hơn nhiều mà chữa được phần lớn lỗi người dùng thật sự thấy. Còn khi bắt buộc phải có một thứ tự toàn phần, bạn đã bước vào lãnh địa đồng thuận — nơi <span class="closing-accent">total order broadcast và đồng thuận là một</span>, nơi epoch và quorum giữ cho quyết định không bị xoá, và nơi lời khuyên đúng đắn nhất là đừng tự viết lại.</span><span class="easy-only">Không phải lúc nào cũng cần mức chắc chắn cao nhất. Mức cao nhất giống như <span class="closing-accent">chỉ có một cuốn sổ duy nhất</span> — rất chắc nhưng phải chờ lâu. Hãy dùng nó cho vài việc quan trọng: giữ khoá, chọn chỉ huy, giữ cái tên là duy nhất. Còn lại, chỉ cần <span class="closing-accent">giữ đúng thứ tự trước-sau</span> là đủ. Nhớ nhé: chọn mức vừa đủ, và <span class="closing-accent">đừng tự viết lại</span> thứ người ta đã làm tốt.</span><span class="en-only" lang="en">Consistency is not a switch but a <span class="closing-accent">priced spectrum</span>. Linearizability sells you the illusion of a <span class="closing-accent">single copy</span> and charges in daily latency and in availability when the network breaks — so buy it only for locks, leader election and uniqueness. Causality is far cheaper and fixes most of the bugs users actually see. And when a total order is truly required, you have entered the land of consensus — where <span class="closing-accent">total order broadcast and consensus are one</span>, where epochs and quorums keep decisions from being erased, and where the soundest advice is not to write your own.</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-8-the-trouble-with-distributed-systems.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 8 · Rắc rối của hệ phân tán</span><span class="en-only" lang="en">Chapter 8 · The Trouble with Distributed Systems</span></span>
+    </a>
+    <span class="nav-cell nav-next" aria-disabled="true">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 10 · Xử lý theo mẻ · sắp có</span><span class="en-only" lang="en">Chapter 10 · Batch Processing · soon</span></span>
+    </span>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 9 <span lang="en">“Consistency and Consensus”</span><span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span> — chương khép lại Phần II <span lang="en">“Distributed Data”</span> của cuốn sách<span class="cite"><a href="#ref-2">2</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (cuốn sổ trong nhiều phòng, đội trưởng, người cầm loa…) là minh hoạ do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. Ví dụ Alice/Bob xem chung kết World Cup 2014 là của chính Kleppmann trong bài viết về CAP <span class="cite"><a href="#ref-9">9</a></span>. Hành vi sản phẩm của ZooKeeper và etcd được dẫn từ tài liệu <em>hiện hành</em> của hai dự án <span class="cite"><a href="#ref-30">30</a></span><span class="cite"><a href="#ref-31">31</a></span>, muộn hơn bản in 2017, nên có thể khác diễn đạt trong sách. Danh mục dưới đây được đối chiếu với danh mục tham chiếu Chương 9 do chính Kleppmann duy trì<span class="cite"><a href="#ref-4">4</a></span>.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 9 “Consistency and Consensus”<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span> — the chapter that closes Part II “Distributed Data”<span class="cite"><a href="#ref-2">2</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (notebooks in several rooms, a team captain, someone on the loudspeaker…) are illustrations added by this companion, not examples from the book. The Alice/Bob 2014 World Cup example is Kleppmann's own, from his CAP essay <span class="cite"><a href="#ref-9">9</a></span>. ZooKeeper and etcd product behaviour is quoted from those projects' <em>current</em> documentation <span class="cite"><a href="#ref-30">30</a></span><span class="cite"><a href="#ref-31">31</a></span>, later than the 2017 print edition, so wording may differ from the book. The list below was cross-checked against the Chapter 9 reference list Kleppmann himself maintains<span class="cite"><a href="#ref-4">4</a></span>.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 9 <span lang="en">“Consistency and Consensus”</span>.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách (khung Phần II · Distributed Data, chương “Consistency and Consensus”)</a></li>
+        <li id="ref-3"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O'Reilly — trang sách chính thức (mục lục, định danh chương)</a> <em>(oreilly.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-4"><a href="https://github.com/ept/ddia-references/blob/master/chapter-09-refs.md" target="_blank" rel="noopener noreferrer">ept/ddia-references — danh mục tham chiếu Chương 9 do chính Kleppmann duy trì</a></li>
+        <li id="ref-5"><a href="https://cs.brown.edu/~mph/HerlihyW90/p463-herlihy.pdf" target="_blank" rel="noopener noreferrer">Maurice P. Herlihy &amp; Jeannette M. Wing, “Linearizability: A Correctness Condition for Concurrent Objects”, ACM TOPLAS 12(3), 1990 — định nghĩa hình thức của linearizability</a></li>
+        <li id="ref-6"><a href="https://www.bailis.org/blog/linearizability-versus-serializability/" target="_blank" rel="noopener noreferrer">Peter Bailis, “Linearizability versus Serializability”, bailis.org, 2014 — phân biệt hai bảo đảm và tính ghép được</a></li>
+        <li id="ref-7"><a href="https://jepsen.io/consistency/models/strict-serializable" target="_blank" rel="noopener noreferrer">Jepsen — Strict Serializable (mô hình kết hợp serializability với ràng buộc thời gian thực)</a></li>
+        <li id="ref-8"><a href="https://queue.acm.org/detail.cfm?id=2462076" target="_blank" rel="noopener noreferrer">Peter Bailis &amp; Ali Ghodsi, “Eventual Consistency Today: Limitations, Extensions, and Beyond”, ACM Queue 11(3), 2013</a> <em>(queue.acm.org chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-9"><a href="https://martin.kleppmann.com/2015/05/11/please-stop-calling-databases-cp-or-ap.html" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “Please Stop Calling Databases CP or AP”, martin.kleppmann.com, 11/05/2015 — phạm vi hẹp của CAP, ví dụ Alice/Bob, ZooKeeper</a></li>
+        <li id="ref-10"><a href="https://arxiv.org/abs/1509.05393" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “A Critique of the CAP Theorem”, arXiv:1509.05393, 2015</a></li>
+        <li id="ref-11"><a href="https://www.comp.nus.edu.sg/~gilbert/pubs/BrewersConjecture-SigAct.pdf" target="_blank" rel="noopener noreferrer">Seth Gilbert &amp; Nancy Lynch, “Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services”, ACM SIGACT News 33(2), 2002 — bản chứng minh hình thức của CAP</a></li>
+        <li id="ref-12"><a href="https://groups.csail.mit.edu/tds/papers/Gilbert/Brewer2.pdf" target="_blank" rel="noopener noreferrer">Seth Gilbert &amp; Nancy Lynch, “Perspectives on the CAP Theorem”, IEEE Computer 45(2), 2012 — chính các tác giả đặt lại CAP vào đúng phạm vi</a></li>
+        <li id="ref-13"><a href="https://courses.csail.mit.edu/6.852/01/papers/p91-attiya.pdf" target="_blank" rel="noopener noreferrer">Hagit Attiya &amp; Jennifer L. Welch, “Sequential Consistency Versus Linearizability”, ACM TOCS 12(2), 1994 — giới hạn độ trễ của thao tác khả tuyến tính hoá</a></li>
+        <li id="ref-14"><a href="https://www.cse.huji.ac.il/course/2004/dist/p124-attiya.pdf" target="_blank" rel="noopener noreferrer">Hagit Attiya, Amotz Bar-Noy &amp; Danny Dolev, “Sharing Memory Robustly in Message-Passing Systems”, JACM 42(1), 1995 — thanh ghi khả tuyến tính hoá bằng quorum</a></li>
+        <li id="ref-15"><a href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “How to do distributed locking”, martin.kleppmann.com, 08/02/2016 — fencing token</a></li>
+        <li id="ref-16"><a href="https://lamport.azurewebsites.net/pubs/time-clocks.pdf" target="_blank" rel="noopener noreferrer">Leslie Lamport, “Time, Clocks, and the Ordering of Events in a Distributed System”, CACM 21(7), 1978 — happens-before và đồng hồ logic</a></li>
+        <li id="ref-17"><a href="https://apps.cs.utexas.edu/tech_reports/reports/tr/TR-2036.pdf" target="_blank" rel="noopener noreferrer">Prince Mahajan, Lorenzo Alvisi &amp; Mike Dahlin, “Consistency, Availability, and Convergence”, UTCS TR-11-22, 2011 — trần của bảo đảm khi luôn khả dụng</a></li>
+        <li id="ref-18"><a href="https://dspace.jaist.ac.jp/dspace/bitstream/10119/4883/1/defago_et_al.pdf" target="_blank" rel="noopener noreferrer">Xavier Défago, André Schiper &amp; Péter Urbán, “Total Order Broadcast and Multicast Algorithms: Taxonomy and Survey”, ACM Computing Surveys 36(4), 2004</a></li>
+        <li id="ref-19"><a href="https://www.cs.cornell.edu/fbs/publications/smsurvey.pdf" target="_blank" rel="noopener noreferrer">Fred B. Schneider, “Implementing Fault-Tolerant Services Using the State Machine Approach: A Tutorial”, ACM Computing Surveys 22(4), 1990</a></li>
+        <li id="ref-20"><a href="https://www.cs.utexas.edu/~lorenzo/corsi/cs380d/papers/Ske81.pdf" target="_blank" rel="noopener noreferrer">Dale Skeen, “Nonblocking Commit Protocols”, ACM SIGMOD, 1981 — tính treo của 2PC và điều kiện của 3PC</a></li>
+        <li id="ref-21"><a href="https://pubs.opengroup.org/onlinepubs/009680699/toc.pdf" target="_blank" rel="noopener noreferrer">“Distributed Transaction Processing: The XA Specification”, X/Open Company Ltd., XO/CAE/91/300, 1991 — giao diện XA và heuristic decision</a></li>
+        <li id="ref-22"><a href="https://groups.csail.mit.edu/tds/papers/Lynch/jacm85.pdf" target="_blank" rel="noopener noreferrer">Michael J. Fischer, Nancy Lynch &amp; Michael S. Paterson, “Impossibility of Distributed Consensus with One Faulty Process”, JACM 32(2), 1985 — định lý FLP</a></li>
+        <li id="ref-23"><a href="https://courses.csail.mit.edu/6.852/08/papers/CT96-JACM.pdf" target="_blank" rel="noopener noreferrer">Tushar Deepak Chandra &amp; Sam Toueg, “Unreliable Failure Detectors for Reliable Distributed Systems”, JACM 43(2), 1996 — bộ phát hiện lỗi và tương đương giữa đồng thuận với atomic broadcast</a></li>
+        <li id="ref-24"><a href="https://lamport.azurewebsites.net/pubs/paxos-simple.pdf" target="_blank" rel="noopener noreferrer">Leslie Lamport, “Paxos Made Simple”, ACM SIGACT News 32(4), 2001</a></li>
+        <li id="ref-25"><a href="https://raft.github.io/raft.pdf" target="_blank" rel="noopener noreferrer">Diego Ongaro &amp; John Ousterhout, “In Search of an Understandable Consensus Algorithm (Raft)”, USENIX ATC, 2014 — term, bầu cử, quorum giao nhau</a></li>
+        <li id="ref-26"><a href="https://www.cs.cornell.edu/courses/cs6452/2012sp/papers/zab-ieee.pdf" target="_blank" rel="noopener noreferrer">Flavio P. Junqueira, Benjamin C. Reed &amp; Marco Serafini, “Zab: High-Performance Broadcast for Primary-Backup Systems”, IEEE DSN, 2011 — giao thức nền của ZooKeeper</a></li>
+        <li id="ref-27"><a href="https://www.cs.princeton.edu/courses/archive/fall11/cos518/papers/viewstamped.pdf" target="_blank" rel="noopener noreferrer">Brian M. Oki &amp; Barbara H. Liskov, “Viewstamped Replication”, ACM PODC, 1988</a></li>
+        <li id="ref-28"><a href="https://research.google/pubs/pub27897/" target="_blank" rel="noopener noreferrer">Mike Burrows, “The Chubby Lock Service for Loosely-Coupled Distributed Systems”, USENIX OSDI, 2006 — dịch vụ khoá và bầu leader dùng chung</a></li>
+        <li id="ref-29"><a href="https://www.read.seas.harvard.edu/~kohler/class/08w-dsi/chandra07paxos.pdf" target="_blank" rel="noopener noreferrer">Tushar Deepak Chandra, Robert Griesemer &amp; Joshua Redstone, “Paxos Made Live — An Engineering Perspective”, ACM PODC, 2007 — khoảng cách giữa bài báo và hệ chạy được</a></li>
+        <li id="ref-30"><a href="https://zookeeper.apache.org/doc/current/zookeeperProgrammers.html" target="_blank" rel="noopener noreferrer">Apache ZooKeeper — Programmer's Guide, mục “Consistency Guarantees” (nhất quán tuần tự, single system image, cảnh báo về đọc cũ và <span lang="en">sync()</span>)</a></li>
+        <li id="ref-31"><a href="https://etcd.io/docs/v3.5/learning/api_guarantees/" target="_blank" rel="noopener noreferrer">etcd — “API guarantees made by etcd” (strict serializability cho KV, khả tuyến tính hoá mặc định, chế độ đọc <span lang="en">serializable</span>)</a></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-8-the-trouble-with-distributed-systems.html">Chương 8 — Rắc rối của hệ phân tán</a>. <span class="soon-note">Chương 10 — Xử lý theo mẻ: sắp có.</span></p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-8-the-trouble-with-distributed-systems.html">Chapter 8 — The Trouble with Distributed Systems</a>. <span class="soon-note">Chapter 10 — Batch Processing: coming soon.</span></p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,2018 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 8 &quot;The Trouble with Distributed Systems&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: lỗi bộ phận, mạng không đáng tin, đồng hồ không đáng tin, quãng dừng tiến trình, fencing token, lỗi Byzantine và mô hình hệ thống.">
+<title>The Trouble with Distributed Systems</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 08";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 8</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 8</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 8</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 8 · Rắc rối của hệ phân tán</span><span class="easy-only">DDIA · Chương 8 · Rắc rối của hệ phân tán</span><span class="en-only" lang="en">DDIA · Chapter 8 · The Trouble with Distributed Systems</span></div>
+      <h1 id="page-title"><span class="standard-copy">Hệ phân tán hỏng theo kiểu <span class="hero-title-accent">bộ phận và bất định</span></span><span class="easy-only">Nhiều máy làm chung thì hay trục trặc</span><span class="en-only" lang="en">Distributed systems fail in <span class="hero-title-accent">partial, nondeterministic</span> ways</span></h1>
+      <p class="standard-copy">Đây là chương đổ vỡ của cuốn sách. Sau khi Chương 7 dựng lên giao dịch như một lớp trừu tượng gọn gàng, Kleppmann quay lại tháo tung nền móng: trong một hệ phân tán, <strong>bất cứ thứ gì có thể hỏng thì sẽ hỏng</strong>, và tệ hơn — bạn thường không biết nó đã hỏng hay chưa<span class="cite"><a href="#ref-1">1</a></span>. Mạng nuốt gói tin, đồng hồ nói dối, tiến trình đứng hình giữa chừng rồi tỉnh dậy như chưa có gì xảy ra. Giọng của chương là <em>hoài nghi có kỷ luật</em>: không phải bi quan, mà là từ chối tin vào những giả định mà phần cứng không hề hứa hẹn.</p>
+      <p class="easy-only">Một cái máy hỏng thì bạn biết ngay: nó tắt. Nhưng khi nhiều máy làm việc cùng nhau, chuyện khó hơn nhiều: một máy có thể <strong>im lặng</strong> mà bạn không biết nó chết hay chỉ đang bận. Chương này kể ra tất cả những kiểu trục trặc kỳ quặc ấy, để mình đừng ngây thơ tin rằng mọi thứ luôn chạy đúng.</p>
+      <p class="en-only" lang="en">This is the book's chapter of breakage. After Chapter 7 builds transactions into a tidy abstraction, Kleppmann goes back and pulls the foundations apart: in a distributed system <strong>anything that can go wrong will go wrong</strong>, and worse — you usually cannot tell whether it has<span class="cite"><a href="#ref-1">1</a></span>. Networks swallow packets, clocks lie, processes freeze mid-sentence and wake up as if nothing happened. The chapter's tone is <em>disciplined scepticism</em>: not pessimism, but a refusal to believe assumptions the hardware never promised.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Khác biệt cốt lõi giữa một máy đơn và một hệ phân tán là <strong>lỗi bộ phận</strong>: trên một máy, lỗi thường toàn phần và tất định (hoặc chạy đúng, hoặc sập hẳn); trong hệ phân tán, một phần hỏng trong khi phần còn lại vẫn chạy, và kết quả <em>bất định</em><span class="cite"><a href="#ref-1">1</a></span>. Vì mạng, đồng hồ và tiến trình đều không cho ta bất kỳ chặn trên nào về thời gian, ta không thể phân biệt "node đã chết" với "node đang chậm". Kết luận thực dụng của Kleppmann: đừng cố suy ra sự thật từ một node tự tin — hãy để <strong>đa số</strong> định nghĩa sự thật, và bảo vệ tài nguyên bằng cơ chế có thể chứng minh được như <em>fencing token</em>.</p>
+          <p class="easy-only">Một máy hỏng thì hỏng hẳn — dễ hiểu. Nhiều máy thì có máy hỏng, máy không, và bạn không biết máy im lặng kia còn sống hay đã chết. Nên đừng tin một máy tự nói "tôi đúng"; hãy hỏi cả nhóm. Nhớ nhé: trong hệ nhiều máy, <strong>số đông</strong> mới là người quyết định sự thật.</p>
+          <p class="en-only" lang="en">The core difference between one machine and a distributed system is <strong>partial failure</strong>: on one machine faults are usually total and deterministic (it works, or it crashes); in a distributed system part of it breaks while the rest runs on, and the outcome is <em>nondeterministic</em><span class="cite"><a href="#ref-1">1</a></span>. Because networks, clocks and processes give us no upper bound on time, we cannot distinguish "the node is dead" from "the node is slow". Kleppmann's pragmatic conclusion: stop inferring truth from one confident node — let the <strong>majority</strong> define truth, and protect resources with provable mechanisms such as <em>fencing tokens</em>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Ba nguồn bất định của hệ phân tán theo Chương 8: mạng không đáng tin, đồng hồ không đáng tin, và quãng dừng tiến trình / Three sources of uncertainty in Chapter 8: unreliable networks, unreliable clocks, and process pauses">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">ĐIỀU GÌ<br>CÓ THỂ HỎNG?</span><span class="en-only" lang="en">WHAT CAN<br>GO WRONG?</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Mạng</span><span class="en-only" lang="en">Networks</span></b>
+        <small class="standard-copy">Gói tin mất, chậm, hoặc tới muộn không chặn trên</small>
+        <small class="easy-only">Thư gửi đi có thể lạc hoặc tới rất muộn.</small>
+        <small class="en-only" lang="en">Packets drop, delay, or arrive after unbounded time</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Đồng hồ</span><span class="en-only" lang="en">Clocks</span></b>
+        <small class="standard-copy">Lệch nhau, nhảy lùi, không đủ chính xác để xếp thứ tự</small>
+        <small class="easy-only">Mỗi máy xem một cái đồng hồ hơi khác nhau.</small>
+        <small class="en-only" lang="en">Skewed, can jump backwards, too coarse to order events</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Tiến trình</span><span class="en-only" lang="en">Processes</span></b>
+        <small class="standard-copy">Bị dừng bất kỳ lúc nào, lâu tùy ý, rồi chạy tiếp</small>
+        <small class="easy-only">Máy có thể "đứng hình" rồi tỉnh lại như không.</small>
+        <small class="en-only" lang="en">Can pause at any point, for any length, then resume</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#partial-failure"><span><span class="vi-only">Lỗi bộ phận</span><span class="en-only" lang="en">Partial failure</span></span><b class="standard-copy">Vì sao hệ phân tán khác hệ một máy</b><b class="easy-only">Hỏng một phần, không hỏng hết</b><b class="en-only" lang="en">Why distributed differs from single-machine</b></a>
+    <a href="#unreliable-networks"><span><span class="vi-only">Mạng</span><span class="en-only" lang="en">Networks</span></span><b class="standard-copy">Timeout, độ trễ không chặn trên, hàng đợi</b><b class="easy-only">Thư có thể lạc hoặc tới muộn</b><b class="en-only" lang="en">Timeouts, unbounded delay, queueing</b></a>
+    <a href="#unreliable-clocks"><span><span class="vi-only">Đồng hồ</span><span class="en-only" lang="en">Clocks</span></span><b class="standard-copy">Time-of-day, monotonic, khoảng tin cậy, quãng dừng</b><b class="easy-only">Đồng hồ mỗi máy một khác</b><b class="en-only" lang="en">Time-of-day, monotonic, confidence intervals, pauses</b></a>
+    <a href="#truth-and-lies"><span><span class="vi-only">Sự thật</span><span class="en-only" lang="en">Truth</span></span><b class="standard-copy">Đa số, fencing token, Byzantine, mô hình hệ thống</b><b class="easy-only">Ai được quyền nói điều gì là đúng</b><b class="en-only" lang="en">Majority, fencing, Byzantine, system models</b></a>
+    <a href="#diagnostic"><span><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></span><b class="standard-copy">Soi những giả định bạn đang ngầm tin</b><b class="easy-only">Câu hỏi tự hỏi mình</b><b class="en-only" lang="en">Audit the assumptions you silently make</b></a>
+  </nav>
+
+  <section class="section" id="partial-failure" aria-labelledby="partial-failure-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">Partial failure</span></span><span class="en-only" lang="en">Axis 1 · Partial failure</span></div>
+        <h2 id="partial-failure-title"><span class="vi-only">Lỗi bộ phận: hỏng một phần, và không biết là phần nào</span><span class="en-only" lang="en">Partial failure: part of it breaks, and you can't tell which</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann mở chương bằng một phép so sánh: khi bạn viết phần mềm chạy trên <em>một</em> máy, phần cứng cho bạn một lời hứa ngầm rất mạnh — nó hoặc làm đúng, hoặc hỏng hẳn. Không có trạng thái "hơi hỏng"<span class="cite"><a href="#ref-1">1</a></span>. Máy tính một nút được thiết kế để <strong>thà sập còn hơn trả kết quả sai</strong>, nên lỗi là <em>toàn phần</em> và <em>tất định</em>: chạy lại cùng đầu vào thường ra cùng kết quả. Hệ phân tán vứt bỏ lời hứa đó. Ở đó lỗi là <strong>bộ phận</strong> — một nút, một liên kết, một switch hỏng trong khi phần còn lại vẫn chạy — và <strong>bất định</strong>: cùng một thao tác lúc thành công, lúc thất bại, lúc treo vô hạn.</p>
+      <p class="easy-only">Một cái máy tính giống một cái đèn: hoặc sáng, hoặc tắt. Bạn nhìn là biết. Nhưng một nhóm máy nối với nhau thì giống một lớp học đông: có bạn giơ tay, có bạn im lặng — mà im lặng thì có thể là ngủ gật, có thể là đang suy nghĩ, có thể là đã về nhà. Bạn không nhìn thấy được. Nhớ nhé: khó nhất không phải là <em>hỏng</em>, mà là <em>không biết có hỏng hay không</em>.</p>
+      <p class="en-only" lang="en">Kleppmann opens with a comparison: when you write software for <em>one</em> machine, the hardware gives you a very strong implicit promise — it either does the right thing or fails completely. There is no "slightly broken" state<span class="cite"><a href="#ref-1">1</a></span>. A single computer is built to <strong>crash rather than return a wrong answer</strong>, so faults are <em>total</em> and <em>deterministic</em>: rerun the same input and you usually get the same result. A distributed system throws that promise away. There, faults are <strong>partial</strong> — one node, one link, one switch fails while the rest runs on — and <strong>nondeterministic</strong>: the same operation sometimes succeeds, sometimes fails, sometimes hangs forever.</p>
+      <p class="deep-only">Điểm tinh tế là <em>bất định</em> chứ không chỉ <em>bộ phận</em>. Một lỗi bộ phận mà bạn quan sát được thì vẫn xử lý được bằng dư thừa, đúng như bộ ba reliability · scalability · maintainability của Chương 1. Cái làm hệ phân tán khó suy luận là <strong>tính không quan sát được</strong>: bạn gửi một yêu cầu và không nhận được gì. Đã xảy ra điều gì? Yêu cầu chưa rời máy bạn; nó lạc trên đường; nó tới nơi và node đã chết trước khi xử lý; nó được xử lý xong và <em>phản hồi</em> mới là thứ bị lạc. Bốn kịch bản, một quan sát duy nhất là sự im lặng. Cả chương 8 là cuộc vật lộn với sự im lặng đó.</p>
+    </div>
+
+    <div class="overview-grid">
+      <article class="overview-card teal">
+        <div class="term"><span class="vi-only">Ý lõi 01 · <span lang="en">Deterministic vs nondeterministic</span></span><span class="en-only" lang="en">Idea 01 · Deterministic vs nondeterministic</span></div>
+        <h3><span class="vi-only">Một máy: tất định. Nhiều máy: bất định</span><span class="en-only" lang="en">One machine: deterministic. Many: not</span></h3>
+        <p class="standard-copy">Trên một máy, một bug thường tái hiện được: cùng đầu vào, cùng trạng thái, cùng kết quả sai. Đó là lý do gỡ lỗi phần mềm một nút là việc khả thi. Trong hệ phân tán, cùng một lệnh gọi có thể thành công chín lần rồi treo lần thứ mười vì một switch vừa nghẹt hàng đợi. Kleppmann gọi đây là bước nhảy về <strong>bản chất của bài toán</strong>, không phải về quy mô<span class="cite"><a href="#ref-1">1</a></span>: bạn không còn suy luận bằng <em>chắc chắn</em> mà bằng <em>xác suất và giả định</em>.</p>
+        <p class="easy-only">Ở một máy, nếu bạn làm lại y hệt thì thường ra y hệt — nên tìm ra chỗ sai không quá khó. Ở nhiều máy, làm lại y hệt có khi ra khác hẳn, vì đường truyền lúc thông lúc tắc. Nhớ nhé: cái khó không phải là nhiều máy hơn, mà là <strong>kết quả không còn lặp lại được</strong>.</p>
+        <p class="en-only" lang="en">On one machine a bug usually reproduces: same input, same state, same wrong answer. That is why debugging single-node software is tractable. In a distributed system the same call can succeed nine times and hang on the tenth because a switch queue just filled up. Kleppmann treats this as a change in <strong>the nature of the problem</strong>, not in its scale<span class="cite"><a href="#ref-1">1</a></span>: you stop reasoning with <em>certainty</em> and start reasoning with <em>probabilities and assumptions</em>.</p>
+        <div class="result standard-copy">Bất định là bước nhảy về chất, không về lượng.</div>
+        <div class="result easy-only">Nhớ nhé: làm lại chưa chắc ra như cũ.</div>
+        <div class="result en-only" lang="en">Nondeterminism is a change in kind, not degree.</div>
+      </article>
+      <article class="overview-card blue">
+        <div class="term"><span class="vi-only">Ý lõi 02 · <span lang="en">Reliable from unreliable</span></span><span class="en-only" lang="en">Idea 02 · Reliable from unreliable</span></div>
+        <h3><span class="vi-only">Dựng cái đáng tin từ cái không đáng tin</span><span class="en-only" lang="en">Building something reliable from unreliable parts</span></h3>
+        <p class="standard-copy">Kleppmann không dừng ở bi quan. Ông nhắc rằng ngành máy tính đã quen với bài toán này từ lâu: von Neumann viết về việc tổng hợp <em>cơ thể đáng tin từ các bộ phận không đáng tin</em>, còn Shannon cho ta lý thuyết truyền tin qua kênh nhiễu — cả hai đều nằm trong danh mục tham chiếu của chính Chương 8<span class="cite"><a href="#ref-3">3</a></span>. IP có thể mất gói, nhưng TCP dựng trên nó một dòng dữ liệu "đáng tin"; giới hạn của thủ thuật ấy chính là bài học của chương.</p>
+        <p class="easy-only">Không phải cứ vật liệu dở là làm đồ dở. Người ta vẫn xây nhà chắc từ những viên gạch không hoàn hảo, bằng cách đặt nhiều viên đỡ nhau. Máy tính cũng vậy: đường truyền hay rớt thư, nhưng có cách gửi lại để cuối cùng thư vẫn tới. Nhớ nhé: từ những thứ hay hỏng, vẫn làm ra được thứ khá đáng tin — nếu biết cách.</p>
+        <p class="en-only" lang="en">Kleppmann does not stop at pessimism. He notes that computing has long known this problem: von Neumann wrote about synthesising <em>reliable organisms from unreliable components</em>, and Shannon gave us the theory of communication over noisy channels — both sit in Chapter 8's own bibliography<span class="cite"><a href="#ref-3">3</a></span>. IP may lose packets, yet TCP builds a "reliable" stream on top of it; the limits of that trick are the lesson of the chapter.</p>
+        <div class="result standard-copy">Dung thứ lỗi là truyền thống, không phải phép màu.</div>
+        <div class="result easy-only">Nhớ nhé: gạch xấu vẫn xây được nhà chắc.</div>
+        <div class="result en-only" lang="en">Fault tolerance is a tradition, not magic.</div>
+      </article>
+      <article class="overview-card amber">
+        <div class="term"><span class="vi-only">Ý lõi 03 · <span lang="en">Cloud vs supercomputing</span></span><span class="en-only" lang="en">Idea 03 · Cloud vs supercomputing</span></div>
+        <h3><span class="vi-only">Hai triết lý đối lập về lỗi</span><span class="en-only" lang="en">Two opposing philosophies of failure</span></h3>
+        <p class="standard-copy">Kleppmann đặt cạnh nhau hai thái cực<span class="cite"><a href="#ref-1">1</a></span>. Siêu máy tính (<span lang="en">HPC</span>) chạy các tác vụ tính toán dài, thường <em>checkpoint</em> định kỳ rồi khi có lỗi thì dừng cả job và khởi động lại từ điểm lưu — tức là xử lý lỗi bộ phận bằng cách <strong>biến nó thành lỗi toàn phần</strong>, giống một máy đơn phóng to. Dịch vụ trực tuyến trên đám mây thì không được phép dừng: nó phải phục vụ liên tục, dựng trên phần cứng hàng loạt, chấp nhận rằng luôn có thứ gì đó đang hỏng. Hai triết lý này dẫn tới hai bộ công cụ khác hẳn nhau.</p>
+        <p class="easy-only">Có hai kiểu làm việc. Kiểu một: nếu có trục trặc thì dừng tất cả, sửa xong làm lại từ chỗ đã lưu — giống chơi game gặp lỗi thì tải lại bản save. Kiểu hai: không được dừng, vì hàng triệu người đang dùng — nên phải vừa chạy vừa vá. Nhớ nhé: hai kiểu này cần hai cách nghĩ khác nhau.</p>
+        <p class="en-only" lang="en">Kleppmann sets two extremes side by side<span class="cite"><a href="#ref-1">1</a></span>. Supercomputers (<span lang="en">HPC</span>) run long computations, typically <em>checkpoint</em> periodically, and on failure stop the whole job and restart from the last checkpoint — handling partial failure by <strong>turning it into total failure</strong>, like one giant single machine. A cloud online service may not stop: it must serve continuously, on commodity hardware, accepting that something is always broken. The two philosophies lead to very different toolkits.</p>
+        <div class="result standard-copy">Đám mây phải sống chung với lỗi, không né được.</div>
+        <div class="result easy-only">Nhớ nhé: không được dừng thì phải chịu được lỗi.</div>
+        <div class="result en-only" lang="en">The cloud must live with faults, not dodge them.</div>
+      </article>
+    </div>
+
+    <div class="surprise-lead trap-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Partial failure · the defining property</div>
+        <p class="definition standard-copy"><strong>Lỗi bộ phận</strong> là tình huống trong đó một phần của hệ ngừng hoạt động đúng trong khi phần còn lại vẫn chạy — và không có cách nào quan sát trực tiếp để biết phần nào đã hỏng. Hệ quả kép: lỗi <em>bộ phận</em> nên không thể "khởi động lại tất cả", và <em>bất định</em> nên không thể suy luận bằng quy tắc chắc chắn.<span class="cite"><a href="#ref-1">1</a></span></p>
+        <p class="definition easy-only"><strong>Hỏng một phần</strong> nghĩa là một góc của hệ ngừng chạy nhưng các góc khác vẫn ổn — và mình không nhìn thấy góc nào hỏng. Nhớ nhé: cái khó là không nhìn thấy, chứ không phải cái hỏng.</p>
+        <p class="definition en-only" lang="en"><strong>Partial failure</strong> is when part of the system stops working correctly while the rest runs on — with no direct way to observe which part broke. A double consequence: it is <em>partial</em>, so you cannot just "restart everything"; and it is <em>nondeterministic</em>, so you cannot reason with certainty.<span class="cite"><a href="#ref-1">1</a></span></p>
+        <p class="deep-only">Vì sao điều này đáng sợ hơn nghe có vẻ? Vì nó lan lên tầng trừu tượng. Một lệnh gọi RPC không trả lời buộc lớp gọi phải quyết định: thử lại (có thể gây tác dụng kép nếu lần đầu đã thành công), bỏ qua (có thể mất dữ liệu), hay chờ (có thể treo mãi). Không lựa chọn nào an toàn nếu không biết chuyện gì đã xảy ra — nên toàn bộ Chương 8 thực chất là đi tìm những giả định <em>tối thiểu, có thể kiểm chứng</em> đủ để ra quyết định. Đó là lý do chương kết thúc bằng mô hình hệ thống và cặp an toàn – sống còn, chứ không phải bằng một danh sách mẹo vặt.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba hệ quả của lỗi bộ phận">
+        <div class="equation-row">
+          <b>Bộ phận</b>
+          <span>Một phần hỏng, phần khác chạy — không thể "tắt đi bật lại" cả hệ như một máy.</span>
+        </div>
+        <div class="equation-row">
+          <b>Bất định</b>
+          <span>Cùng thao tác, kết quả khác nhau theo thời điểm — bug khó tái hiện.</span>
+        </div>
+        <div class="equation-row">
+          <b>Không quan sát được</b>
+          <span>Sự im lặng có ít nhất bốn cách giải thích; bạn chỉ thấy đúng một dữ kiện.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về hỏng một phần">
+        <div class="equation-row">
+          <b>Hỏng một góc</b>
+          <span>Chỗ khác vẫn chạy, nên không thể tắt hết đi bật lại.</span>
+        </div>
+        <div class="equation-row">
+          <b>Lúc thế này lúc thế khác</b>
+          <span>Làm lại y hệt có khi ra khác, nên rất khó bắt lỗi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Không nhìn thấy</b>
+          <span>Im lặng có thể là nhiều chuyện khác nhau.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three consequences of partial failure">
+        <div class="equation-row">
+          <b>Partial</b>
+          <span>One part fails while others run — you cannot reboot the whole system like one machine.</span>
+        </div>
+        <div class="equation-row">
+          <b>Nondeterministic</b>
+          <span>The same operation gives different outcomes over time — bugs barely reproduce.</span>
+        </div>
+        <div class="equation-row">
+          <b>Unobservable</b>
+          <span>Silence has at least four explanations; you observe exactly one datum.</span>
+        </div>
+      </div>
+    </div>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ lỗi bộ phận tới nguồn bất định đầu tiên</strong>
+      <strong class="en-only" lang="en">From partial failure to the first source of uncertainty</strong>
+      <span class="standard-copy">Nếu sự im lặng là dữ kiện duy nhất bạn có, thì câu hỏi kế tiếp là: cái gì tạo ra sự im lặng đó? Nguồn thứ nhất, và là nguồn phổ biến nhất, chính là mạng.</span>
+      <span class="easy-only">Vậy tại sao một máy lại im lặng? Nguyên nhân số một là đường truyền. Phần sau nói về chuyện đó.</span>
+      <span class="en-only" lang="en">If silence is the only datum you have, the next question is: what produces that silence? The first and most common source is the network.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="unreliable-networks" aria-labelledby="unreliable-networks-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · <span lang="en">Unreliable networks</span></span><span class="en-only" lang="en">Axis 2 · Unreliable networks</span></div>
+        <h2 id="unreliable-networks-title"><span class="vi-only">Mạng không đáng tin: bạn chỉ có timeout, và timeout luôn nói dối</span><span class="en-only" lang="en">Unreliable networks: all you have is a timeout, and it always lies</span></h2>
+      </div>
+      <p class="standard-copy">Hệ phân tán mà cuốn sách bàn tới là hệ <em>shared-nothing</em>: các máy chỉ liên lạc qua mạng, không dùng chung bộ nhớ hay đĩa. Và mạng ở đây là <strong>mạng gói bất đồng bộ</strong> (<span lang="en">asynchronous packet network</span>)<span class="cite"><a href="#ref-1">1</a></span>: bạn gửi đi một thông điệp, và mạng <em>không hứa</em> bao giờ nó tới, hay có tới hay không. Kleppmann liệt kê những gì có thể xảy ra với một yêu cầu: nó có thể lạc; nó có thể nằm trong hàng đợi và tới muộn; node nhận có thể đã chết; node nhận có thể đang tạm dừng; phản hồi có thể lạc; phản hồi có thể tới muộn. <strong>Người gửi không phân biệt được các trường hợp này</strong> — tất cả đều hiện ra như nhau: không có gì cả.</p>
+      <p class="easy-only">Tưởng tượng bạn nhắn tin cho một người bạn và không thấy trả lời. Bạn không biết: bạn ấy chưa đọc? đã đọc mà bận? hay điện thoại hết pin? Hay tin nhắn của bạn chưa gửi được? Bạn chỉ thấy một điều: <strong>im lặng</strong>. Máy tính nói chuyện với nhau qua mạng cũng đúng như thế.</p>
+      <p class="en-only" lang="en">The distributed systems this book discusses are <em>shared-nothing</em>: machines communicate only over a network, sharing no memory or disk. And that network is an <strong>asynchronous packet network</strong><span class="cite"><a href="#ref-1">1</a></span>: you send a message, and the network makes <em>no promise</em> about when — or whether — it arrives. Kleppmann enumerates what can happen to a request: it may be lost; it may sit in a queue and arrive late; the remote node may have died; the remote node may be paused; the response may be lost; the response may be delayed. <strong>The sender cannot distinguish these cases</strong> — they all look identical: nothing at all.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Asynchronous packet network</div>
+        <p class="definition standard-copy">Một mạng <strong>bất đồng bộ</strong> là mạng không đặt bất kỳ <em>chặn trên</em> nào cho thời gian truyền một thông điệp, và không bảo đảm thông điệp sẽ tới. Vì không có chặn trên, không tồn tại một ngưỡng chờ nào mà vượt qua nó bạn <em>chứng minh</em> được node kia đã chết — chỉ có ngưỡng bạn <em>chọn</em> để ngừng chờ.<span class="cite"><a href="#ref-1">1</a></span></p>
+        <p class="definition easy-only">Mạng "bất đồng bộ" nghĩa là không ai hứa thư tới trong bao lâu, cũng không hứa thư sẽ tới. Nhớ nhé: chờ bao lâu là do bạn <em>chọn</em>, chứ không phải vì bạn <em>biết</em>.</p>
+        <p class="definition en-only" lang="en">An <strong>asynchronous</strong> network puts no <em>upper bound</em> on how long a message takes, and guarantees nothing about delivery. Because there is no upper bound, no waiting threshold ever <em>proves</em> the other node is dead — there is only the threshold you <em>choose</em> in order to stop waiting.<span class="cite"><a href="#ref-1">1</a></span></p>
+        <p class="deep-only">Đây là chỗ Kleppmann tách hai khái niệm hay bị gộp. <em>Phát hiện lỗi</em> (<span lang="en">failure detection</span>) trong mạng bất đồng bộ về nguyên tắc là không hoàn hảo: mọi bộ phát hiện đều có thể vừa bỏ sót (node chết mà chưa bị tuyên bố) vừa báo nhầm (node sống mà bị tuyên bố chết). Không có cách cấu hình nào loại bỏ được cả hai cùng lúc, vì chúng là hai mặt của cùng một tham số: ngưỡng chờ. Cả chương 9 — đồng thuận — về sau được dựng trên chính sự bất khả này.<span class="cite"><a href="#ref-1">1</a></span></p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba điều mạng không hứa">
+        <div class="equation-row">
+          <b>Không hứa tới</b>
+          <span>Gói tin có thể bị rớt ở bất kỳ chặng nào, và không ai báo cho bạn.</span>
+        </div>
+        <div class="equation-row">
+          <b>Không hứa nhanh</b>
+          <span>Độ trễ không có chặn trên: một gói có thể nằm hàng đợi rất lâu rồi mới tới.</span>
+        </div>
+        <div class="equation-row">
+          <b>Không hứa thứ tự</b>
+          <span>Thông điệp tới muộn có thể chen vào sau thông điệp gửi sau nó.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều đường truyền không hứa">
+        <div class="equation-row">
+          <b>Có thể lạc</b>
+          <span>Thư gửi đi chưa chắc tới nơi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Có thể rất muộn</b>
+          <span>Không ai nói trước bao lâu thì tới.</span>
+        </div>
+        <div class="equation-row">
+          <b>Có thể lộn xộn</b>
+          <span>Thư gửi trước có khi tới sau.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three things the network does not promise">
+        <div class="equation-row">
+          <b>No delivery</b>
+          <span>A packet can be dropped at any hop, and nobody tells you.</span>
+        </div>
+        <div class="equation-row">
+          <b>No bound</b>
+          <span>Latency has no upper bound: a packet may queue for a very long time.</span>
+        </div>
+        <div class="equation-row">
+          <b>No order</b>
+          <span>A delayed message can arrive after one sent later than it.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Network faults in practice</div>
+          <h3><span class="vi-only">Lỗi mạng trong thực tế — có đo được</span><span class="en-only" lang="en">Network faults in practice — measured</span></h3>
+          <p class="standard-copy">Không phải chuyện lý thuyết. Bailis và Kingsbury tập hợp các khảo sát công khai về lỗi mạng<span class="cite"><a href="#ref-4">4</a></span>. Một nghiên cứu trên <em>vài trung tâm dữ liệu của Microsoft</em> (Gill, Jain, Nagappan, SIGCOMM 2011) ghi nhận tỉ lệ hỏng trung bình <strong>5,2 thiết bị mỗi ngày và 40,8 liên kết mỗi ngày</strong>, thời gian sửa trung vị khoảng <strong>5 phút</strong> (có ca kéo dài tới một tuần), ước tính trung vị <strong>59.000 gói tin mất mỗi lần hỏng</strong>, và — đáng lo nhất — <strong>dư thừa mạng chỉ cải thiện lưu lượng trung vị thêm 43%</strong><span class="cite"><a href="#ref-5">5</a></span>. Một khảo sát khác trên mạng diện rộng CENIC (hơn hai trăm router khắp California, năm năm vận hành) tìm ra hơn <strong>508 "phân vùng cô lập"</strong>, thời lượng trung vị 2,7 phút với lỗi phần mềm và 32 phút với lỗi phần cứng<span class="cite"><a href="#ref-4">4</a></span>.</p>
+          <p class="easy-only">Đây không phải chuyện tưởng tượng. Người ta đã đi đếm thật: trong các trung tâm máy chủ lớn, mỗi ngày vẫn có vài thiết bị và vài chục đường dây hỏng. Và điều bất ngờ: lắp thêm đường dây dự phòng <strong>không</strong> cứu được nhiều như ta tưởng. Nhớ nhé: đường truyền hỏng là chuyện hằng ngày, không phải chuyện hiếm.</p>
+          <p class="en-only" lang="en">This is not theory. Bailis and Kingsbury collected the public surveys of network failure<span class="cite"><a href="#ref-4">4</a></span>. A study of <em>several Microsoft datacenters</em> (Gill, Jain, Nagappan, SIGCOMM 2011) reported an average failure rate of <strong>5.2 devices and 40.8 links per day</strong>, a median time to repair of about <strong>five minutes</strong> (some up to a week), an estimated median of <strong>59,000 packets lost per failure</strong>, and — most worryingly — that <strong>network redundancy improves median traffic by only 43%</strong><span class="cite"><a href="#ref-5">5</a></span>. Another study of the CENIC wide-area network (over two hundred routers across California, five years of operation) found over <strong>508 "isolating network partitions"</strong>, with median durations of 2.7 minutes for software faults and 32 minutes for hardware faults<span class="cite"><a href="#ref-4">4</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc con số cho đúng</strong>Đây là số đo của những môi trường cụ thể trong những cửa sổ thời gian cụ thể, không phải hằng số của mọi mạng. Điều rút ra không phải "mạng của bạn hỏng 5,2 lần một ngày", mà là "lỗi mạng đủ thường xuyên để phần mềm phải xử lý nó".</div>
+            <div class="easy-only"><strong>Lưu ý</strong>Mấy con số này là của một vài nơi cụ thể, không phải của mọi nơi. Ý chính là: hỏng đủ thường để phải chuẩn bị.</div>
+            <div class="en-only" lang="en"><strong>Read the numbers correctly</strong>These are measurements of specific environments over specific windows, not constants of every network. The takeaway is not "your network fails 5.2 times a day" but "network faults are frequent enough that software must handle them".</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao dư thừa không cứu được</h4>
+              <p>Con số 43% nói lên một điều khó chịu: nhiều nguyên nhân gây lỗi mạng có tính <em>tương quan</em> — cấu hình sai, bản firmware lỗi, một sự kiện bảo trì — nên hai đường dây dự phòng cùng chết vì cùng một lý do. Dư thừa chỉ chống được lỗi độc lập; nó không chống được lỗi hệ thống, đúng như phân biệt "lỗi phần cứng ngẫu nhiên / lỗi phần mềm hệ thống" ở Chương 1.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cả những nguyên nhân buồn cười</h4>
+              <p>Danh mục tham chiếu của chính Chương 8 liệt kê đủ loại nguyên nhân thật: cá mập cắn cáp quang biển, driver card mạng <span lang="en">bnx2</span> thỉnh thoảng rơi khỏi mạng, cho tới "gói tin độc" làm ZooKeeper nghẹt<span class="cite"><a href="#ref-3">3</a></span>. Kleppmann dùng chúng không phải để gây cười mà để phá vỡ giả định ngầm rằng lỗi mạng là chuyện hiếm và kỳ dị.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Detecting faults · the ambiguity</div>
+          <h3><span class="vi-only">Không phân biệt được "chết" với "chậm"</span><span class="en-only" lang="en">You can't tell "dead" from "slow"</span></h3>
+          <p class="standard-copy">Đây là mệnh đề trung tâm của cả chương. Nhiều hệ <em>cần</em> tự động phát hiện node hỏng: bộ cân bằng tải phải ngừng gửi yêu cầu tới node chết; hệ có bản sao chính–phụ phải bầu bản sao chính mới. Nhưng vì mạng không cho chặn trên, <strong>một node im lặng và một node chậm trông giống hệt nhau</strong><span class="cite"><a href="#ref-1">1</a></span>. Đôi khi bạn nhận được phản hồi rõ ràng — hệ điều hành trả <span lang="en">RST/FIN</span> khi không có tiến trình nào nghe ở cổng đó, hoặc router trả gói <span lang="en">ICMP Destination Unreachable</span> — nhưng đó là món quà, không phải bảo đảm. Trong trường hợp chung, công cụ duy nhất còn lại là <strong>timeout</strong>.</p>
+          <p class="easy-only">Bạn gọi điện cho bạn mình mà không ai bắt máy. Bạn ấy đi vắng, hay đang tắm, hay đang ngủ? Bạn không thể biết. Máy tính cũng vậy: một máy không trả lời thì có thể đã hỏng, cũng có thể chỉ đang bận. Nhớ nhé: <strong>im lặng không có nghĩa là đã chết</strong>.</p>
+          <p class="en-only" lang="en">This is the chapter's central claim. Many systems <em>need</em> to detect failed nodes automatically: a load balancer must stop sending requests to a dead node; a leader-based replication system must elect a new leader. But because the network gives no upper bound, <strong>a silent node and a slow node look identical</strong><span class="cite"><a href="#ref-1">1</a></span>. Sometimes you get an explicit signal — the OS sends <span lang="en">RST/FIN</span> when no process is listening on that port, or a router replies with <span lang="en">ICMP Destination Unreachable</span> — but that is a gift, not a guarantee. In the general case the only tool left is a <strong>timeout</strong>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đừng nhầm TCP với sự đảm bảo</strong>TCP có gửi lại gói mất, nhưng nó chỉ giấu chuyện mất gói khỏi ứng dụng chứ không rút ngắn độ trễ về một chặn hữu hạn. Với ứng dụng, một kết nối TCP "đang chờ" và một node đã chết vẫn không phân biệt được.</div>
+            <div class="easy-only"><strong>Lưu ý</strong>Máy tính có tự gửi lại thư bị lạc, nhưng điều đó không giúp bạn biết bên kia còn sống hay không.</div>
+            <div class="en-only" lang="en"><strong>Don't mistake TCP for a guarantee</strong>TCP retransmits lost packets, but it only hides loss from the application; it does not bound the delay. To the application, a TCP connection that is "still waiting" and a dead node remain indistinguishable.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao phản hồi lỗi không đủ</h4>
+              <p>Các tín hiệu như <span lang="en">RST</span> hay <span lang="en">ICMP</span> chỉ tới được khi <em>một phần</em> của hệ vẫn còn sống để trả lời. Nếu cả máy mất điện, hoặc bị cắt khỏi mạng, không ai gửi gì cả — và bạn lại rơi về sự im lặng. Nghịch lý: bạn nhận được thông tin rõ ràng nhất đúng vào những lúc lỗi <em>nhẹ</em> nhất.</p>
+            </div>
+            <div class="info-block">
+              <h4>Hệ quả kiến trúc</h4>
+              <p>Vì tuyên bố "node đã chết" luôn là một <em>quyết định</em> chứ không phải một <em>quan sát</em>, nó phải được đưa ra ở nơi có thẩm quyền và được ghi nhận nhất quán — tức là bởi một nhóm quorum, chứ không phải bởi node đầu tiên hết kiên nhẫn. Đó chính là cây cầu dẫn sang phần "sự thật do đa số định nghĩa".</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Timeouts &amp; unbounded delays</div>
+          <h3><span class="vi-only">Timeout: chọn dài thì chậm, chọn ngắn thì sai</span><span class="en-only" lang="en">Timeouts: long is slow, short is wrong</span></h3>
+          <p class="standard-copy">Timeout dài nghĩa là người dùng phải đợi lâu, hoặc phải xem màn hình lỗi, trước khi hệ kịp chuyển hướng. Timeout ngắn phát hiện lỗi nhanh hơn nhưng tăng nguy cơ <strong>báo nhầm</strong>: tuyên bố chết một node thật ra vẫn sống và chỉ đang chậm<span class="cite"><a href="#ref-1">1</a></span>. Báo nhầm không vô hại — nó có thể khiến một hành động bị thực hiện hai lần, và tệ hơn, chuyển tải của node "chết" sang các node khác đúng lúc hệ đang quá tải, đẩy chúng cũng vào ngưỡng timeout: một vòng phản hồi dương biến trục trặc nhỏ thành sập dây chuyền. Thay vì một hằng số cố định, các hệ thực tế đo phân bố thời gian đáp ứng rồi tự điều chỉnh — ví dụ bộ phát hiện lỗi <em>phi accrual</em>, trả về mức độ nghi ngờ thay vì câu trả lời có/không, được dùng trong Akka<span class="cite"><a href="#ref-16">16</a></span><span class="cite"><a href="#ref-17">17</a></span>.</p>
+          <p class="easy-only">Chờ bao lâu rồi mới kết luận "bạn ấy không tới"? Chờ lâu quá thì mình mất cả buổi. Chờ ngắn quá thì mình bỏ về ngay lúc bạn ấy sắp tới nơi. Máy tính gặp đúng bài toán này, và không có con số đúng cho mọi lúc. Nhớ nhé: <strong>chờ bao lâu cũng là một lựa chọn có giá</strong>.</p>
+          <p class="en-only" lang="en">A long timeout means users wait — or stare at an error — before the system can route around the fault. A short timeout detects faults faster but raises the risk of a <strong>false positive</strong>: declaring dead a node that is alive and merely slow<span class="cite"><a href="#ref-1">1</a></span>. False positives are not harmless — an action may be performed twice, and worse, shifting the "dead" node's load onto others exactly when the system is overloaded can push them over their timeouts too: a positive feedback loop that turns a hiccup into a cascading failure. Instead of a fixed constant, real systems measure the response-time distribution and adapt — for instance the <em>phi accrual</em> failure detector, which returns a suspicion level rather than a yes/no answer, and is used in Akka<span class="cite"><a href="#ref-16">16</a></span><span class="cite"><a href="#ref-17">17</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dùng khi nào</strong>Đo thực tế thay vì đoán: theo dõi phân bố thời gian đi–về, đặt ngưỡng theo phần đuôi của phân bố đó, và chừa biên cho quãng dừng GC hoặc trục trặc mạng thoáng qua.</div>
+            <div class="easy-only"><strong>Dùng sao</strong>Hãy đo xem bình thường mất bao lâu, rồi chờ hơn mức đó một chút — đừng đoán bừa một con số.</div>
+            <div class="en-only" lang="en"><strong>When to use</strong>Measure rather than guess: track the round-trip time distribution, set the threshold from its tail, and leave margin for GC pauses or transient network trouble.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Phi accrual, cụ thể</h4>
+              <p>Tài liệu Akka mô tả cách tính: <span lang="en">phi = -log10(1 - F(timeSinceLastHeartbeat))</span>, trong đó F là hàm phân phối tích lũy của phân phối chuẩn với kỳ vọng và độ lệch chuẩn ước lượng từ lịch sử khoảng cách giữa các nhịp tim<span class="cite"><a href="#ref-16">16</a></span>. Ý tưởng gốc — tách <em>giám sát</em> khỏi <em>diễn giải</em> — đến từ Hayashibara và cộng sự<span class="cite"><a href="#ref-17">17</a></span>. Điểm hay: ngưỡng nghi ngờ tự thắt lại khi mạng ổn định và tự nới ra khi mạng nhiễu.</p>
+            </div>
+            <div class="info-block">
+              <h4>Biên cho quãng dừng</h4>
+              <p>Akka còn cho cấu hình tường minh một biên (<span lang="en">acceptable-heartbeat-pause</span>) để sống sót qua những bất thường đột ngột như quãng dừng thu gom rác hay trục trặc mạng thoáng qua<span class="cite"><a href="#ref-16">16</a></span>. Đây là thừa nhận thẳng thắn rằng bộ phát hiện lỗi phải đối phó với cả hai nguồn bất định — mạng <em>và</em> tiến trình — bằng cùng một tham số.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Synchronous vs asynchronous networks</div>
+          <h3><span class="vi-only">Vì sao gói tin bị xếp hàng</span><span class="en-only" lang="en">Why packets end up queueing</span></h3>
+          <p class="standard-copy">Kleppmann đối chiếu mạng gói với mạng điện thoại cổ điển<span class="cite"><a href="#ref-1">1</a></span>. Một cuộc gọi trên mạng chuyển mạch kênh <strong>đặt trước</strong> một dải băng thông cố định suốt cuộc gọi, nên độ trễ có chặn trên — đó là ý nghĩa của chữ <em>đồng bộ</em>. Mạng gói (Ethernet, IP) thì tối ưu cho lưu lượng <em>bùng nổ</em>: không đặt trước gì cả, mà chia sẻ động. Cái giá là <strong>hàng đợi</strong>. Gói xếp hàng ở cổng ra của switch khi nhiều nguồn cùng gửi tới một đích; xếp hàng ở card mạng và trong hệ điều hành khi mọi lõi CPU đang bận; xếp hàng trong máy ảo khi bộ giám sát đang cho một máy ảo khác chạy; và TCP còn tự tạo hàng đợi ở phía gửi qua điều khiển luồng và tránh nghẽn.</p>
+          <p class="easy-only">Có hai cách đi lại. Một: tàu chạy theo giờ, đường riêng, nên tới đúng giờ — nhưng giữ đường riêng thì tốn. Hai: đi xe trên phố chung, rẻ và linh hoạt, nhưng gặp tắc đường thì tới muộn không biết trước. Mạng máy tính chọn cách thứ hai. Nhớ nhé: <strong>tắc đường chính là lý do thư tới muộn</strong>.</p>
+          <p class="en-only" lang="en">Kleppmann contrasts packet networks with the classical telephone network<span class="cite"><a href="#ref-1">1</a></span>. A call on a circuit-switched network <strong>reserves</strong> a fixed slice of bandwidth for its whole duration, so latency is bounded — that is what <em>synchronous</em> means. Packet networks (Ethernet, IP) instead optimise for <em>bursty</em> traffic: nothing is reserved, everything is shared dynamically. The price is <strong>queueing</strong>. Packets queue at a switch's output port when several sources send to one destination; queue at the NIC and in the OS when all CPU cores are busy; queue inside virtual machines when the hypervisor is running another VM; and TCP itself creates a sender-side queue through flow control and congestion avoidance.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đánh đổi nền tảng</strong>Độ trễ có chặn trên đòi hỏi đặt trước tài nguyên; chia sẻ động cho hiệu suất sử dụng cao hơn nhưng đổi lại là độ trễ biến thiên. Mạng gói chọn hiệu suất — nên biến thiên độ trễ là <em>tính năng</em>, không phải lỗi.</div>
+            <div class="easy-only"><strong>Đánh đổi</strong>Muốn luôn đúng giờ thì phải giữ đường riêng, mà giữ đường riêng thì phí. Đi chung thì rẻ nhưng có lúc tắc.</div>
+            <div class="en-only" lang="en"><strong>The underlying trade-off</strong>Bounded latency demands reserved resources; dynamic sharing yields higher utilisation at the cost of variable latency. Packet networks chose utilisation — so variable delay is a <em>feature</em>, not a bug.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Hàng đợi ở đâu</h4>
+              <p>Ít nhất bốn tầng, và chúng cộng dồn: (a) cổng ra của switch khi lưu lượng hội tụ; (b) hàng đợi nhận của hệ điều hành khi CPU đã kín việc; (c) lịch trình của bộ giám sát máy ảo — máy ảo bị tạm dừng hàng chục mili giây là chuyện thường trong môi trường nhiều người thuê chung; (d) bộ đệm gửi của TCP. Mỗi tầng đều có thể biến một chuyến đi vài trăm micro giây thành vài trăm mili giây.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao không quay lại mạng đồng bộ</h4>
+              <p>Có những công nghệ cho phép đặt trước tài nguyên và cho độ trễ chặn trên — chương này nhắc tới ATM và InfiniBand trong danh mục tham chiếu<span class="cite"><a href="#ref-3">3</a></span>. Nhưng chúng đắt và không hợp với lưu lượng bùng nổ của dữ liệu web, nơi ta muốn một yêu cầu lớn dùng hết băng thông khi rảnh. Chừng nào còn chọn hiệu suất sử dụng, ta còn phải sống với timeout.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ mạng sang đồng hồ</strong>
+      <strong class="en-only" lang="en">From networks to clocks</strong>
+      <span class="standard-copy">Nếu không thể tin vào thời gian truyền, liệu có thể tin vào <em>thời điểm</em>? Nhiều thuật toán lặng lẽ dựa vào đồng hồ — để hết hạn khoá, để xếp thứ tự ghi, để tính timeout. Nguồn bất định thứ hai nằm ở chính chiếc đồng hồ ấy.</span>
+      <span class="easy-only">Vậy còn đồng hồ thì sao? Nhiều chương trình tin vào giờ trên máy để quyết định ai làm trước ai làm sau. Phần sau cho thấy đồng hồ cũng không đáng tin.</span>
+      <span class="en-only" lang="en">If we cannot trust transmission time, can we trust <em>points</em> in time? Many algorithms quietly lean on clocks — to expire locks, to order writes, to compute timeouts. The second source of uncertainty is the clock itself.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="unreliable-clocks" aria-labelledby="unreliable-clocks-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Unreliable clocks</span></span><span class="en-only" lang="en">Axis 3 · Unreliable clocks</span></div>
+        <h2 id="unreliable-clocks-title"><span class="vi-only">Đồng hồ không đáng tin: hai loại đồng hồ, hai kiểu sai</span><span class="en-only" lang="en">Unreliable clocks: two kinds of clock, two kinds of wrong</span></h2>
+      </div>
+      <p class="standard-copy">Thời gian là thứ ta dùng để trả lời hai loại câu hỏi rất khác nhau: "<em>bây giờ là mấy giờ?</em>" và "<em>việc này mất bao lâu?</em>"<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann nhấn mạnh rằng máy tính có hai chiếc đồng hồ tách biệt cho hai câu hỏi ấy, và lẫn lộn chúng là một trong những nguồn bug âm thầm nhất. Mỗi máy lại có tinh thể thạch anh riêng, chạy nhanh chậm khác nhau, được kéo về đúng giờ bằng <span lang="en">NTP</span> — nên "giờ" trên hai máy không bao giờ hoàn toàn trùng nhau, và độ lệch ấy có thể lớn hơn chính khoảng thời gian bạn đang muốn đo.</p>
+      <p class="easy-only">Có hai câu hỏi về thời gian mà ta hay nhập làm một. Câu thứ nhất: "bây giờ là mấy giờ?" — cần một cái đồng hồ treo tường. Câu thứ hai: "mình chạy hết bao lâu?" — cần một cái đồng hồ bấm giờ. Nếu giữa chừng có người chỉnh lại đồng hồ treo tường, thì dùng nó để bấm giờ sẽ ra kết quả sai. Nhớ nhé: <strong>hai câu hỏi khác nhau cần hai loại đồng hồ khác nhau</strong>.</p>
+      <p class="en-only" lang="en">Time answers two very different questions: "<em>what time is it now?</em>" and "<em>how long did this take?</em>"<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann stresses that computers keep two separate clocks for those two questions, and confusing them is one of the quietest sources of bugs. Each machine also has its own quartz crystal, running slightly fast or slow, pulled back into line by <span lang="en">NTP</span> — so "now" on two machines never quite matches, and that skew can exceed the very interval you are trying to measure.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Time-of-day clock vs monotonic clock</div>
+        <p class="definition standard-copy">Đồng hồ <strong>thời-gian-ngày</strong> trả về thời điểm theo lịch và được đồng bộ với bên ngoài; vì thế nó <em>có thể nhảy lùi</em> khi bị chỉnh. Đồng hồ <strong>đơn điệu</strong> chỉ bảo đảm luôn tiến về phía trước; giá trị tuyệt đối của nó vô nghĩa, nhưng <em>hiệu</em> của hai lần đọc thì đo được khoảng thời gian.<span class="cite"><a href="#ref-1">1</a></span></p>
+        <p class="definition easy-only">Có <strong>đồng hồ treo tường</strong> để biết mấy giờ — nhưng người ta chỉnh được nó, kể cả chỉnh lùi. Và có <strong>đồng hồ bấm giờ</strong> chỉ biết chạy tới. Nhớ nhé: đo khoảng thời gian thì phải dùng đồng hồ bấm giờ.</p>
+        <p class="definition en-only" lang="en">A <strong>time-of-day clock</strong> returns calendar time and is synchronised with the outside world; that is exactly why it <em>can jump backwards</em> when corrected. A <strong>monotonic clock</strong> only guarantees that it moves forward; its absolute value is meaningless, but the <em>difference</em> between two readings measures an interval.<span class="cite"><a href="#ref-1">1</a></span></p>
+        <p class="deep-only">Trên Linux, sự phân đôi này hiện ra tường minh trong <span lang="en">clock_gettime(2)</span>: <span lang="en">CLOCK_REALTIME</span> là đồng hồ hệ thống chỉnh được, "bị ảnh hưởng bởi những bước nhảy không liên tục của giờ hệ thống" và bởi các hiệu chỉnh tần số do NTP thực hiện; <span lang="en">CLOCK_MONOTONIC</span> thì không chỉnh được và "không bị ảnh hưởng bởi những bước nhảy không liên tục", dù vẫn chịu hiệu chỉnh tần số<span class="cite"><a href="#ref-10">10</a></span>. Nói cách khác: hệ điều hành đã nói thẳng với bạn rằng đừng dùng đồng hồ tường để bấm giờ. Bug xảy ra khi thư viện hoặc ngôn ngữ che mất sự phân đôi ấy.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Hai loại đồng hồ và cách dùng đúng">
+        <div class="equation-row">
+          <b>Time-of-day</b>
+          <span>Trả lời "mấy giờ?"; đồng bộ NTP; có thể nhảy lùi — đừng dùng để đo khoảng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Monotonic</b>
+          <span>Trả lời "bao lâu?"; chỉ tiến; so sánh giữa hai máy thì vô nghĩa.</span>
+        </div>
+        <div class="equation-row">
+          <b>Logical</b>
+          <span>Trả lời "cái nào trước?"; đếm sự kiện chứ không đếm giây — công cụ đúng để xếp thứ tự.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba loại đồng hồ, nói đơn giản">
+        <div class="equation-row">
+          <b>Đồng hồ treo tường</b>
+          <span>Biết mấy giờ, nhưng có thể bị chỉnh lùi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Đồng hồ bấm giờ</b>
+          <span>Chỉ chạy tới, dùng để đo lâu hay nhanh.</span>
+        </div>
+        <div class="equation-row">
+          <b>Sổ đánh số</b>
+          <span>Không đếm giây, chỉ ghi việc nào xảy ra trước việc nào.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Two clocks and their correct uses">
+        <div class="equation-row">
+          <b>Time-of-day</b>
+          <span>Answers "what time?"; NTP-synchronised; may jump backwards — never measure durations with it.</span>
+        </div>
+        <div class="equation-row">
+          <b>Monotonic</b>
+          <span>Answers "how long?"; forward only; comparing values across machines is meaningless.</span>
+        </div>
+        <div class="equation-row">
+          <b>Logical</b>
+          <span>Answers "which came first?"; counts events, not seconds — the right tool for ordering.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">When a clock jumps backwards</div>
+          <h3><span class="vi-only">Giây nhuận 2017: khi thời gian chạy lùi</span><span class="en-only" lang="en">The 2017 leap second: when time ran backwards</span></h3>
+          <p class="standard-copy">Ví dụ rõ nhất là sự cố DNS của Cloudflare rạng sáng 1.1.2017. Đội kỹ thuật viết thẳng rằng nguyên nhân gốc là <strong>niềm tin rằng thời gian không thể chạy lùi</strong><span class="cite"><a href="#ref-11">11</a></span>. Dịch vụ RRDNS viết bằng Go, dùng <span lang="en">time.Now()</span> — một hàm không bảo đảm tính đơn điệu. Khi giây nhuận làm đồng hồ lùi lại, biểu thức <span lang="en">time.Now().Sub(start)</span> cho giá trị <strong>âm</strong>; giá trị âm ấy trôi vào bộ ước lượng thời gian đáp ứng đã làm trơn, rồi được đưa vào <span lang="en">rand.Int63n()</span> — hàm này lập tức <em>panic</em> khi đối số âm. Bản vá chỉ là kiểm tra hiệu số âm trước khi ghi nhận.</p>
+          <p class="easy-only">Đêm giao thừa năm 2017, thế giới thêm một giây nhuận vào đồng hồ. Một hệ thống lớn bị lỗi vì chương trình của nó <em>đinh ninh</em> rằng thời gian không bao giờ chạy lùi — nên khi đồng hồ lùi một giây, nó tính ra "mất âm mấy mili giây" và hoảng loạn. Nhớ nhé: <strong>đừng bao giờ tin rằng đồng hồ luôn chạy tới</strong>.</p>
+          <p class="en-only" lang="en">The clearest example is Cloudflare's DNS incident in the early hours of 1 January 2017. Their engineers wrote plainly that the root cause was <strong>the belief that time cannot go backwards</strong><span class="cite"><a href="#ref-11">11</a></span>. RRDNS is written in Go and used <span lang="en">time.Now()</span> — a function that does not guarantee monotonicity. When the leap second pushed the clock back, <span lang="en">time.Now().Sub(start)</span> returned a <strong>negative</strong> value; that value flowed into a smoothed response-time estimate and then into <span lang="en">rand.Int63n()</span>, which <em>panics</em> immediately on a negative argument. The fix was simply to check for a negative difference before recording it.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bài học chuyển giao được</strong>Mọi phép trừ hai mốc thời gian lấy từ đồng hồ thời-gian-ngày đều là một giả định chưa được kiểm chứng. Hoặc dùng đồng hồ đơn điệu, hoặc kiểm tra dấu của hiệu số — không có lựa chọn thứ ba.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Khi trừ hai mốc giờ, hãy kiểm tra xem kết quả có âm không. Nếu âm thì đồng hồ vừa bị chỉnh.</div>
+            <div class="en-only" lang="en"><strong>The transferable lesson</strong>Every subtraction of two time-of-day readings is an unverified assumption. Either use a monotonic clock, or check the sign of the difference — there is no third option.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao giây nhuận nguy hiểm</h4>
+              <p>Giây nhuận buộc đồng hồ dân sự lặp lại hoặc bỏ qua một giây, tức là tạo ra chính xác cái bước nhảy mà phần mềm ngầm cho là không tồn tại. Danh mục tham chiếu của Chương 8 gom nhiều sự cố cùng họ — từ đợt giây nhuận 2012 tới hướng dẫn chuẩn bị của AWS và cách Google "bôi trơn" giây nhuận trải đều trong ngày<span class="cite"><a href="#ref-3">3</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Không chỉ giây nhuận</h4>
+              <p>Đồng hồ thời-gian-ngày còn nhảy khi quản trị viên chỉnh tay, khi NTP phát hiện lệch quá lớn và <em>bước</em> (step) thay vì <em>trượt</em> (slew), khi máy ảo được khôi phục từ ảnh chụp, hay khi máy vừa khởi động và chưa kịp đồng bộ. Mỗi tình huống đều đủ để phá một phép đo khoảng thời gian.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Clock synchronisation &amp; its accuracy</div>
+          <h3><span class="vi-only">NTP chính xác tới đâu — và tới đâu là hết</span><span class="en-only" lang="en">How accurate NTP is — and where it stops</span></h3>
+          <p class="standard-copy">NTP kéo đồng hồ máy về gần giờ chuẩn, nhưng độ chính xác của nó phụ thuộc vào <em>đường mạng</em> — và ta vừa thấy đường mạng không đáng tin. Đặc tả NTPv4 nêu các mức thực tế theo từng hoàn cảnh: máy chủ tầng một trên phần cứng hiện đại chính xác tới <strong>vài chục micro giây</strong>; máy chủ thứ cấp và máy khách trên mạng LAN nhanh đạt <strong>vài trăm micro giây</strong> với chu kỳ hỏi tối đa 1024 giây; còn với chu kỳ hỏi kéo dài tới 36 giờ thì độ chính xác là <strong>vài chục mili giây</strong><span class="cite"><a href="#ref-9">9</a></span>. Đặc tả cũng nói rõ sai số trung bình tăng xấp xỉ tỉ lệ với số tầng (<span lang="en">stratum</span>) và với thời gian đi–về đo được.</p>
+          <p class="easy-only">Máy tính chỉnh giờ bằng cách hỏi những máy chủ giữ giờ chuẩn. Nhưng câu hỏi và câu trả lời phải đi qua đường truyền — mà đường truyền lúc nhanh lúc chậm, nên giờ chỉnh về cũng chỉ <em>gần đúng</em>. Càng xa nguồn giờ chuẩn thì càng lệch nhiều. Nhớ nhé: <strong>giờ trên máy luôn gần đúng, không bao giờ đúng hẳn</strong>.</p>
+          <p class="en-only" lang="en">NTP pulls a machine's clock close to standard time, but its accuracy depends on the <em>network path</em> — and we have just seen that networks are unreliable. The NTPv4 specification states practical levels per situation: stratum-one servers on modern hardware are precise to <strong>a few tens of microseconds</strong>; secondary servers and clients on fast LANs reach <strong>a few hundred microseconds</strong> with poll intervals up to 1024 seconds; and with poll intervals stretching to 36 hours, precision is <strong>a few tens of milliseconds</strong><span class="cite"><a href="#ref-9">9</a></span>. The spec also notes that mean errors grow roughly in proportion to stratum number and to measured round-trip delay.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc con số cho đúng</strong>Đây là các mức <em>theo điều kiện</em> — phần cứng, chất lượng mạng, chu kỳ hỏi — chứ không phải một hằng số toàn cầu. Trên một máy ảo thuê chung, mạng nghẽn, chu kỳ hỏi thưa, sai số thực tế có thể tệ hơn nhiều.</div>
+            <div class="easy-only"><strong>Lưu ý</strong>Mấy con số này chỉ đúng trong điều kiện tốt. Máy bình thường, mạng bận thì lệch nhiều hơn.</div>
+            <div class="en-only" lang="en"><strong>Read the numbers correctly</strong>These are <em>conditional</em> levels — hardware, network quality, poll interval — not a global constant. On a shared virtual machine, a congested network and sparse polling, real error can be far worse.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>NTP đã phải phòng cả kẻ nói dối</h4>
+              <p>Điều đáng chú ý: chính NTP cũng không tin các nguồn giờ của nó. Đặc tả mô tả thuật toán chọn lọc dùng <em>nguyên lý phát hiện lỗi Byzantine</em> để loại những ứng viên sai — gọi là <span lang="en">falsetickers</span> — và chỉ giữ lại những <span lang="en">truechimers</span><span class="cite"><a href="#ref-9">9</a></span>. Nói cách khác, ý tưởng "đa số định nghĩa sự thật" của phần cuối chương đã nằm sẵn trong giao thức đồng bộ giờ.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao đừng dựa vào đồng bộ giờ để bảo đảm đúng đắn</h4>
+              <p>Kleppmann đặt ra một nguyên tắc: nếu tính đúng đắn của thuật toán phụ thuộc vào việc đồng hồ đủ đồng bộ, thì hệ phải <em>theo dõi</em> độ lệch đồng hồ như một chỉ số vận hành và loại khỏi cụm những node lệch quá ngưỡng<span class="cite"><a href="#ref-1">1</a></span>. Nguy hiểm của lỗi đồng hồ là nó <strong>âm thầm</strong>: một node lệch giờ vẫn chạy tốt về mọi mặt quan sát được, chỉ dữ liệu là sai lặng lẽ.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Timestamps for ordering events</div>
+          <h3><span class="vi-only">Dùng dấu thời gian để xếp thứ tự: LWW trở lại</span><span class="en-only" lang="en">Timestamps for ordering: LWW returns</span></h3>
+          <p class="standard-copy">Nhiều hệ sao chép đa chủ và không-chủ giải quyết xung đột ghi bằng <em>last write wins</em> — bản ghi nào có dấu thời gian lớn hơn thì thắng. Kingsbury mô tả cụ thể: Cassandra xếp thứ tự các lần ghi bằng <strong>dấu thời gian đồng hồ tường</strong> do máy chủ (hoặc tùy chọn là máy khách) cung cấp<span class="cite"><a href="#ref-12">12</a></span>. Vấn đề: nếu đồng hồ của node A chạy nhanh hơn node B dù chỉ vài mili giây, một lần ghi <em>xảy ra sau</em> ở B vẫn có thể mang dấu thời gian nhỏ hơn và bị <strong>âm thầm vứt bỏ</strong>. Dữ liệu mất mà không có lỗi nào được ném ra. Công cụ đúng để xếp thứ tự là <em>đồng hồ logic</em> — đếm sự kiện, không đếm giây — theo đúng tinh thần bài báo kinh điển của Lamport<span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <p class="easy-only">Hai bạn cùng sửa một tờ giấy, và ta chọn giữ bản nào "ghi giờ muộn hơn". Nghe hợp lý — trừ khi đồng hồ của hai bạn lệch nhau. Lúc đó bản sửa <em>sau</em> lại ghi giờ <em>sớm hơn</em>, và nó bị vứt đi mất mà không ai biết. Nhớ nhé: <strong>xếp thứ tự bằng giờ trên máy là cách làm mất dữ liệu trong im lặng</strong>.</p>
+          <p class="en-only" lang="en">Many multi-leader and leaderless replication systems resolve write conflicts with <em>last write wins</em> — the write with the larger timestamp survives. Kingsbury describes the concrete case: Cassandra orders writes by <strong>wall-clock timestamps</strong> supplied by the server (or optionally the client)<span class="cite"><a href="#ref-12">12</a></span>. The problem: if node A's clock runs a few milliseconds ahead of node B's, a write that <em>happened later</em> on B can still carry a smaller timestamp and be <strong>silently discarded</strong>. Data is lost and no error is raised. The right tool for ordering is a <em>logical clock</em> — counting events, not seconds — in the spirit of Lamport's classic paper<span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao nguy hiểm hơn vẻ ngoài</strong>LWW hỏng theo kiểu im lặng: không ngoại lệ, không cảnh báo, không mục log. Bạn chỉ phát hiện khi một người dùng hỏi vì sao thay đổi của họ biến mất — thường là nhiều tuần sau.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Kiểu hỏng này không báo lỗi gì cả, nên rất lâu sau mới bị phát hiện.</div>
+            <div class="en-only" lang="en"><strong>Why it's worse than it looks</strong>LWW fails silently: no exception, no warning, no log line. You find out when a user asks why their change vanished — usually weeks later.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Độ phân giải cũng là vấn đề</h4>
+              <p>Ngay cả khi đồng hồ đồng bộ tốt, hai lần ghi xảy ra cách nhau vài micro giây có thể nhận cùng một dấu thời gian nếu độ phân giải là mili giây — lúc đó thứ tự do một quy tắc phá hoà tuỳ ý quyết định, chứ không do nhân quả. Đây là lý do đồng hồ vật lý không thể thay thế quan hệ <em>xảy ra trước</em> (<span lang="en">happens-before</span>) mà Lamport định nghĩa<span class="cite"><a href="#ref-13">13</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khi nào LWW vẫn chấp nhận được</h4>
+              <p>Khi mất một lần ghi là chuyện có thể chịu được — ví dụ bộ đệm cache, hay dữ liệu đo đạc lấy mẫu dày. Vấn đề nảy sinh khi LWW được dùng cho dữ liệu mà mỗi lần ghi đều quan trọng. Kleppmann coi đây là một lựa chọn phải <em>tuyên bố công khai</em>, không phải mặc định vô hình<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Clock readings have a confidence interval</div>
+          <h3><span class="vi-only">Một lần đọc đồng hồ là một khoảng, không phải một điểm</span><span class="en-only" lang="en">A clock reading is an interval, not a point</span></h3>
+          <p class="standard-copy">Kleppmann đề nghị đổi cách nghĩ: đừng coi kết quả đọc đồng hồ là một thời điểm, hãy coi nó là <strong>một khoảng tin cậy</strong><span class="cite"><a href="#ref-1">1</a></span>. TrueTime của Google Spanner là hiện thực hiếm hoi biến điều này thành API tường minh: <span lang="en">TT.now()</span> không trả về một con số mà trả về một <span lang="en">TTinterval</span> — cặp <em>earliest / latest</em> được bảo đảm chứa thời điểm tuyệt đối của lời gọi<span class="cite"><a href="#ref-8">8</a></span>. Sai số ε là nửa bề rộng khoảng đó. Trong môi trường vận hành mà bài báo OSDI 2012 mô tả, ε là một hàm răng cưa dao động <strong>khoảng 1 đến 7 mili giây</strong> qua mỗi chu kỳ hỏi, tức <strong>khoảng 4 ms phần lớn thời gian</strong>; chu kỳ hỏi khi đó là 30 giây và tốc độ trôi được áp dụng là 200 micro giây mỗi giây<span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <p class="easy-only">Khi nhìn đồng hồ, đừng nói "bây giờ là 8 giờ 00 phút 00 giây". Hãy nói "bây giờ nằm đâu đó giữa 7:59:58 và 8:00:02". Google có một hệ thống làm đúng như vậy: máy của họ trả lời "giờ nằm trong khoảng này", chứ không nói một con số chắc nịch. Nhớ nhé: <strong>thành thật về chỗ mình không biết thì an toàn hơn</strong>.</p>
+          <p class="en-only" lang="en">Kleppmann proposes a change of mindset: stop treating a clock reading as an instant, treat it as a <strong>confidence interval</strong><span class="cite"><a href="#ref-1">1</a></span>. Google Spanner's TrueTime is the rare implementation that makes this explicit in the API: <span lang="en">TT.now()</span> returns not a number but a <span lang="en">TTinterval</span> — an <em>earliest / latest</em> pair guaranteed to contain the absolute time of the call<span class="cite"><a href="#ref-8">8</a></span>. The error bound ε is half that interval's width. In the production environment the OSDI 2012 paper describes, ε was a sawtooth varying <strong>from about 1 to 7 milliseconds</strong> over each poll interval, so <strong>about 4 ms most of the time</strong>; the poll interval was then 30 seconds and the applied drift rate 200 microseconds per second<span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cơ chế đi kèm: <span lang="en">commit wait</span></strong>Spanner dùng khoảng tin cậy để bảo đảm thứ tự: node điều phối <em>chờ hết</em> khoảng bất định trước khi công bố giao dịch, nên hai giao dịch có quan hệ nhân quả chắc chắn không chồng khoảng lên nhau<span class="cite"><a href="#ref-8">8</a></span>. Cái giá của sự chắc chắn ấy là độ trễ bằng đúng ε.</div>
+            <div class="easy-only"><strong>Cách làm</strong>Google chờ cho hết khoảng "không chắc" rồi mới chốt, nên thứ tự luôn đúng — đổi lại phải chờ thêm một chút.</div>
+            <div class="en-only" lang="en"><strong>The paired mechanism: commit wait</strong>Spanner uses the interval to guarantee ordering: the coordinator <em>waits out</em> the uncertainty before publishing a transaction, so causally related transactions cannot have overlapping intervals<span class="cite"><a href="#ref-8">8</a></span>. The price of that certainty is a delay equal to ε.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao ít hệ làm được</h4>
+              <p>ε nhỏ không tự nhiên mà có: TrueTime dựa trên một tập máy chủ giờ mỗi trung tâm dữ liệu, phần lớn gắn máy thu GPS với ăng-ten riêng, phần còn lại dùng đồng hồ nguyên tử — hai loại nguồn giờ vì chúng hỏng theo những cách khác nhau<span class="cite"><a href="#ref-8">8</a></span>. Đây là hạ tầng vật lý, không phải thư viện cài được. Các con số ε nêu trên là của môi trường Google năm 2012, không phải hằng số áp dụng được cho mọi hệ.</p>
+            </div>
+            <div class="info-block">
+              <h4>Không có đồng hồ nguyên tử thì sao</h4>
+              <p>Có những hệ chọn hướng khác: chấp nhận khoảng bất định rộng hơn và trả giá bằng việc thỉnh thoảng phải thử lại giao dịch, thay vì mua phần cứng chuyên dụng — CockroachDB mô tả cách tiếp cận này trong bài "Living Without Atomic Clocks"<span class="cite"><a href="#ref-18">18</a></span>. Điểm chung vẫn là: bất định về giờ phải được <em>biểu diễn tường minh</em>, chứ không được giả vờ không tồn tại.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Process pauses</div>
+          <h3><span class="vi-only">Quãng dừng tiến trình: đứng hình rồi tỉnh dậy</span><span class="en-only" lang="en">Process pauses: frozen, then awake</span></h3>
+          <p class="standard-copy">Giả định ngầm nguy hiểm nhất là: giữa hai dòng lệnh của tôi, thời gian trôi không đáng kể. Sai. Một luồng có thể bị dừng ở <strong>bất kỳ điểm nào</strong>, trong thời gian <strong>tuỳ ý</strong><span class="cite"><a href="#ref-1">1</a></span>. Thu gom rác kiểu "dừng cả thế giới" là thủ phạm quen mặt: kỹ sư LinkedIn báo cáo những quãng dừng <strong>lớn hơn 5 giây</strong> trong ứng dụng trọng yếu ở môi trường vận hành của họ, với hai ví dụ cụ thể là <strong>4,17 giây</strong> với bộ thu gom G1 trên heap 8 GB và <strong>11,45 giây</strong> với CMS — nguyên nhân không phải khối lượng rác mà là lời gọi <span lang="en">write()</span> ghi log GC bị chặn bởi cơ chế ghi lùi bộ đệm trang của hệ điều hành<span class="cite"><a href="#ref-15">15</a></span>. Ngoài GC còn: máy ảo bị tạm ngưng để di trú sống, đĩa hoán đổi (swap) và lỗi trang, hay đơn giản là một tín hiệu <span lang="en">SIGSTOP</span>.</p>
+          <p class="easy-only">Bạn đang đọc dở một câu thì bị gọi ra ngoài mười phút, rồi quay lại đọc tiếp mà không biết mình đã vắng mặt. Máy tính cũng bị như vậy: nó có thể "đứng hình" vài giây rồi chạy tiếp, và nó <strong>không biết</strong> mình vừa vắng mặt. Trong lúc đó, cả thế giới bên ngoài đã đổi khác. Nhớ nhé: <strong>chương trình không thể tin rằng nó chạy liên tục</strong>.</p>
+          <p class="en-only" lang="en">The most dangerous implicit assumption is: between two of my lines of code, negligible time passes. Wrong. A thread can be paused at <strong>any point</strong>, for an <strong>arbitrary</strong> duration<span class="cite"><a href="#ref-1">1</a></span>. Stop-the-world garbage collection is the familiar culprit: LinkedIn engineers reported pauses <strong>longer than 5 seconds</strong> in mission-critical applications in their production environments, with two concrete cases of <strong>4.17 seconds</strong> under the G1 collector on an 8 GB heap and <strong>11.45 seconds</strong> under CMS — caused not by the volume of garbage but by the GC log's <span lang="en">write()</span> call being blocked by OS page-cache writeback<span class="cite"><a href="#ref-15">15</a></span>. Beyond GC there are: virtual machines suspended for live migration, swap and page faults, or simply a <span lang="en">SIGSTOP</span> signal.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao đây là vấn đề đúng đắn, không phải hiệu năng</strong>Một node bị dừng lâu hơn thời hạn khoá của nó sẽ tỉnh dậy và hành động như thể vẫn còn giữ khoá. Không kiểm tra lại nào cứu được, vì quãng dừng có thể rơi đúng vào giữa lần kiểm tra và lần ghi.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Máy tỉnh lại vẫn tưởng mình đang "đến lượt", trong khi lượt đã sang người khác từ lâu.</div>
+            <div class="en-only" lang="en"><strong>Why this is a correctness problem, not a performance one</strong>A node paused past its lease expiry wakes up and acts as though it still holds the lock. No re-check saves you, because the pause can land exactly between the check and the write.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Kleppmann nói gì về độ dài</h4>
+              <p>Trong bài viết riêng về khoá phân tán, ông lưu ý rằng quãng dừng GC <em>thường</em> ngắn, nhưng những quãng dừng "dừng cả thế giới" đã từng được ghi nhận kéo dài <strong>vài phút</strong> — thừa đủ để một hợp đồng thuê hết hạn — và ngay cả các bộ thu gom "đồng thời" như CMS của HotSpot cũng vẫn phải dừng thế giới đôi lúc<span class="cite"><a href="#ref-6">6</a></span>. Đây là nhận định của ông dẫn lại từ nguồn khác, không phải một phép đo trong một môi trường cụ thể.</p>
+            </div>
+            <div class="info-block">
+              <h4>Giới hạn thời gian đáp ứng</h4>
+              <p>Có một họ hệ thống <em>thật sự</em> bảo đảm thời hạn: hệ thời gian thực cứng (<span lang="en">hard real-time</span>), nơi vi phạm thời hạn là hỏng cả hệ — túi khí ô tô, điều khiển bay. Nhưng cái giá là toàn bộ ngăn xếp phải được thiết kế lại: nhân thời gian thực, cấp phát bộ nhớ tất định, phân tích thời gian tệ nhất. Kleppmann kết luận rằng với hệ dữ liệu phía máy chủ, chi phí ấy thường không đáng — nên ta chấp nhận quãng dừng và <em>thiết kế để chịu được nó</em><span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ bất định sang quyết định</strong>
+      <strong class="en-only" lang="en">From uncertainty to decision</strong>
+      <span class="standard-copy">Mạng không cho ta chặn trên, đồng hồ không cho ta thời điểm chắc chắn, tiến trình không cho ta tính liên tục. Vậy dựa vào đâu để <em>quyết định</em> điều gì là đúng? Phần cuối chương trả lời bằng ba ý: đa số, fencing token, và mô hình hệ thống.<span class="cite"><a href="#ref-1">1</a></span></span>
+      <span class="easy-only">Vậy khi không tin được đường truyền, không tin được đồng hồ, không tin được cả chính mình — thì ai nói điều gì là đúng? Phần cuối trả lời câu đó.</span>
+      <span class="en-only" lang="en">Networks give no upper bound, clocks give no certain instant, processes give no continuity. So on what basis do we <em>decide</em> what is true? The last part of the chapter answers with three ideas: the majority, fencing tokens, and system models.<span class="cite"><a href="#ref-1">1</a></span></span>
+    </aside>
+  </section>
+
+  <section class="section" id="truth-and-lies" aria-labelledby="truth-and-lies-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · <span lang="en">Knowledge, truth &amp; lies</span></span><span class="en-only" lang="en">Axis 4 · Knowledge, truth &amp; lies</span></div>
+        <h2 id="truth-and-lies-title"><span class="vi-only">Tri thức, sự thật và dối trá: ai có quyền phán xử?</span><span class="en-only" lang="en">Knowledge, truth and lies: who gets to rule?</span></h2>
+      </div>
+      <p class="standard-copy">Một node chỉ biết những gì nó nhận được qua mạng — nghĩa là nó chỉ có <em>tin đồn</em>, không có quan sát trực tiếp. Từ đó Kleppmann rút ra một nguyên tắc nghe có vẻ chính trị hơn kỹ thuật: <strong>sự thật do đa số định nghĩa</strong><span class="cite"><a href="#ref-1">1</a></span>. Nếu quorum tuyên bố một node đã chết thì node ấy <em>phải</em> coi mình đã chết, kể cả khi nó tự thấy mình hoàn toàn khoẻ mạnh — bởi nếu nó cứ hành động theo niềm tin riêng, hệ sẽ có hai node cùng nghĩ mình là bản chính. Phần này đi từ nguyên tắc ấy tới cơ chế cụ thể (fencing token), rồi tới giới hạn của mọi cơ chế (lỗi Byzantine), và cuối cùng tới ngôn ngữ để phát biểu bảo đảm (mô hình hệ thống, an toàn và sống còn).</p>
+      <p class="easy-only">Trong một nhóm, khi mọi người chỉ liên lạc bằng tin nhắn, không ai nhìn thấy toàn cảnh. Vậy ai đúng? Cách làm an toàn là: <strong>số đông quyết định</strong>. Nếu cả nhóm bảo "bạn A rớt rồi" thì bạn A phải chấp nhận, dù bạn ấy thấy mình vẫn ổn — nếu không thì sẽ có hai người cùng tưởng mình là nhóm trưởng.</p>
+      <p class="en-only" lang="en">A node knows only what arrives over the network — that is, it has <em>hearsay</em>, not direct observation. From this Kleppmann draws a principle that sounds more political than technical: <strong>the truth is defined by the majority</strong><span class="cite"><a href="#ref-1">1</a></span>. If a quorum declares a node dead, that node <em>must</em> consider itself dead, even if it feels perfectly healthy — because if it keeps acting on its private belief, the system ends up with two nodes each believing it is the leader. This part moves from that principle to a concrete mechanism (fencing tokens), then to the limits of any mechanism (Byzantine faults), and finally to the language for stating guarantees (system models, safety and liveness).</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">The truth is defined by the majority</div>
+        <p class="definition standard-copy">Một <strong>quorum</strong> là một tập con các node đủ lớn để không hai tập con hợp lệ nào rời nhau — thường là quá bán. Vì hai quorum luôn giao nhau, không thể có hai quyết định mâu thuẫn cùng được công nhận. Đây là lý do "đa số" không phải một quy ước lịch sự mà là một <em>bất biến toán học</em>.<span class="cite"><a href="#ref-1">1</a></span></p>
+        <p class="definition easy-only"><strong>Quá bán</strong> nghĩa là hơn một nửa. Hai nhóm "hơn một nửa" thì bao giờ cũng có ít nhất một người chung — nên không thể có hai nhóm ra hai quyết định trái ngược nhau. Nhớ nhé: quá bán thì không bao giờ chia đôi được.</p>
+        <p class="definition en-only" lang="en">A <strong>quorum</strong> is a subset of nodes large enough that no two valid subsets are disjoint — usually a strict majority. Because any two quorums intersect, two contradictory decisions can never both be accepted. That is why "the majority" is not a polite convention but a <em>mathematical invariant</em>.<span class="cite"><a href="#ref-1">1</a></span></p>
+        <p class="deep-only">Kleppmann nêu một biến thể khó chịu hơn cả node chết hẳn: node <em>nửa ngắt kết nối</em><span class="cite"><a href="#ref-1">1</a></span>. Một máy vẫn nhận được nhịp tim nhưng không gửi đi được; một card mạng chỉ rớt gói theo một chiều; một node chạy nhưng chậm gấp trăm lần vì đĩa gần hỏng. Những node "khập khiễng" như vậy tệ hơn node chết, vì chúng vẫn giữ vai trò của mình trong cụm trong khi không còn làm tròn vai. Phát hiện chúng đúng là bài toán mà bộ phát hiện lỗi kiểu tích luỹ ở phần trước cố giải<span class="cite"><a href="#ref-17">17</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba mệnh đề về sự thật trong hệ phân tán">
+        <div class="equation-row">
+          <b>Node không tự phán</b>
+          <span>Một node không thể tự khẳng định mình vẫn là bản chính — quorum mới nói được.</span>
+        </div>
+        <div class="equation-row">
+          <b>Quorum giao nhau</b>
+          <span>Hai tập quá bán luôn có phần tử chung, nên không thể có hai quyết định mâu thuẫn.</span>
+        </div>
+        <div class="equation-row">
+          <b>Cần chứng cứ kiểm được</b>
+          <span>Tài nguyên phải tự kiểm tra quyền ghi, không tin lời khai của client.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều về việc ai đúng">
+        <div class="equation-row">
+          <b>Tự nói không tính</b>
+          <span>Một mình bảo "tôi vẫn là trưởng nhóm" thì không đủ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Hơn một nửa</b>
+          <span>Hai nhóm quá bán luôn có người chung, nên không cãi nhau được.</span>
+        </div>
+        <div class="equation-row">
+          <b>Phải có bằng chứng</b>
+          <span>Nơi giữ đồ phải tự kiểm tra vé, đừng tin lời hứa.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three claims about truth in distributed systems">
+        <div class="equation-row">
+          <b>No self-certification</b>
+          <span>A node cannot assert that it is still the leader — only a quorum can.</span>
+        </div>
+        <div class="equation-row">
+          <b>Quorums intersect</b>
+          <span>Any two majorities share a member, so contradictory decisions cannot both stand.</span>
+        </div>
+        <div class="equation-row">
+          <b>Checkable evidence</b>
+          <span>The resource must verify the right to write, not trust the client's word.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">A</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Fencing tokens</div>
+          <h3><span class="vi-only">Fencing token — tấm vé không thể quay ngược</span><span class="en-only" lang="en">Fencing tokens — a ticket that never goes back</span></h3>
+          <p class="standard-copy">Kleppmann trình bày cơ chế này rõ nhất trong bài viết riêng của ông về khoá phân tán<span class="cite"><a href="#ref-6">6</a></span>. Kịch bản hỏng: client 1 lấy được hợp đồng thuê (lease) và <strong>token 33</strong>, rồi bị dừng lâu — chẳng hạn vì thu gom rác — đến mức hợp đồng hết hạn mà nó không biết. Client 2 lấy được hợp đồng, nhận <strong>token 34</strong>, và ghi dữ liệu. Sau đó client 1 tỉnh dậy và gửi lệnh ghi của mình kèm token 33. Vì máy chủ lưu trữ <em>nhớ</em> rằng nó đã xử lý một lệnh ghi với token cao hơn, nó <strong>từ chối</strong> lệnh ghi mang token 33. Điều kiện bắt buộc: dịch vụ khoá sinh token <em>tăng ngặt</em>, và tài nguyên phải <em>chủ động kiểm tra</em> token chứ không tin lời client.</p>
+          <p class="easy-only">Hãy tưởng tượng phòng gửi đồ phát vé có đánh số tăng dần. Bạn cầm vé số 33 nhưng ngủ quên; trong lúc đó người khác lấy vé 34 và vào lấy đồ. Bạn tỉnh dậy, chìa vé 33 ra — nhân viên nhìn sổ, thấy đã có vé 34 vào rồi, nên từ chối bạn. Nhớ nhé: <strong>người giữ đồ phải kiểm tra vé, chứ không chỉ nghe bạn nói</strong>.</p>
+          <p class="en-only" lang="en">Kleppmann lays this mechanism out most clearly in his own post on distributed locking<span class="cite"><a href="#ref-6">6</a></span>. The failure scenario: client 1 acquires the lease and <strong>token 33</strong>, then pauses for a long time — say for garbage collection — long enough that the lease expires without it noticing. Client 2 acquires the lease, gets <strong>token 34</strong>, and writes. Client 1 then wakes up and sends its write with token 33. Because the storage server <em>remembers</em> that it has already processed a write with a higher token, it <strong>rejects</strong> the write carrying token 33. The requirements: the lock service must issue <em>strictly increasing</em> tokens, and the resource must <em>actively check</em> them rather than trust the client.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dùng ở đâu</strong>Bất cứ khi nào một khoá hay hợp đồng thuê bảo vệ dữ liệu mà tính đúng đắn phụ thuộc vào nó. Kleppmann chỉ ra nguồn token sẵn có: dùng ZooKeeper thì lấy <span lang="en">zxid</span> hoặc số phiên bản của znode là đủ<span class="cite"><a href="#ref-6">6</a></span>.</div>
+            <div class="easy-only"><strong>Dùng sao</strong>Mỗi lần phát khoá thì kèm một con số tăng dần, và bên nhận phải từ chối số nhỏ hơn số đã thấy.</div>
+            <div class="en-only" lang="en"><strong>Where to use it</strong>Wherever a lock or lease guards data on which correctness depends. Kleppmann points to a ready source of tokens: with ZooKeeper, the <span lang="en">zxid</span> or the znode version number will do<span class="cite"><a href="#ref-6">6</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao kiểm tra lại hạn khoá không cứu được</h4>
+              <p>Ý tưởng "trước khi ghi thì kiểm tra xem khoá còn hạn không" nghe hợp lý nhưng sai, vì quãng dừng có thể rơi đúng vào khoảng giữa lần kiểm tra cuối cùng và thao tác ghi<span class="cite"><a href="#ref-6">6</a></span>. Không có cách nào thu hẹp khoảng trống ấy về không. Chỉ có cách chuyển việc kiểm tra sang <em>phía tài nguyên</em>, nơi mà thứ tự các lệnh ghi là quan sát được — đó chính là fencing token.</p>
+            </div>
+            <div class="info-block">
+              <h4>Và mạng cũng làm được điều tương tự</h4>
+              <p>Kleppmann nhấn mạnh rằng ngay cả khi tiến trình của bạn không bị dừng, <em>gói tin</em> vẫn có thể bị mạng giữ lại rất lâu. Ông dẫn một sự cố ở GitHub, nơi theo ông gói tin bị trì hoãn trong mạng <strong>khoảng 90 giây</strong><span class="cite"><a href="#ref-6">6</a></span> — bản tường trình sự cố của GitHub mô tả chi tiết chuỗi lỗi trên cặp switch tổng hợp<span class="cite"><a href="#ref-7">7</a></span>. Con số 90 giây là cách đọc của Kleppmann về sự cố ấy, không phải con số do GitHub công bố.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">B</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Byzantine faults</div>
+          <h3><span class="vi-only">Lỗi Byzantine — khi node có thể nói dối</span><span class="en-only" lang="en">Byzantine faults — when a node may lie</span></h3>
+          <p class="standard-copy">Tới đây ta vẫn giả định node có thể <em>chết</em> hoặc <em>chậm</em>, nhưng khi nói thì nói thật. Bỏ giả định đó đi, ta có <strong>lỗi Byzantine</strong>: node có thể hành xử <em>tuỳ ý</em> — gửi thông tin sai, gửi những thông điệp mâu thuẫn cho những người nhận khác nhau, hoặc cố tình phá. Tên gọi đến từ bài báo của Lamport, Shostak và Pease, trong đó bài toán được phát biểu qua hình ảnh các vị tướng vây thành và một số có thể là kẻ phản bội; kết quả trung tâm: bài toán <strong>giải được khi và chỉ khi hơn hai phần ba số tướng là trung thành</strong>, nên chỉ một kẻ phản bội cũng đủ làm rối hai vị tướng trung thành<span class="cite"><a href="#ref-14">14</a></span>.</p>
+          <p class="easy-only">Từ nãy tới giờ ta giả sử: máy có thể im lặng, nhưng khi nó nói thì nó nói thật. Bây giờ bỏ giả sử đó: nếu có máy <strong>nói dối</strong> thì sao? Nó có thể kể với bạn một đằng và kể với người khác một nẻo. Người ta chứng minh được: chỉ giải quyết được nếu <strong>hơn hai phần ba</strong> số máy trung thực. Nhớ nhé: một kẻ nói dối cũng đủ làm hai người thật thà cãi nhau.</p>
+          <p class="en-only" lang="en">So far we have assumed nodes may <em>die</em> or be <em>slow</em>, but that when they speak, they speak truthfully. Drop that assumption and you get <strong>Byzantine faults</strong>: a node may behave <em>arbitrarily</em> — send wrong information, send contradictory messages to different recipients, or actively sabotage. The name comes from Lamport, Shostak and Pease, who stated the problem as generals besieging a city where some may be traitors; the central result: the problem is <strong>solvable if and only if more than two-thirds of the generals are loyal</strong>, so a single traitor suffices to confound two loyal generals<span class="cite"><a href="#ref-14">14</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Lập trường của Kleppmann</strong>Ông cho rằng <strong>phần lớn hệ trong một trung tâm dữ liệu không cần chịu lỗi Byzantine</strong><span class="cite"><a href="#ref-1">1</a></span>: các node đều do bạn kiểm soát, kẻ tấn công vượt qua được lớp xác thực thì thường cũng vượt qua được giao thức. Byzantine mới thành thiết yếu ở nơi không có bên nào tin bên nào — hàng không vũ trụ, hoặc hệ nhiều tổ chức như blockchain.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Trong một công ty, các máy đều là máy của mình nên ít khi nói dối. Chuyện nói dối quan trọng khi nhiều bên không tin nhau cùng dùng chung một hệ.</div>
+            <div class="en-only" lang="en"><strong>Kleppmann's position</strong>He argues that <strong>most systems inside one datacenter do not need Byzantine fault tolerance</strong><span class="cite"><a href="#ref-1">1</a></span>: you control all the nodes, and an attacker who gets past authentication usually gets past the protocol too. Byzantine tolerance becomes essential where no party trusts another — aerospace, or multi-organisation systems such as blockchains.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Những dạng "nói dối" nhẹ vẫn đáng phòng</h4>
+              <p>Không cần dựng cả một giao thức chịu lỗi Byzantine mới phòng được dữ liệu sai lệch. Kiểm tổng gói tin có thể không bắt được lỗi hỏng dữ liệu — Evan Jones khảo sát chính xác chuyện kiểm tổng TCP và Ethernet thất bại ra sao<span class="cite"><a href="#ref-21">21</a></span>. Tương tự, NTP phòng máy chủ giờ sai bằng cách loại <span lang="en">falsetickers</span><span class="cite"><a href="#ref-9">9</a></span>. Kiểm tra đầu vào, kiểm tổng ở tầng ứng dụng, và hỏi nhiều nguồn giờ đều là những biện pháp rẻ và đáng làm.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao giao thức Byzantine đắt</h4>
+              <p>Ngưỡng "hơn hai phần ba trung thành" nghĩa là để chịu được <em>f</em> node phản bội, bạn cần ít nhất <em>3f + 1</em> node, cộng với nhiều vòng trao đổi thông điệp để so khớp lời khai<span class="cite"><a href="#ref-14">14</a></span>. So với một giao thức quorum quá bán chịu được <em>f</em> lỗi kiểu dừng với <em>2f + 1</em> node, cái giá là rõ rệt về cả phần cứng lẫn độ trễ.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">C</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">System models</div>
+          <h3><span class="vi-only">Mô hình hệ thống — viết ra giả định của mình</span><span class="en-only" lang="en">System models — writing your assumptions down</span></h3>
+          <p class="standard-copy">Để nói được "thuật toán này đúng", trước hết phải nói rõ <em>đúng dưới giả định nào</em>. Kleppmann dùng hai trục<span class="cite"><a href="#ref-1">1</a></span>. Trục thời gian: <strong>đồng bộ</strong> (có chặn trên cho độ trễ mạng, quãng dừng và độ lệch đồng hồ — gần như không tồn tại trong thực tế), <strong>bán đồng bộ</strong> (thường hành xử như đồng bộ, nhưng thỉnh thoảng vượt chặn — mô hình thực tế nhất), và <strong>bất đồng bộ</strong> (không được phép giả định gì về thời gian). Trục lỗi node: <strong>crash-stop</strong> (chết là biến mất mãi mãi), <strong>crash-recovery</strong> (chết rồi quay lại, giữ được phần trạng thái đã ghi bền), và <strong>Byzantine</strong>. Cặp hữu dụng nhất cho hệ dữ liệu thực tế là <em>bán đồng bộ + crash-recovery</em>.</p>
+          <p class="easy-only">Trước khi nói "cách làm này đúng", phải nói rõ mình đang giả sử gì. Ví dụ: giả sử thư luôn tới trong 1 giây? Giả sử máy chết thì chết luôn, hay chết xong bật lại được? Mỗi giả sử khác nhau sẽ cần một cách làm khác nhau. Nhớ nhé: <strong>viết rõ giả định ra thì mới biết khi nào cách làm của mình hết linh</strong>.</p>
+          <p class="en-only" lang="en">To say "this algorithm is correct" you must first say <em>correct under which assumptions</em>. Kleppmann uses two axes<span class="cite"><a href="#ref-1">1</a></span>. Timing: <strong>synchronous</strong> (bounded network delay, pauses and clock skew — barely existing in practice), <strong>partially synchronous</strong> (behaves synchronously most of the time, occasionally exceeds the bounds — the most realistic model), and <strong>asynchronous</strong> (no timing assumptions allowed at all). Node failures: <strong>crash-stop</strong> (gone forever), <strong>crash-recovery</strong> (comes back, retaining durably written state), and <strong>Byzantine</strong>. The most useful pairing for real data systems is <em>partially synchronous + crash-recovery</em>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao "bán đồng bộ" là mô hình đúng</strong>Nó phản ánh thực tế: mạng thường nhanh, nhưng thỉnh thoảng nghẽn; GC thường ngắn, nhưng thỉnh thoảng dài. Mô hình này do Dwork, Lynch và Stockmeyer đưa ra trong bài báo về đồng thuận khi chỉ có đồng bộ bộ phận<span class="cite"><a href="#ref-19">19</a></span>.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Thực tế là: thường thì nhanh, thỉnh thoảng rất chậm. Cách làm tốt phải chịu được cả hai.</div>
+            <div class="en-only" lang="en"><strong>Why "partially synchronous" is the right model</strong>It matches reality: networks are usually fast but occasionally congested; GC pauses are usually short but occasionally long. The model was introduced by Dwork, Lynch and Stockmeyer in their paper on consensus under partial synchrony<span class="cite"><a href="#ref-19">19</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Mô hình không phải mô tả</h4>
+              <p>Kleppmann cẩn thận nói rằng mô hình hệ thống là <em>sự trừu tượng hoá</em>, không phải bức ảnh chụp thực tế. Một mô hình tốt bỏ đi những chi tiết không ảnh hưởng tới kết luận, giữ lại đúng những giả định mà chứng minh cần. Rủi ro là chọn mô hình quá mạnh: chứng minh thì đẹp, còn hệ thật thì vi phạm giả định vào đúng ngày xấu trời.<span class="cite"><a href="#ref-1">1</a></span></p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao crash-recovery quan trọng</h4>
+              <p>Trong thực tế node hay khởi động lại. Nếu thuật toán chỉ đúng dưới crash-stop, một node quay lại với ký ức cũ có thể phá vỡ bất biến của hệ. Đó là lý do các giao thức đồng thuận thực dụng đòi ghi bền một số phần trạng thái trước khi trả lời — chủ đề mà Chương 9 sẽ khai thác.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">D</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Safety &amp; liveness</div>
+          <h3><span class="vi-only">An toàn và sống còn — hai loại lời hứa</span><span class="en-only" lang="en">Safety &amp; liveness — two kinds of promise</span></h3>
+          <p class="standard-copy">Cặp khái niệm cuối cùng cho ta ngôn ngữ để phát biểu chính xác thuật toán hứa gì. <strong>An toàn</strong> (<span lang="en">safety</span>) là "không điều tệ nào xảy ra": ví dụ không bao giờ có hai token trùng nhau. <strong>Sống còn</strong> (<span lang="en">liveness</span>) là "điều tốt rốt cuộc sẽ xảy ra": ví dụ mọi yêu cầu rốt cuộc đều nhận được phản hồi — chú ý chữ "rốt cuộc"<span class="cite"><a href="#ref-1">1</a></span>. Sự bất đối xứng là điểm cốt yếu: một vi phạm an toàn xảy ra tại <em>một thời điểm cụ thể</em> và <strong>không thể hoàn tác</strong>; còn một tính chất sống còn thì chưa thoả ở thời điểm này vẫn có thể thoả ở thời điểm sau. Vì thế Kleppmann đòi các thuật toán phải <em>luôn</em> an toàn trong mọi kịch bản lỗi, và chỉ cần sống còn dưới những giả định nhất định. Sự phân đôi này đến từ Alpern và Schneider<span class="cite"><a href="#ref-20">20</a></span>.</p>
+          <p class="easy-only">Có hai kiểu lời hứa. Kiểu một: "sẽ không có chuyện xấu xảy ra" — như hứa không làm vỡ cái cốc. Nếu cốc vỡ rồi thì không sửa lại được. Kiểu hai: "rồi chuyện tốt sẽ tới" — như hứa xe buýt sẽ tới, chỉ là chưa biết lúc nào. Nhớ nhé: <strong>lời hứa kiểu một phải giữ bằng mọi giá, vì lỡ hỏng là hỏng luôn</strong>.</p>
+          <p class="en-only" lang="en">The final pair gives us the language to state precisely what an algorithm promises. <strong>Safety</strong> means "nothing bad ever happens": for instance, two identical tokens are never issued. <strong>Liveness</strong> means "something good eventually happens": for instance, every request eventually gets a response — note the word "eventually"<span class="cite"><a href="#ref-1">1</a></span>. The asymmetry is the crux: a safety violation occurs at <em>one specific point</em> and <strong>cannot be undone</strong>; a liveness property unsatisfied now may still be satisfied later. So Kleppmann demands that algorithms be <em>always</em> safe under every failure scenario, and live only under stated assumptions. The distinction comes from Alpern and Schneider<span class="cite"><a href="#ref-20">20</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cách dùng thực tế</strong>Khi đọc tài liệu một hệ dữ liệu, hãy tách bảo đảm của nó thành hai cột. Cột an toàn phải đúng kể cả khi mọi node sập; cột sống còn hầu như luôn kèm điều kiện kiểu "miễn là quá bán số node còn sống và mạng rốt cuộc hồi phục".</div>
+            <div class="easy-only"><strong>Dùng sao</strong>Khi đọc lời quảng cáo của một hệ, hãy hỏi: điều gì <em>luôn</em> đúng, và điều gì chỉ đúng <em>khi mọi thứ suôn sẻ</em>?</div>
+            <div class="en-only" lang="en"><strong>How to use it</strong>When reading a data system's docs, split its guarantees into two columns. The safety column must hold even if every node crashes; the liveness column nearly always carries a condition such as "provided a majority of nodes are up and the network eventually recovers".</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao không thể đòi sống còn vô điều kiện</h4>
+              <p>Nếu mạng bị cắt hoàn toàn và vĩnh viễn, không thuật toán nào có thể hứa mọi yêu cầu rồi sẽ được trả lời. Do đó sống còn <em>bắt buộc</em> phải kèm giả định — thường là dạng bán đồng bộ: mạng rốt cuộc sẽ hồi phục<span class="cite"><a href="#ref-19">19</a></span>. Đây chính là cây cầu dẫn sang định lý FLP và các giao thức đồng thuận của Chương 9.</p>
+            </div>
+            <div class="info-block">
+              <h4>Từ chứng minh sang hiện thực</h4>
+              <p>Kleppmann khép chương bằng một lưu ý khiêm tốn: mô hình toán học là công cụ hữu ích để chưng cất giả định, nhưng chứng minh trên giấy không loại trừ được lỗi hiện thực, cấu hình sai, hay những dạng hỏng nằm ngoài mô hình<span class="cite"><a href="#ref-1">1</a></span>. Lý thuyết và kiểm thử thực nghiệm — kiểu các bài phân tích Jepsen<span class="cite"><a href="#ref-12">12</a></span> — bổ sung cho nhau chứ không thay thế nhau.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Chương 8 dọn đường cho Chương 9</strong>
+      <strong class="en-only" lang="en">Chapter 8 clears the ground for Chapter 9</strong>
+      <span class="standard-copy">Chương này không đưa ra lời giải — nó xác lập <em>ràng buộc</em>. Sau khi đã biết mạng, đồng hồ và tiến trình không hứa gì, câu hỏi tiếp theo là: với ngần ấy bất định, ta vẫn xây được những bảo đảm nào? Đó là nội dung của Chương 9 về nhất quán và đồng thuận.<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span></span>
+      <span class="easy-only">Chương này chỉ ra mọi thứ có thể hỏng. Chương sau sẽ hỏi: dù vậy, ta vẫn hứa chắc được điều gì?</span>
+      <span class="en-only" lang="en">This chapter offers no solution — it establishes <em>constraints</em>. Once we know that networks, clocks and processes promise nothing, the next question is: given all that uncertainty, which guarantees can we still build? That is Chapter 9, on consistency and consensus.<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span></span>
+    </aside>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận thường gặp về hệ phân tán</span><span class="en-only" lang="en">Three common misreadings about distributed systems</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Timeout hết hạn nghĩa là node đã chết”</span><span class="en-only" lang="en">"Timeout expired means the node is dead"</span></h4>
+          <p class="standard-copy">Sai: timeout chỉ nói rằng <em>bạn đã ngừng chờ</em>. Vì mạng bất đồng bộ không có chặn trên, không tồn tại ngưỡng nào chứng minh được cái chết. Tuyên bố một node đã chết luôn là một <strong>quyết định</strong> của quorum, không phải một quan sát — và phải được toàn hệ công nhận cùng lúc, kèm fencing token, nếu không sẽ có hai bản chính cùng ghi.</p>
+          <p class="en-only" lang="en">Wrong: a timeout only says <em>you stopped waiting</em>. Since an asynchronous network has no upper bound, no threshold can prove death. Declaring a node dead is always a quorum <strong>decision</strong>, not an observation — and it must be recognised system-wide at once, backed by fencing tokens, or two leaders will write at the same time.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Đồng hồ máy chủ đủ chính xác để xếp thứ tự”</span><span class="en-only" lang="en">"Server clocks are accurate enough to order events"</span></h4>
+          <p class="standard-copy">Sai: NTP chỉ đưa đồng hồ về <em>gần</em> đúng, với sai số phụ thuộc mạng và chu kỳ hỏi<span class="cite"><a href="#ref-9">9</a></span>. Dùng dấu thời gian tường để quyết định "lần ghi nào thắng" khiến lần ghi xảy ra sau bị vứt bỏ trong im lặng<span class="cite"><a href="#ref-12">12</a></span>. Muốn xếp thứ tự thì dùng đồng hồ logic; muốn dùng đồng hồ vật lý thì phải mang theo khoảng bất định như TrueTime<span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: NTP only brings clocks <em>close</em>, with error depending on the network and poll interval<span class="cite"><a href="#ref-9">9</a></span>. Using wall-clock timestamps to decide "which write wins" silently discards the write that happened later<span class="cite"><a href="#ref-12">12</a></span>. To order events, use logical clocks; to use physical clocks, carry the uncertainty interval, as TrueTime does<span class="cite"><a href="#ref-8">8</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Cứ có khoá phân tán là an toàn”</span><span class="en-only" lang="en">"A distributed lock makes it safe"</span></h4>
+          <p class="standard-copy">Sai: khoá có thời hạn, còn tiến trình giữ khoá thì có thể bị dừng lâu hơn thời hạn ấy mà không hay biết. Kiểm tra hạn khoá ngay trước khi ghi cũng không cứu được, vì quãng dừng có thể rơi vào đúng khe hở đó<span class="cite"><a href="#ref-6">6</a></span>. Chỉ khi tài nguyên tự từ chối những token nhỏ hơn token cao nhất đã thấy thì khoá mới thật sự an toàn.</p>
+          <p class="en-only" lang="en">Wrong: leases expire, and the process holding one can be paused past the expiry without noticing. Checking the lease just before writing does not save you, because the pause can land in exactly that gap<span class="cite"><a href="#ref-6">6</a></span>. The lock is only truly safe when the resource itself rejects any token lower than the highest it has seen.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi những giả định bạn đang ngầm tin</span><span class="en-only" lang="en">Audit the assumptions you silently make</span></h2>
+        <p class="standard-copy">Chương 8 không cho bạn công cụ mới; nó lấy đi những giả định cũ. Cách áp dụng thiết thực nhất là lôi các giả định ẩn trong hệ của bạn ra ánh sáng. Mỗi câu dưới đây nhắm vào một giả định mà phần mềm thường tin mà không hề tuyên bố.</p>
+        <p class="easy-only">Chương này không dạy mẹo mới, mà chỉ ra những điều mình <em>tưởng</em> là đúng. Thử soi hệ bạn đang làm bằng mấy câu hỏi dưới đây xem sao.</p>
+        <p class="en-only" lang="en">Chapter 8 gives you no new tools; it takes away old assumptions. The most practical way to apply it is to drag your system's hidden assumptions into the light. Each question below targets an assumption software usually believes without ever stating it.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Khi một node của bạn không trả lời, hệ kết luận điều gì — và dựa vào đâu?</strong><span class="deep-only">Hãy truy tới tận cùng: có phải chỉ là một timeout cố định trong tệp cấu hình? Nếu vậy, con số ấy được chọn thế nào, và ai đã kiểm tra nó dưới tải đỉnh? Nhớ rằng timeout không bao giờ chứng minh được cái chết — nó chỉ nói rằng bạn đã ngừng chờ.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu bạn tuyên bố nhầm một node đang sống là đã chết, chuyện gì xảy ra?</strong><span class="deep-only">Liệt kê cụ thể: một thao tác bị thực hiện hai lần? hai node cùng nghĩ mình là bản chính? tải của node "chết" dồn sang các node khác đúng lúc hệ đang nghẽn? Kịch bản cuối cùng là con đường kinh điển dẫn tới sập dây chuyền.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Ở đâu trong mã của bạn có phép trừ hai mốc thời gian?</strong><span class="deep-only">Mỗi phép trừ ấy là một giả định rằng đồng hồ không nhảy lùi. Nó dùng đồng hồ thời-gian-ngày hay đồng hồ đơn điệu? Nếu là loại thứ nhất, hãy thử nghĩ xem điều gì xảy ra vào đêm có giây nhuận, hay khi NTP bước một nhát lớn.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Hệ của bạn có dùng dấu thời gian để quyết định "bản ghi nào thắng" không?</strong><span class="deep-only">Nếu có, thì độ lệch đồng hồ giữa các node đang là bao nhiêu, và bạn có đang theo dõi nó không? Với last-write-wins, một node chạy nhanh vài mili giây có thể âm thầm xoá các lần ghi hợp lệ — và sẽ không có dòng log nào báo cho bạn.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Quãng dừng dài nhất mà tiến trình của bạn từng chịu là bao lâu — bạn có số đo không?</strong><span class="deep-only">Không chỉ thu gom rác: còn di trú máy ảo, lỗi trang khi bị hoán đổi ra đĩa, tranh chấp CPU trên máy thuê chung. Nếu chưa có số đo, thì mọi thời hạn khoá trong hệ đang được chọn bằng cảm tính.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu một client giữ khoá bị dừng quá hạn rồi tỉnh dậy và ghi, ai chặn nó?</strong><span class="deep-only">Câu trả lời đúng duy nhất là: chính tài nguyên chặn, bằng cách từ chối token nhỏ hơn token cao nhất nó đã thấy. Nếu câu trả lời của bạn là "client sẽ tự kiểm tra hạn khoá trước khi ghi", thì bạn vẫn đang để ngỏ khe hở giữa lần kiểm tra và lần ghi.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Hệ của bạn có cần chịu lỗi Byzantine không — và bạn đã trả lời câu này một cách có ý thức chưa?</strong><span class="deep-only">Với phần lớn hệ trong một trung tâm dữ liệu, câu trả lời là không, và đó là một quyết định hợp lý. Nhưng hãy nói ra thành lời, rồi hỏi tiếp: những dạng "nói dối" nhẹ — dữ liệu hỏng do lỗi bit, gói tin sai qua mặt kiểm tổng, cấu hình sai — bạn phòng bằng gì?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Hãy tách các bảo đảm của hệ bạn thành cột an toàn và cột sống còn.</strong><span class="deep-only">Cột an toàn phải đúng ngay cả khi mọi giả định về thời gian bị vi phạm. Cột sống còn được phép kèm điều kiện — nhưng điều kiện ấy phải được viết ra. Nếu bạn không tách được hai cột này, thì bạn chưa biết hệ của mình hứa gì.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Khi một máy im lặng, hệ của bạn kết luận nó chết hay chỉ đang bận?</strong><span>Im lặng không có nghĩa là đã chết. Đợi bao lâu là do mình chọn.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu đoán nhầm là nó chết, thì chuyện gì hỏng?</strong><span>Có thể hai máy cùng tưởng mình là người phụ trách — và cùng ghi đè lên nhau.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Chương trình của bạn có chỗ nào lấy giờ hiện tại trừ đi giờ lúc nãy không?</strong><span>Nếu đồng hồ bị chỉnh lùi, phép trừ đó ra số âm và mọi thứ có thể vỡ.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu máy của bạn "đứng hình" mười giây rồi tỉnh lại, nó có biết không?</strong><span>Thường là không. Nên đừng để nó tự tin rằng vẫn tới lượt mình.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Chỗ giữ dữ liệu của bạn có kiểm tra "vé" không, hay chỉ tin lời máy gửi tới?</strong><span>Nhớ nhé: phải kiểm tra vé, đừng chỉ nghe kể.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>When a node stops answering, what does your system conclude — and on what basis?</strong><span>Chase it to the bottom: is it just a fixed timeout in a config file? How was that number chosen, and who tested it under peak load? A timeout never proves death; it only says you stopped waiting.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>If you wrongly declare a live node dead, what breaks?</strong><span>Name them: an operation performed twice? two nodes each believing they lead? the "dead" node's load shifted onto others exactly while the system is congested? That last path is the classic route to cascading failure.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Where in your code do you subtract two timestamps?</strong><span>Every such subtraction assumes the clock never jumps backwards. Is it a time-of-day or a monotonic clock? If the former, think about leap-second night, or NTP taking a large step.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Does your system use timestamps to decide which write wins?</strong><span>If so, what is the current clock skew between nodes, and are you monitoring it? With last-write-wins, a node a few milliseconds fast can silently erase valid writes, with no log line to warn you.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>What is the longest pause your process has ever suffered — do you have the measurement?</strong><span>Not just GC: VM migration, page faults after swapping, CPU contention on shared hosts. Without the measurement, every lease duration in your system was chosen by feel.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>If a lock-holding client is paused past expiry, wakes and writes — who stops it?</strong><span>The only right answer is: the resource itself, by rejecting tokens lower than the highest it has seen. If your answer is "the client re-checks the lease before writing", the gap between check and write is still open.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Does your system need Byzantine fault tolerance — and have you answered that deliberately?</strong><span>For most systems inside one datacenter the answer is no, and that is reasonable. But say it out loud, then ask: what guards against the mild forms of lying — bit-flip corruption, bad packets slipping past checksums, misconfiguration?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Split your system's guarantees into a safety column and a liveness column.</strong><span>The safety column must hold even when every timing assumption is violated. The liveness column may carry conditions — but those conditions must be written down. If you can't split them, you don't yet know what your system promises.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Trong hệ phân tán, điều khó nhất không phải là <span class="closing-accent">mọi thứ đều có thể hỏng</span>, mà là <span class="closing-accent">bạn không biết thứ gì đã hỏng</span>. Mạng không cho chặn trên, đồng hồ không cho thời điểm chắc chắn, tiến trình không cho tính liên tục — nên mọi phát biểu "node kia đã chết" hay "lần ghi này xảy ra sau" đều là suy diễn, không phải quan sát. Lối thoát của Kleppmann không phải một thuật toán khôn ngoan hơn, mà là <span class="closing-accent">đổi chỗ đặt niềm tin</span>: để đa số định nghĩa sự thật, để tài nguyên tự kiểm chứng bằng token tăng ngặt, và <span class="closing-accent">viết rõ giả định của mình ra</span> thành mô hình hệ thống cùng cặp an toàn – sống còn.<span class="cite"><a href="#ref-1">1</a></span></span><span class="easy-only">Nhiều máy làm việc chung thì kiểu gì cũng có lúc trục trặc — điều đó bình thường. Cái khó là <span class="closing-accent">mình không nhìn thấy chỗ nào đang hỏng</span>. Vì thế: đừng tin một máy tự nói mình đúng, hãy <span class="closing-accent">hỏi cả nhóm</span>; và chỗ giữ đồ thì phải <span class="closing-accent">kiểm tra vé</span>, đừng chỉ nghe kể. Nhớ nhé: thành thật về chỗ mình không biết thì an toàn hơn là giả vờ biết.</span><span class="en-only" lang="en">In a distributed system the hard part is not that <span class="closing-accent">anything can go wrong</span>, but that <span class="closing-accent">you cannot tell what did</span>. Networks give no upper bound, clocks give no certain instant, processes give no continuity — so every claim that "that node is dead" or "this write came later" is an inference, not an observation. Kleppmann's way out is not a cleverer algorithm but a <span class="closing-accent">relocation of trust</span>: let the majority define truth, let the resource verify itself with strictly increasing tokens, and <span class="closing-accent">write your assumptions down</span> as a system model with its safety and liveness properties.<span class="cite"><a href="#ref-1">1</a></span></span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-7-transactions.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 7 · Giao dịch</span><span class="en-only" lang="en">Chapter 7 · Transactions</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="chapter-9-consistency-and-consensus.html">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 9 · Nhất quán &amp; đồng thuận</span><span class="en-only" lang="en">Chapter 9 · Consistency &amp; Consensus</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 8 <span lang="en">“The Trouble with Distributed Systems”</span><span class="cite"><a href="#ref-22">22</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (nhắn tin không ai trả lời, đồng hồ treo tường và đồng hồ bấm giờ, phòng gửi đồ phát vé…) là minh họa do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. <strong>Về các con số:</strong> mọi số liệu trên trang này đều là phép đo trong một môi trường cụ thể tại một thời điểm cụ thể, không phải hằng số phổ quát — tỉ lệ hỏng thiết bị và liên kết là của vài trung tâm dữ liệu Microsoft trong khảo sát SIGCOMM 2011 <span class="cite"><a href="#ref-5">5</a></span>; các mức chính xác NTP là mức <em>theo điều kiện</em> nêu trong RFC 5905 <span class="cite"><a href="#ref-9">9</a></span>; khoảng ε 1–7 ms của TrueTime là số đo trong môi trường vận hành của Google mà bài báo OSDI 2012 mô tả <span class="cite"><a href="#ref-8">8</a></span>; các quãng dừng 4,17 s và 11,45 s là hai ca cụ thể trong môi trường vận hành của LinkedIn năm 2016 <span class="cite"><a href="#ref-15">15</a></span>.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 8 “The Trouble with Distributed Systems”<span class="cite"><a href="#ref-22">22</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (an unanswered text message, a wall clock versus a stopwatch, a cloakroom issuing numbered tickets…) are illustrations added by this companion, not examples from the book. <strong>About the numbers:</strong> every figure on this page is a measurement of a specific environment at a specific time, not a universal constant — the device and link failure rates come from several Microsoft datacenters in the SIGCOMM 2011 study <span class="cite"><a href="#ref-5">5</a></span>; the NTP precision levels are the <em>conditional</em> figures stated in RFC 5905 <span class="cite"><a href="#ref-9">9</a></span>; TrueTime's 1–7 ms ε range is measured in the Google production environment described by the OSDI 2012 paper <span class="cite"><a href="#ref-8">8</a></span>; the 4.17 s and 11.45 s pauses are two specific cases in LinkedIn's production environment in 2016 <span class="cite"><a href="#ref-15">15</a></span>.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 8, “The Trouble with Distributed Systems”.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách (mục lục, khung reliable / scalable / maintainable, phần II về dữ liệu phân tán)</a></li>
+        <li id="ref-3"><a href="https://github.com/ept/ddia-references/blob/master/chapter-08-refs.md" target="_blank" rel="noopener noreferrer">Martin Kleppmann — ept/ddia-references, danh mục tham chiếu Chương 8 (von Neumann, Shannon, Bailis &amp; Kingsbury, Gill và cộng sự, Spanner, NTP FAQ, giây nhuận, GC pause, Lamport, Dwork–Lynch–Stockmeyer, Alpern &amp; Schneider…)</a></li>
+        <li id="ref-4"><a href="https://aphyr.com/posts/288-the-network-is-reliable" target="_blank" rel="noopener noreferrer">Peter Bailis &amp; Kyle Kingsbury, “The Network Is Reliable”, aphyr.com, 2.6.2013 — tổng hợp khảo sát lỗi mạng: nghiên cứu trung tâm dữ liệu Microsoft (5,2 thiết bị/ngày, 40,8 liên kết/ngày, sửa trung vị ~5 phút, trung vị 59.000 gói mất mỗi lần hỏng, dư thừa cải thiện lưu lượng trung vị 43%) và khảo sát CENIC (508 phân vùng cô lập trong 5 năm)</a> <em>(bản mở rộng đăng trên ACM Queue 12(7), 2014; queue.acm.org chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-5"><a href="https://conferences.sigcomm.org/sigcomm/2011/papers/sigcomm/p350.pdf" target="_blank" rel="noopener noreferrer">Phillipa Gill, Navendu Jain, Nachiappan Nagappan, “Understanding Network Failures in Data Centers: Measurement, Analysis, and Implications”, ACM SIGCOMM 2011 — nghiên cứu gốc đằng sau các con số trên</a></li>
+        <li id="ref-6"><a href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “How to do distributed locking”, martin.kleppmann.com, 8.2.2016 — cơ chế fencing token (token 33 / 34), quãng dừng GC vượt hạn lease, ZooKeeper zxid, sự cố GitHub với gói tin bị trì hoãn ~90 giây</a></li>
+        <li id="ref-7"><a href="https://github.blog/news-insights/the-library/downtime-last-saturday/" target="_blank" rel="noopener noreferrer">Mark Imbriaco, “Downtime last Saturday”, github.blog, 26.12.2012 — bản tường trình sự cố mạng trên cặp switch tổng hợp</a></li>
+        <li id="ref-8"><a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf" target="_blank" rel="noopener noreferrer">James C. Corbett và cộng sự, “Spanner: Google's Globally-Distributed Database”, USENIX OSDI 2012 — TrueTime: TT.now() trả về TTinterval, ε là hàm răng cưa 1–7 ms mỗi chu kỳ hỏi (≈4 ms phần lớn thời gian), chu kỳ hỏi 30 giây, tốc độ trôi áp dụng 200 µs/giây, cơ chế commit wait</a></li>
+        <li id="ref-9"><a href="https://datatracker.ietf.org/doc/html/rfc5905" target="_blank" rel="noopener noreferrer">David L. Mills và cộng sự, RFC 5905 — Network Time Protocol Version 4 (độ chính xác theo điều kiện: vài chục µs cho máy chủ tầng một, vài trăm µs trên LAN nhanh, vài chục ms với chu kỳ hỏi tới 36 giờ; sai số tăng theo stratum và thời gian đi–về; thuật toán chọn lọc loại falsetickers, giữ truechimers)</a></li>
+        <li id="ref-10"><a href="https://man7.org/linux/man-pages/man2/clock_gettime.2.html" target="_blank" rel="noopener noreferrer">clock_gettime(2) — Linux manual page (CLOCK_REALTIME chỉnh được và chịu bước nhảy không liên tục; CLOCK_MONOTONIC không chỉnh được và không chịu bước nhảy)</a></li>
+        <li id="ref-11"><a href="https://blog.cloudflare.com/how-and-why-the-leap-second-affected-cloudflare-dns/" target="_blank" rel="noopener noreferrer">John Graham-Cumming, “How and why the leap second affected Cloudflare DNS”, blog.cloudflare.com, 1.1.2017 — time.Now() của Go không đơn điệu, hiệu số âm, rand.Int63n() panic</a></li>
+        <li id="ref-12"><a href="https://aphyr.com/posts/299-the-trouble-with-timestamps" target="_blank" rel="noopener noreferrer">Kyle Kingsbury, “The trouble with timestamps”, aphyr.com, 12.10.2013 — Cassandra xếp thứ tự ghi bằng dấu thời gian đồng hồ tường; hệ quả với last-write-wins</a></li>
+        <li id="ref-13"><a href="https://lamport.azurewebsites.net/pubs/time-clocks.pdf" target="_blank" rel="noopener noreferrer">Leslie Lamport, “Time, Clocks, and the Ordering of Events in a Distributed System”, CACM 21(7), 1978 — quan hệ happens-before và đồng hồ logic</a></li>
+        <li id="ref-14"><a href="https://lamport.azurewebsites.net/pubs/byz.pdf" target="_blank" rel="noopener noreferrer">Leslie Lamport, Robert Shostak, Marshall Pease, “The Byzantine Generals Problem”, ACM TOPLAS 4(3), 1982 — giải được khi và chỉ khi hơn hai phần ba số tướng trung thành</a></li>
+        <li id="ref-15"><a href="https://engineering.linkedin.com/blog/2016/02/eliminating-large-jvm-gc-pauses-caused-by-background-io-traffic" target="_blank" rel="noopener noreferrer">Zhenyun Zhuang &amp; Cuong Tran, “Eliminating Large JVM GC Pauses Caused by Background IO Traffic”, engineering.linkedin.com, 10.2.2016 — quãng dừng &gt; 5 giây trong môi trường vận hành, ví dụ 4,17 s với G1 (heap 8 GB) và 11,45 s với CMS, do write() ghi log GC bị chặn bởi page cache writeback</a></li>
+        <li id="ref-16"><a href="https://doc.akka.io/libraries/akka-core/current/typed/failure-detector.html" target="_blank" rel="noopener noreferrer">Akka — Phi Accrual Failure Detector (công thức phi = -log10(1 - F(timeSinceLastHeartbeat)), biên acceptable-heartbeat-pause để sống sót qua quãng dừng GC)</a></li>
+        <li id="ref-17"><a href="https://hdl.handle.net/10119/4784" target="_blank" rel="noopener noreferrer">Naohiro Hayashibara, Xavier Défago, Rami Yared, Takuya Katayama, “The φ Accrual Failure Detector”, JAIST Technical Report IS-RR-2004-010, 2004</a></li>
+        <li id="ref-18"><a href="https://www.cockroachlabs.com/blog/living-without-atomic-clocks/" target="_blank" rel="noopener noreferrer">Spencer Kimball, “Living Without Atomic Clocks”, cockroachlabs.com, 17.2.2016 — cách xử lý bất định đồng hồ khi không có hạ tầng giờ chuyên dụng</a></li>
+        <li id="ref-19"><a href="https://groups.csail.mit.edu/tds/papers/Lynch/jacm88.pdf" target="_blank" rel="noopener noreferrer">Cynthia Dwork, Nancy Lynch, Larry Stockmeyer, “Consensus in the Presence of Partial Synchrony”, Journal of the ACM 35(2), 1988 — nguồn gốc mô hình bán đồng bộ</a> <em>(bản trên dl.acm.org chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-20"><a href="https://www.cs.cornell.edu/fbs/publications/DefLiveness.pdf" target="_blank" rel="noopener noreferrer">Bowen Alpern &amp; Fred B. Schneider, “Defining Liveness”, Information Processing Letters 21(4), 1985 — phân đôi safety / liveness</a></li>
+        <li id="ref-21"><a href="https://www.evanjones.ca/tcp-and-ethernet-checksums-fail.html" target="_blank" rel="noopener noreferrer">Evan Jones, “How both TCP and Ethernet checksums fail”, evanjones.ca, 5.10.2015 — vì sao kiểm tổng tầng dưới không bắt hết dữ liệu hỏng</a></li>
+        <li id="ref-22"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O'Reilly — trang sách chính thức (định danh ấn bản, mục lục, số hiệu chương)</a> <em>(oreilly.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-7-transactions.html">Chương 7 — Giao dịch</a> · <a href="chapter-9-consistency-and-consensus.html">Chương 9 — Nhất quán &amp; đồng thuận</a>.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-7-transactions.html">Chapter 7 — Transactions</a> · <a href="chapter-9-consistency-and-consensus.html">Chapter 9 — Consistency &amp; Consensus</a>.</p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

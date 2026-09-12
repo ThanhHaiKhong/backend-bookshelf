@@ -79,10 +79,49 @@ Scaffold phải được copy **nguyên văn**, không cắt gọt. Những th�
   cacm.acm.org, infoq.com) vẫn được cite bình thường — chúng có thật, chỉ chặn bot.
   Kèm một `<em>` anh em **ngoài** thẻ `<a>` ghi rõ host nào chặn và mã trả về, để
   trang tự đứng được mà không cần người đọc lục file này.
+- **Trích dẫn phải trỏ đúng nguồn**: `ref-1` là **cuốn sách**, `ref-2` là **trang web**
+  của sách. Mọi phát biểu quy cho tác giả ("Kleppmann nói…", cách ông đóng khung vấn
+  đề, ví dụ ông dùng) phải cite `ref-1`, không phải `ref-2`. Đây là lỗi đã xảy ra ở
+  **4/5 agent** trong một wave và `book-qa` không bắt được. Mật độ tham chiếu: 33–62
+  cite `ref-1` mỗi chương.
+- **0 ref thừa, 0 cite treo**: mọi mục trong ref-list phải được cite ít nhất một lần,
+  và mọi cite phải trỏ tới một mục có thật. Ref chỉ dùng để định danh ấn bản thì cite
+  vào dòng nguồn-chính ở footer.
 
 **Nguồn scaffold canonical:** `~/Documents/secrets-of-a-super-memory` (cùng khuôn,
 đã mang đủ rail). Khi cần một khối bị thiếu, trích từ đó chứ đừng viết lại — khối
 rail ở bản cover và bản chapter là byte-identical.
+
+## Kiểm link ngoài — đừng tin một phép đo
+
+Mã HTTP **phụ thuộc User-Agent theo cách phản trực giác**: cùng một URL có thể trả 403
+cho UA Chrome đầy đủ nhưng 200 cho `curl` trần, vì bộ lọc bot phạt thứ *giả dạng*
+trình duyệt. Đo bằng một UA rồi kết luận là sai.
+
+Quy trình trước khi dán nhãn "bot-blocked" hay tuyên bố một link đã chết:
+
+1. Thử ít nhất hai User-Agent (UA Chrome đầy đủ **và** `curl` trần).
+2. Nếu còn nghi ngờ, mở bằng **trình duyệt thật** (`chrome-devtools-axi open <url>`
+   rồi đọc `document.title`). Chỉ cách này mới phân biệt được ba tình huống khác hẳn
+   nhau: chặn bot mà người đọc vẫn vào được · thử thách Cloudflare · link mục nát.
+3. **5xx không phải chặn bot.** Không được ghi chú kiểu bot-blocked để cho qua. Thay
+   bằng nguồn còn sống, hoặc bỏ hẳn khẳng định nếu không có nguồn nào đỡ được nó.
+
+**Ưu tiên doc chính thức hơn blog của cùng vendor** — blog mục nát nhanh hơn nhiều.
+
+## Fan-out song song — mỗi agent một thư mục scratchpad
+
+Agent viết chương hay dùng tên file trung gian giống nhau (`body1.html`…). Khi nhiều
+agent chạy song song trong **cùng một thư mục** scratchpad, chúng **ghi đè lẫn nhau**
+và ráp ra trang lẫn nội dung của chương khác — trong khi `book-qa`, cite/ref, rail,
+nav đều vẫn xanh, vì đó là lỗi *nội dung* chứ không phải *cấu trúc*.
+
+Luật: mỗi agent trong một đợt fan-out dùng thư mục con riêng — `scratchpad/ch5/`,
+`scratchpad/ch6/`… — hoặc tiền tố tên file theo chương.
+
+Sau mỗi wave song song, kiểm nhiễm chéo trước khi tin vào gate: định danh chương
+(`<title>`, `content: "DDIA / 0N"`, `.book-label`, tập `section[id]`), và các thuật
+ngữ **chỉ thuộc về một chương** (đếm từ khoá chung như "quorum" sẽ báo động giả).
 
 ## Chủ quyền file
 
@@ -109,6 +148,6 @@ DDIA dùng tông giấy cũ: `--teal: #b5502f` (đất nung), `--blue: #2b7c73`,
 
 | Cuốn | Chương | Ghi chú |
 |---|---|---|
-| `designing-data-intensive-applications` | **4 / 12** | Kleppmann, O'Reilly 2017. Phần I **4/4 trọn vẹn**; Phần II 0/5; Phần III 0/3. Mind-map: CSS `.mindmap-banner` đã có, chưa có element trong body. |
+| `designing-data-intensive-applications` | **9 / 12** | Kleppmann, O'Reilly 2017. Phần I **4/4** và Phần II **5/5** trọn vẹn; Phần III 0/3. Mind-map: CSS `.mindmap-banner` đã có, chưa có element trong body. Mục mở: chính tả `hoá`/`hóa` trộn lẫn toàn cuốn (436 vs 60), chưa chuẩn hoá. |
 
-Việc kế tiếp của DDIA: Chương 5–9 (Phần II · Distributed Data).
+Việc kế tiếp của DDIA: Chương 10–12 (Phần III · Derived Data).

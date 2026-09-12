@@ -1,0 +1,2126 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 5 &quot;Replication&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: leader–follower và failover, bốn kiểu log nhân bản, độ trễ nhân bản và ba bảo đảm, multi-leader &amp; xung đột ghi, quorum kiểu Dynamo, LWW và version vector.">
+<title>Replication</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 05";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 5</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 5</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 5</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 5 · Nhân bản</span><span class="easy-only">DDIA · Chương 5 · Nhân bản</span><span class="en-only" lang="en">DDIA · Chapter 5 · Replication</span></div>
+      <h1 id="page-title"><span class="standard-copy">Giữ cùng một dữ liệu trên <span class="hero-title-accent">nhiều máy</span></span><span class="easy-only">Chép dữ liệu ra nhiều máy</span><span class="en-only" lang="en">Keeping the same data on <span class="hero-title-accent">several machines</span></span></h1>
+      <p class="standard-copy">Chương 5 mở ra Phần II của cuốn sách — phần dữ liệu phân tán. Kleppmann nêu ba lý do người ta chấp nhận giữ nhiều bản sao của cùng một tập dữ liệu: đặt dữ liệu <strong>gần người dùng về mặt địa lý</strong> để giảm độ trễ, giữ hệ <strong>còn chạy khi một phần chết</strong>, và <strong>rải tải đọc</strong> ra nhiều máy<span class="cite"><a href="#ref-1">1</a></span>. Nhưng ông lập tức chỉ ra chỗ khó thật: nếu dữ liệu không bao giờ đổi, nhân bản chỉ là chép một lần rồi thôi. <strong>Toàn bộ độ khó của nhân bản nằm ở chỗ xử lý <em>thay đổi</em></strong> — và ba mươi năm nghiên cứu chỉ sinh ra ba họ lời giải: một lãnh đạo, nhiều lãnh đạo, và không lãnh đạo.</p>
+      <p class="easy-only">Nếu chỉ có một cuốn sổ ghi chép mà nó cháy mất thì coi như xong. Nên người ta chép thành nhiều cuốn, để ở nhiều nơi: một cuốn cháy vẫn còn cuốn khác, và ai ở gần cuốn nào thì đọc cuốn đó cho nhanh. Chép thì dễ. Khó là ở chỗ: khi có người <strong>sửa</strong> một cuốn, làm sao để mấy cuốn kia cũng được sửa theo cho khớp?</p>
+      <p class="en-only" lang="en">Chapter 5 opens Part II of the book — distributed data. Kleppmann gives three reasons people accept keeping multiple copies of the same dataset: putting data <strong>geographically close to users</strong> to cut latency, keeping the system <strong>running when parts of it die</strong>, and <strong>spreading read load</strong> across machines<span class="cite"><a href="#ref-1">1</a></span>. But he immediately points at the real difficulty: if the data never changed, replication would be a one-off copy. <strong>All the difficulty of replication lies in handling <em>changes</em></strong> — and thirty years of research have produced only three families of answer: single-leader, multi-leader, and leaderless.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Nhân bản không phải bài toán sao chép, mà là bài toán <strong>quyết định ai được phép ghi và làm gì khi các bản sao bất đồng</strong>. Ba họ kiến trúc — <em>single-leader</em>, <em>multi-leader</em>, <em>leaderless</em> — không phải ba mức độ tốt dần, mà là ba cách <strong>đặt chi phí ở chỗ khác nhau</strong>: hoặc trả bằng độ sẵn sàng khi ghi, hoặc trả bằng xung đột phải tự hoá giải, hoặc trả bằng việc ứng dụng phải hiểu chuyện đồng thời. Không có lựa chọn nào miễn phí, và mọi “bảo đảm” trong chương này đều kèm điều kiện.</p>
+          <p class="easy-only">Chép sổ ra nhiều cuốn thì dễ. Câu hỏi thật là: <strong>ai được quyền viết vào sổ, và khi hai cuốn ghi khác nhau thì tin cuốn nào?</strong> Có ba cách trả lời, và cách nào cũng phải trả giá ở một chỗ nào đó. Nhớ nhé: không có cách chép sổ nào vừa nhanh, vừa luôn đúng, vừa không bao giờ hỏng.</p>
+          <p class="en-only" lang="en">Replication is not a copying problem but a problem of <strong>deciding who may write and what to do when copies disagree</strong>. The three families — <em>single-leader</em>, <em>multi-leader</em>, <em>leaderless</em> — are not three grades of quality but three ways of <strong>placing the cost somewhere else</strong>: you pay in write availability, or in conflicts you must resolve yourself, or in an application that must understand concurrency. None is free, and every “guarantee” in this chapter comes with conditions.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Ba họ kiến trúc nhân bản của Chương 5: một lãnh đạo, nhiều lãnh đạo, và không lãnh đạo / Three replication architectures: single-leader, multi-leader and leaderless">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">NHÂN BẢN<br>AI ĐƯỢC GHI?</span><span class="en-only" lang="en">REPLICATION<br>WHO MAY<br>WRITE?</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Single-leader</span><span class="en-only" lang="en">Single-leader</span></b>
+        <small class="standard-copy">Một leader nhận ghi, follower chép log theo</small>
+        <small class="easy-only">Một cuốn sổ chính, các cuốn kia chép theo.</small>
+        <small class="en-only" lang="en">One leader takes writes; followers replay its log</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Multi-leader</span><span class="en-only" lang="en">Multi-leader</span></b>
+        <small class="standard-copy">Nhiều nơi cùng nhận ghi — đổi lấy xung đột</small>
+        <small class="easy-only">Nhiều cuốn cùng được viết — dễ đụng nhau.</small>
+        <small class="en-only" lang="en">Several nodes accept writes — at the price of conflicts</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Leaderless</span><span class="en-only" lang="en">Leaderless</span></b>
+        <small class="standard-copy">Không ai là leader; đọc/ghi theo quorum</small>
+        <small class="easy-only">Không ai làm chủ; hỏi nhiều cuốn cùng lúc.</small>
+        <small class="en-only" lang="en">No leader at all; reads and writes use quorums</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#leader-follower"><span><span class="vi-only">Leader–follower</span><span class="en-only" lang="en">Leader–follower</span></span><b class="standard-copy">Một lãnh đạo, log nhân bản, và failover</b><b class="easy-only">Một cuốn sổ chính, các cuốn chép theo</b><b class="en-only" lang="en">One leader, replication logs, and failover</b></a>
+    <a href="#replication-lag"><span><span class="vi-only">Replication lag</span><span class="en-only" lang="en">Replication lag</span></span><b class="standard-copy">Ba bảo đảm vá lỗ hổng của độ trễ</b><b class="easy-only">Khi cuốn sổ chép chậm hơn</b><b class="en-only" lang="en">Three guarantees that patch the lag</b></a>
+    <a href="#multi-leader"><span><span class="vi-only">Multi-leader</span><span class="en-only" lang="en">Multi-leader</span></span><b class="standard-copy">Mua sẵn sàng bằng xung đột ghi</b><b class="easy-only">Nhiều nơi cùng được viết</b><b class="en-only" lang="en">Buying availability with write conflicts</b></a>
+    <a href="#leaderless"><span><span class="vi-only">Leaderless</span><span class="en-only" lang="en">Leaderless</span></span><b class="standard-copy">Quorum, và chỗ quorum không giữ lời</b><b class="easy-only">Hỏi nhiều bản cùng lúc</b><b class="en-only" lang="en">Quorums, and where they break their promise</b></a>
+    <a href="#diagnostic"><span><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></span><b class="standard-copy">Soi chiến lược nhân bản của hệ bạn</b><b class="easy-only">Câu hỏi tự hỏi mình</b><b class="en-only" lang="en">Audit your own replication strategy</b></a>
+  </nav>
+
+  <section class="section" id="leader-follower" aria-labelledby="leader-follower-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">Leaders and followers</span></span><span class="en-only" lang="en">Axis 1 · Leaders and followers</span></div>
+        <h2 id="leader-follower-title"><span class="vi-only">Một người ghi, những người còn lại chép theo</span><span class="en-only" lang="en">One writer, everyone else replays the log</span></h2>
+      </div>
+      <p class="standard-copy">Lời giải phổ biến nhất — và cũng là lời giải mà PostgreSQL, MySQL, MongoDB và phần lớn cơ sở dữ liệu quan hệ dùng — là <em>nhân bản dựa trên lãnh đạo</em>: một bản sao được chỉ định làm <strong>leader</strong>, mọi lệnh ghi của client đều đi qua nó; leader ghi thay đổi vào log nhân bản rồi đẩy log ấy sang các <strong>follower</strong>, mỗi follower phát lại log theo đúng thứ tự cũ<span class="cite"><a href="#ref-1">1</a></span>. Client có thể đọc từ leader hoặc bất kỳ follower nào, nhưng chỉ leader mới nhận ghi. Toàn bộ phần còn lại của trục này là giá phải trả cho cái sắp xếp gọn gàng đó: chờ hay không chờ follower, dựng follower mới thế nào, và chuyện gì xảy ra khi chính leader chết.</p>
+      <p class="easy-only">Tưởng tượng một lớp học chép chính tả: cô giáo đọc, cả lớp chép. Chỉ mình cô được quyết định nội dung; các bạn chỉ chép lại đúng thứ tự cô đọc. Muốn xem bài thì xem vở ai cũng được, nhưng muốn <strong>sửa</strong> bài thì phải qua cô. Cách này gọn — nhưng nếu cô giáo nghỉ ốm thì cả lớp phải chọn ai đọc thay, và đó mới là chỗ rắc rối.</p>
+      <p class="en-only" lang="en">The most common answer — the one PostgreSQL, MySQL, MongoDB and most relational databases use — is <em>leader-based replication</em>: one replica is designated the <strong>leader</strong>, all client writes go through it; the leader writes each change to a replication log and ships it to the <strong>followers</strong>, each of which replays the log in the same order<span class="cite"><a href="#ref-1">1</a></span>. Clients may read from the leader or from any follower, but only the leader accepts writes. Everything else on this axis is the price of that tidy arrangement: whether to wait for followers, how to build a new one, and what happens when the leader itself dies.</p>
+    </div>
+
+    <div class="overview-grid">
+      <article class="overview-card teal">
+        <div class="term"><span class="vi-only">Lý do 01 · <span lang="en">Latency</span></span><span class="en-only" lang="en">Reason 01 · Latency</span></div>
+        <h3><span class="vi-only">Đặt dữ liệu gần người dùng</span><span class="en-only" lang="en">Put data near the user</span></h3>
+        <p class="standard-copy">Ánh sáng cũng cần thời gian để đi vòng quanh Trái Đất. Giữ một bản sao ở trung tâm dữ liệu gần người dùng nhất là cách duy nhất cắt được phần độ trễ do khoảng cách vật lý gây ra<span class="cite"><a href="#ref-1">1</a></span> — không tối ưu truy vấn nào bù được cho nửa vòng địa cầu.</p>
+        <p class="easy-only">Muốn mượn sách nhanh thì thư viện phải ở gần nhà, chứ không phải ở tỉnh khác. Dữ liệu cũng vậy. Nhớ nhé: ở gần thì nhanh hơn.</p>
+        <p class="en-only" lang="en">Even light takes time to cross the planet. Keeping a copy in the data centre nearest the user is the only way to remove the latency that distance itself imposes<span class="cite"><a href="#ref-1">1</a></span> — no query optimisation compensates for half a globe.</p>
+        <div class="result standard-copy">Gần về địa lý = nhanh về độ trễ.</div>
+        <div class="result easy-only">Nhớ nhé: gần thì nhanh.</div>
+        <div class="result en-only" lang="en">Geographic closeness buys latency.</div>
+      </article>
+      <article class="overview-card blue">
+        <div class="term"><span class="vi-only">Lý do 02 · <span lang="en">Availability</span></span><span class="en-only" lang="en">Reason 02 · Availability</span></div>
+        <h3><span class="vi-only">Vẫn chạy khi một phần chết</span><span class="en-only" lang="en">Keep working when parts die</span></h3>
+        <p class="standard-copy">Có nhiều bản sao nghĩa là mất một máy không đồng nghĩa mất dữ liệu hay mất dịch vụ<span class="cite"><a href="#ref-1">1</a></span>. Đây chính là <em>dung thứ lỗi</em> của Chương 1 được hiện thực ở tầng dữ liệu — và cũng là lý do nhân bản khác hẳn sao lưu: bản sao ở đây <em>đang phục vụ</em>, không nằm chờ trong kho.</p>
+        <p class="easy-only">Có hai cuốn sổ thì một cuốn ướt mưa vẫn còn cuốn kia đọc được. Nhớ nhé: nhiều bản thì bớt sợ mất.</p>
+        <p class="en-only" lang="en">Having several copies means losing one machine doesn't mean losing the data or the service<span class="cite"><a href="#ref-1">1</a></span>. This is Chapter 1's <em>fault tolerance</em> realised at the data layer — and it's why replication differs from backup: these copies are <em>serving traffic</em>, not sitting in storage.</p>
+        <div class="result standard-copy">Mất một nút ≠ mất dịch vụ.</div>
+        <div class="result easy-only">Nhớ nhé: còn bản dự phòng.</div>
+        <div class="result en-only" lang="en">One node lost ≠ service lost.</div>
+      </article>
+      <article class="overview-card amber">
+        <div class="term"><span class="vi-only">Lý do 03 · <span lang="en">Read throughput</span></span><span class="en-only" lang="en">Reason 03 · Read throughput</span></div>
+        <h3><span class="vi-only">Rải tải đọc ra nhiều máy</span><span class="en-only" lang="en">Spread read load across machines</span></h3>
+        <p class="standard-copy">Vì mọi follower đều có đủ dữ liệu, ta có thể rót truy vấn đọc vào chúng — kiến trúc <em>read-scaling</em> mà Kleppmann mô tả cho các ứng dụng đọc nhiều, ghi ít<span class="cite"><a href="#ref-1">1</a></span>. Nhưng nó chỉ mở rộng phần <em>đọc</em>: mọi lệnh ghi vẫn dồn về một leader duy nhất.</p>
+        <p class="easy-only">Nhiều cuốn sổ thì nhiều bạn cùng đọc một lúc được, khỏi phải xếp hàng. Nhưng muốn <em>viết</em> thì vẫn phải chờ tới lượt ở cuốn chính. Nhớ nhé: chép nhiều bản giúp <strong>đọc</strong> nhanh, không giúp <strong>ghi</strong> nhanh.</p>
+        <p class="en-only" lang="en">Because every follower holds the full dataset, read queries can be poured into them — the <em>read-scaling</em> architecture Kleppmann describes for read-heavy, write-light workloads<span class="cite"><a href="#ref-1">1</a></span>. But it only scales <em>reads</em>: every write still funnels through a single leader.</p>
+        <div class="result standard-copy">Mở rộng đọc, không mở rộng ghi.</div>
+        <div class="result easy-only">Nhớ nhé: nhanh đọc, không nhanh ghi.</div>
+        <div class="result en-only" lang="en">Scales reads, not writes.</div>
+      </article>
+    </div>
+
+    <div class="surprise-lead trap-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Leader-based replication: the whole cost is in the log</div>
+        <p class="definition standard-copy">Trong mô hình một-lãnh-đạo, thứ thật sự đi qua mạng không phải dữ liệu mà là <strong>một dòng thay đổi có thứ tự</strong>. Follower không “đồng bộ” với leader theo nghĩa so sánh trạng thái; nó chỉ phát lại đúng chuỗi thay đổi ấy. Vì thế mọi câu hỏi khó của trục này đều là câu hỏi về log: leader có chờ log tới nơi rồi mới báo thành công không, một follower mới bắt đầu phát lại từ vị trí nào, và khi leader chết thì phần log chưa kịp đi đâu về đâu.</p>
+        <p class="definition easy-only">Cô giáo không đưa vở của mình cho cả lớp chép lại từ đầu. Cô <strong>đọc từng câu theo thứ tự</strong>, ai cũng chép đúng thứ tự đó nên cuối buổi vở ai cũng giống nhau. Nhớ nhé: quan trọng là chép <em>đúng thứ tự</em>, không phải chép nhanh.</p>
+        <p class="definition en-only" lang="en">In the single-leader model, what actually crosses the network is not data but <strong>an ordered stream of changes</strong>. A follower doesn't “sync” with the leader by comparing state; it replays that exact sequence. So every hard question on this axis is a question about the log: does the leader wait for the log to arrive before reporting success, where does a new follower start replaying, and what becomes of log entries that never left a leader that has died.</p>
+        <p class="deep-only">Điều này giải thích vì sao log nhân bản lại là một trong những trừu tượng có sức sống nhất trong hệ dữ liệu. Cùng một dòng thay đổi có thứ tự ấy nuôi được cả bản sao chờ sẵn (standby), cả chỉ mục tìm kiếm, cả kho dữ liệu phân tích, cả cache — miễn là consumer phát lại đúng thứ tự. PostgreSQL công khai hoá chính ý tưởng này qua <em>logical decoding</em>: giải mã WAL nội bộ thành một dòng thay đổi mức hàng mà bên ngoài tiêu thụ được<span class="cite"><a href="#ref-10">10</a></span>. Và không phải mọi kiến trúc nhân bản đều hình sao quanh một leader: <em>chain replication</em> xếp các bản sao thành một chuỗi, ghi vào đầu chuỗi và đọc ở cuối chuỗi, để đạt vừa thông lượng cao vừa tính nhất quán mạnh<span class="cite"><a href="#ref-25">25</a></span> — Kleppmann nhắc nó như một biến thể đáng biết của họ leader-based.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về nhân bản một lãnh đạo">
+        <div class="equation-row">
+          <b>Ba lý do</b>
+          <span>Gần người dùng (độ trễ), chịu lỗi (sẵn sàng), rải tải đọc. Ghi vẫn dồn về một chỗ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Đồng bộ hay không</b>
+          <span>Chờ follower thì bền nhưng dễ treo; không chờ thì nhanh nhưng có thể mất ghi khi leader chết.</span>
+        </div>
+        <div class="equation-row">
+          <b>Failover là chỗ đau</b>
+          <span>Thăng chức một follower là thao tác nguy hiểm nhất: mất ghi, split brain, chọn timeout.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về nhân bản một lãnh đạo">
+        <div class="equation-row">
+          <b>Vì sao chép nhiều bản</b>
+          <span>Để ở gần cho nhanh, để không mất, và để nhiều người cùng đọc.</span>
+        </div>
+        <div class="equation-row">
+          <b>Chờ hay không chờ</b>
+          <span>Chờ bạn chép xong thì chắc chắn hơn nhưng chậm; không chờ thì nhanh mà dễ sót.</span>
+        </div>
+        <div class="equation-row">
+          <b>Cô giáo nghỉ ốm</b>
+          <span>Chọn ai đọc thay là lúc dễ rối nhất của cả lớp.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about single-leader replication">
+        <div class="equation-row">
+          <b>Three reasons</b>
+          <span>Closeness (latency), fault tolerance (availability), read spreading. Writes still funnel to one place.</span>
+        </div>
+        <div class="equation-row">
+          <b>Sync or not</b>
+          <span>Waiting for a follower is durable but stall-prone; not waiting is fast but can lose writes when the leader dies.</span>
+        </div>
+        <div class="equation-row">
+          <b>Failover is the wound</b>
+          <span>Promoting a follower is the riskiest operation: lost writes, split brain, timeout choice.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Synchronous vs asynchronous</div>
+          <h3><span class="vi-only">Chờ follower, hay báo thành công ngay?</span><span class="en-only" lang="en">Wait for the follower, or ack immediately?</span></h3>
+          <p class="standard-copy">Với nhân bản <em>đồng bộ</em>, leader chỉ báo cho client là ghi thành công sau khi follower xác nhận đã nhận. Ưu điểm: follower chắc chắn có bản sao cập nhật. Nhược điểm chí mạng mà Kleppmann nhấn: nếu follower không phản hồi — vì sập, vì mạng, vì quá tải — thì <strong>ghi bị chặn lại toàn bộ</strong><span class="cite"><a href="#ref-1">1</a></span>. Vì thế trong thực tế hiếm khi <em>mọi</em> follower đều đồng bộ; cấu hình hay gặp là <em>semi-synchronous</em>: một follower đồng bộ, số còn lại bất đồng bộ. PostgreSQL mặc định nhân bản luồng ở chế độ bất đồng bộ, và chỉ chuyển sang đồng bộ khi người vận hành đặt <span lang="en">synchronous_standby_names</span><span class="cite"><a href="#ref-9">9</a></span>; MySQL cung cấp nhân bản bán-đồng-bộ như một plugin phải bật riêng<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <p class="easy-only">Cô giáo đọc một câu rồi hỏi: “Bạn chép xong chưa?” — chờ trả lời rồi mới đọc câu tiếp. Chắc chắn không ai sót, nhưng nếu một bạn ngủ gật thì cả lớp đứng im. Cách kia là cô cứ đọc tiếp, ai chậm thì đuổi theo sau — nhanh hơn, nhưng bạn chậm có thể sót mất mấy câu. Nhớ nhé: chờ thì chắc mà chậm, không chờ thì nhanh mà dễ sót.</p>
+          <p class="en-only" lang="en">With <em>synchronous</em> replication the leader reports success to the client only after a follower confirms receipt. The upside: that follower certainly has an up-to-date copy. The fatal downside Kleppmann stresses: if the follower doesn't answer — crash, network, overload — <strong>writes block entirely</strong><span class="cite"><a href="#ref-1">1</a></span>. So in practice it's rare for <em>all</em> followers to be synchronous; the common setup is <em>semi-synchronous</em>: one synchronous follower, the rest asynchronous. PostgreSQL streams asynchronously by default and only becomes synchronous when an operator sets <span lang="en">synchronous_standby_names</span><span class="cite"><a href="#ref-9">9</a></span>; MySQL ships semisynchronous replication as a plugin you must enable<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc thế nào</strong>“Đồng bộ” không phải nút bật/tắt của cả hệ mà là một lựa chọn <em>trên từng follower</em>. Hỏi: có bao nhiêu bản sao thật sự đồng bộ, và nếu bản duy nhất ấy chậm thì hệ ghi có đứng không?</div>
+            <div class="easy-only"><strong>Hỏi gì</strong>Có ai được chờ không, và nếu người đó ngủ gật thì cả lớp có phải dừng không?</div>
+            <div class="en-only" lang="en"><strong>How to read it</strong>“Synchronous” is not a system-wide switch but a choice <em>per follower</em>. Ask: how many replicas are genuinely synchronous, and if the only one is slow, do writes stall?</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Bán-đồng-bộ là thoả hiệp có ý đồ</h4>
+              <p>Semi-synchronous giữ được lời hứa “luôn có ít nhất hai nút mang dữ liệu cập nhật” mà không để một follower chậm khoá cả hệ: nếu follower đồng bộ ngừng phản hồi, một follower bất đồng bộ được nâng lên thay vai đồng bộ. Đây là lý do PostgreSQL tách riêng <span lang="en">synchronous_commit</span> thành nhiều mức — <span lang="en">remote_write</span>, <span lang="en">on</span>, <span lang="en">remote_apply</span> — mỗi mức mua một lượng bền vững khác nhau bằng một lượng độ trễ khác nhau<span class="cite"><a href="#ref-9">9</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Bất đồng bộ không phải là sai</h4>
+              <p>Kleppmann không coi bất đồng bộ là lựa chọn tồi: nó là lựa chọn <em>thường dùng</em>, đặc biệt khi có nhiều follower hoặc follower ở xa về địa lý. Cái giá được nói thẳng: nếu leader chết trước khi log kịp đi, những ghi đã báo thành công cho client có thể mất hẳn. Đó là một đánh đổi bền-vững-đổi-lấy-hiệu-năng, phải được nói rõ chứ không nên giấu sau chữ “high availability”.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Setting up new followers</div>
+          <h3><span class="vi-only">Dựng follower mới: ảnh chụp + vị trí log</span><span class="en-only" lang="en">New followers: snapshot plus log position</span></h3>
+          <p class="standard-copy">Thêm một bản sao không thể làm bằng cách chép file dữ liệu đang chạy — dữ liệu luôn đổi giữa chừng, và bản chép sẽ không nhất quán. Quy trình mà Kleppmann mô tả gồm bốn bước: chụp một <em>snapshot</em> nhất quán của leader (thường không cần khoá toàn bộ); chép snapshot sang nút mới; nút mới kết nối tới leader và <strong>xin toàn bộ thay đổi kể từ đúng vị trí log gắn với snapshot đó</strong>; phát lại cho tới khi bắt kịp<span class="cite"><a href="#ref-1">1</a></span>. PostgreSQL gọi vị trí ấy là <em>log sequence number</em><span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="easy-only">Bạn đi học muộn. Không thể chép vở của bạn bên cạnh rồi ngồi im — vì cô vẫn đang đọc tiếp. Bạn phải: mượn vở chép tới câu số 30, rồi <strong>hỏi cho rõ cô đang đọc tới câu bao nhiêu</strong>, và chép tiếp từ đúng chỗ đó. Nhớ nhé: chép xong phải biết mình đang ở câu nào, không thì lệch mất.</p>
+          <p class="en-only" lang="en">Adding a replica can't be done by copying the live data files — data changes mid-copy and the result is inconsistent. Kleppmann's procedure has four steps: take a consistent <em>snapshot</em> of the leader (usually without locking the whole database); copy it to the new node; have the new node connect to the leader and <strong>request all changes since the exact log position associated with that snapshot</strong>; replay until caught up<span class="cite"><a href="#ref-1">1</a></span>. PostgreSQL calls that position a <em>log sequence number</em><span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao quan trọng</strong>Chính cặp “snapshot + vị trí log” là thứ làm cho việc thêm bản sao trở nên an toàn và lặp lại được. Không có nó, bạn chỉ có một bản chép mờ mịt không biết đang đứng ở đâu trong dòng lịch sử.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Chép tới đâu thì phải nhớ số câu tới đó, rồi chép tiếp từ đúng chỗ.</div>
+            <div class="en-only" lang="en"><strong>Why it matters</strong>The “snapshot plus log position” pair is exactly what makes adding a replica safe and repeatable. Without it you have a blurry copy with no idea where it stands in history.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao phải giữ log</h4>
+              <p>Nút mới chỉ bắt kịp được nếu leader còn giữ đủ phần log kể từ vị trí snapshot. PostgreSQL đề cập thẳng nguy cơ này: nếu dùng nhân bản luồng mà không lưu trữ WAL, máy chủ có thể tái sử dụng các phân đoạn WAL cũ trước khi standby kịp nhận, và khi đó standby phải khởi tạo lại từ một base backup mới — tránh bằng <span lang="en">wal_keep_size</span> hoặc replication slot<span class="cite"><a href="#ref-9">9</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Bắt kịp là trạng thái, không phải sự kiện</h4>
+              <p>“Bắt kịp” không phải một khoảnh khắc rồi xong: follower ở trong trạng thái đuổi theo vĩnh viễn, độ trễ dao động theo tải. Chính khoảng cách dao động này là <em>replication lag</em> — chủ đề của trục 2 — và nó tồn tại cả khi mọi thứ đang hoạt động bình thường.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Follower failure: catch-up recovery</div>
+          <h3><span class="vi-only">Follower chết: đuổi theo phần đã lỡ</span><span class="en-only" lang="en">Follower down: catch-up recovery</span></h3>
+          <p class="standard-copy">Trường hợp dễ là follower chết. Vì mỗi follower giữ trên đĩa nhật ký các thay đổi nó đã nhận, sau khi khởi động lại nó biết giao dịch cuối cùng mình đã xử lý, kết nối lại với leader và xin mọi thay đổi phát sinh trong lúc mình vắng mặt — Kleppmann gọi đó là <em>catch-up recovery</em><span class="cite"><a href="#ref-1">1</a></span>. Không cần thao tác thủ công, không có quyết định nguy hiểm nào phải ra.</p>
+          <p class="easy-only">Một bạn đi vệ sinh rồi quay lại. Bạn ấy biết mình chép tới câu 12, nên chỉ cần hỏi mượn phần từ câu 13 trở đi rồi chép bù. Nhớ nhé: nhớ mình dừng ở đâu thì quay lại rất dễ.</p>
+          <p class="en-only" lang="en">The easy case is a failed follower. Because each follower keeps on disk a log of the changes it has received, after restarting it knows the last transaction it processed, reconnects to the leader, and requests every change that happened while it was away — Kleppmann's <em>catch-up recovery</em><span class="cite"><a href="#ref-1">1</a></span>. No manual intervention, no dangerous decision to make.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thực tế</strong>Mất một follower gần như không phải sự cố — nó là chuyện thường ngày, miễn là leader còn giữ đủ log. Điều đáng lo không phải follower chết, mà leader chết.</div>
+            <div class="easy-only"><strong>Yên tâm</strong>Một bạn vắng chút xíu rồi chép bù là chuyện bình thường.</div>
+            <div class="en-only" lang="en"><strong>The practical upshot</strong>Losing a follower is barely an incident — it's routine, provided the leader still holds enough log. What should worry you is not a dead follower but a dead leader.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Leader failure: failover</div>
+          <h3><span class="vi-only">Leader chết: failover và bốn cái bẫy</span><span class="en-only" lang="en">Leader down: failover and its four traps</span></h3>
+          <p class="standard-copy">Khi leader chết, một follower phải được <strong>thăng chức</strong>: client phải được cấu hình lại để gửi ghi tới nó, các follower khác phải bắt đầu lấy log từ nó. Kleppmann liệt kê những chỗ dễ hỏng<span class="cite"><a href="#ref-1">1</a></span>. <em>Một</em>: với nhân bản bất đồng bộ, leader mới có thể thiếu phần ghi cuối của leader cũ — cách xử lý phổ biến nhất là <strong>vứt bỏ</strong> phần ghi đó, làm hỏng mọi cam kết bền vững đã hứa với client. <em>Hai</em>: vứt ghi trở nên nguy hiểm khi có hệ khác ngoài cơ sở dữ liệu phụ thuộc vào nội dung bị vứt. <em>Ba</em>: <strong>split brain</strong> — hai nút cùng tin mình là leader và cùng nhận ghi. <em>Bốn</em>: chọn timeout bao lâu thì tuyên bố leader đã chết — quá dài thì kéo dài gián đoạn, quá ngắn thì gây failover thừa, khiến một hệ đang chỉ tải cao bỗng rơi vào vòng xoáy chuyển vai liên tục.</p>
+          <p class="easy-only">Cô giáo đột ngột phải về. Lớp phải chọn một bạn đọc thay. Rắc rối là: bạn đó chưa chắc nghe kịp mấy câu cuối cô vừa đọc; hai bạn có thể cùng tưởng mình được chọn rồi đọc hai kiểu khác nhau; và nếu cô chỉ ra ngoài một phút mà lớp đã vội thay người thì càng loạn. Nhớ nhé: đổi người cầm trịch là lúc dễ sai nhất, chứ không phải lúc bình thường.</p>
+          <p class="en-only" lang="en">When a leader dies, a follower must be <strong>promoted</strong>: clients must be reconfigured to send writes to it, and other followers must start consuming its log. Kleppmann lists the places this goes wrong<span class="cite"><a href="#ref-1">1</a></span>. <em>One</em>: with asynchronous replication the new leader may be missing the old leader's last writes — and the most common remedy is to <strong>discard</strong> them, breaking the durability already promised to clients. <em>Two</em>: discarding becomes dangerous when systems outside the database depend on the discarded content. <em>Three</em>: <strong>split brain</strong> — two nodes both believing they are leader and both accepting writes. <em>Four</em>: choosing the timeout before declaring a leader dead — too long prolongs the outage, too short triggers needless failovers, so a merely overloaded system tumbles into a cascade of role changes.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dùng khi nào</strong>Trước khi bật failover tự động, hãy trả lời được: bạn chấp nhận mất bao nhiêu ghi, bạn chặn split brain bằng cơ chế nào, và timeout của bạn dựa trên số đo nào chứ không phải cảm giác.</div>
+            <div class="easy-only"><strong>Hỏi gì</strong>Đổi người cầm trịch thì mất mấy câu cuối? Làm sao để không có hai người cùng đọc?</div>
+            <div class="en-only" lang="en"><strong>When to use</strong>Before enabling automatic failover, be able to answer: how many writes you accept losing, by what mechanism you prevent split brain, and what measurement — not what feeling — your timeout rests on.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Một sự cố có thật</h4>
+              <p>Kleppmann dẫn sự cố GitHub tháng 9 năm 2012 như minh hoạ cho cái bẫy thứ hai<span class="cite"><a href="#ref-3">3</a></span>. Báo cáo công khai của GitHub mô tả: một lỗi segfault của Pacemaker làm cụm bị phân mảnh trạng thái, hai cuộc bầu leader diễn ra không phối hợp, và nút được bầu lại chính là nút mà đội vận hành đã xác định là <em>lỗi thời</em>; hậu quả là dữ liệu trôi lệch, và vì GitHub dùng khoá ngoại giữa id do MySQL sinh và dữ liệu trong Redis, các quan hệ giữa hai kho dữ liệu mất đồng bộ — một số sự kiện hiện sai bảng tin, và trong bảy phút, 16 kho riêng tư bị định tuyến sai<span class="cite"><a href="#ref-21">21</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao không có lời giải dễ</h4>
+              <p>Split brain thường được chặn bằng cách buộc tắt nút thừa (kỹ thuật quen gọi là <span lang="en">fencing</span> / <span lang="en">STONITH</span>), nhưng Kleppmann lưu ý rằng nếu cơ chế này thiết kế cẩu thả thì cả hai nút đều có thể bị tắt. Ông kết lại rằng chính vì những vấn đề này mà một số đội vận hành <strong>cố tình chọn failover thủ công</strong>. Đây cũng là lý do các chương sau — về giao dịch phân tán và đồng thuận — tồn tại: chúng là câu trả lời nghiêm túc cho đúng những câu hỏi mà failover đặt ra.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Implementation of replication logs</div>
+          <h3><span class="vi-only">Bốn kiểu log nhân bản</span><span class="en-only" lang="en">Four ways to build a replication log</span></h3>
+          <p class="standard-copy">“Log nhân bản” không phải một thứ duy nhất; Kleppmann trình bày bốn cách hiện thực, mỗi cách hỏng theo một kiểu riêng<span class="cite"><a href="#ref-1">1</a></span>. <em>Statement-based</em> gửi chính câu lệnh ghi — gọn nhưng vỡ khi câu lệnh không tất định (<span lang="en">NOW()</span>, <span lang="en">RAND()</span>), khi có cột tự tăng, hay khi có side effect. <em>WAL shipping</em> gửi nguyên nhật ký ghi-trước mức byte — chính xác nhưng gắn chặt vào định dạng lưu trữ, nên rất khó nâng cấp phiên bản mà không dừng dịch vụ. <em>Logical (row-based)</em> gửi mô tả thay đổi ở mức hàng, tách khỏi nội bộ động cơ lưu trữ — nhờ đó leader và follower có thể chạy phiên bản khác nhau, và hệ ngoài có thể tiêu thụ được. <em>Trigger-based</em> đẩy việc lên tầng ứng dụng bằng trigger — linh hoạt nhất, nhưng nhiều lỗi và tốn kém nhất.</p>
+          <p class="easy-only">Có bốn cách để “kể lại” một thay đổi. Một: đọc lại nguyên câu lệnh (“cộng thêm 1 điểm cho bạn nào ngồi bàn đầu”) — nhưng nếu hôm nay bàn đầu ngồi khác thì kết quả ra khác. Hai: chép từng nét chữ y hệt — chính xác nhưng phải cùng loại vở. Ba: nói rõ kết quả (“ô điểm của Lan đổi từ 7 thành 8”) — cách này ai cũng hiểu được. Bốn: nhờ một bạn ngồi ghi hộ theo cách riêng. Nhớ nhé: kể lại <em>kết quả</em> thì an toàn hơn kể lại <em>câu lệnh</em>.</p>
+          <p class="en-only" lang="en">A “replication log” is not one thing; Kleppmann presents four implementations, each broken in its own way<span class="cite"><a href="#ref-1">1</a></span>. <em>Statement-based</em> ships the write statements themselves — compact, but it breaks on nondeterminism (<span lang="en">NOW()</span>, <span lang="en">RAND()</span>), auto-increment columns and side effects. <em>WAL shipping</em> ships the byte-level write-ahead log — exact, but coupled to the storage format, which makes zero-downtime version upgrades very hard. <em>Logical (row-based)</em> ships a row-level description of the change, decoupled from storage internals — so leader and follower can run different versions, and external systems can consume it. <em>Trigger-based</em> pushes the work up into the application via triggers — the most flexible, and the most error-prone and expensive.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc thế nào</strong>Cách bạn nhân bản quyết định bạn nâng cấp được tới đâu. Log mức hàng là thứ mở cửa cho <em>change data capture</em>: cùng một dòng đó nuôi chỉ mục tìm kiếm, cache và kho phân tích — chủ đề Kleppmann quay lại ở Chương 11.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Kể lại kết quả cụ thể thì ai nghe cũng hiểu, kể lại mệnh lệnh thì dễ ra kết quả khác.</div>
+            <div class="en-only" lang="en"><strong>How to read it</strong>How you replicate decides how far you can upgrade. A row-level log is what opens the door to <em>change data capture</em>: the same stream feeds search indexes, caches and analytics — a thread Kleppmann picks up again in Chapter 11.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Trong sản phẩm thật</h4>
+              <p>MySQL hiện đặt <span lang="en">binlog_format</span> mặc định là <span lang="en">ROW</span> và mô tả ba định dạng — statement-based, row-based, mixed — cùng những hạn chế của từng cái<span class="cite"><a href="#ref-11">11</a></span>. PostgreSQL đi theo hướng khác: nhân bản vật lý truyền WAL, còn <em>logical decoding</em> giải mã WAL thành dòng thay đổi mức hàng cho những consumer bên ngoài<span class="cite"><a href="#ref-10">10</a></span>. Hai lộ trình khác nhau dẫn tới cùng một kết luận của sách: log mức logic là cái tách được nhân bản khỏi nội bộ động cơ lưu trữ.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao trigger-based vẫn tồn tại</h4>
+              <p>Vì đôi khi bạn cần nhân bản <em>một phần</em> dữ liệu, nhân bản sang một loại cơ sở dữ liệu khác, hoặc cần logic hoá giải xung đột riêng — những thứ mà log dựng sẵn của động cơ không làm được. Kleppmann nói thẳng cái giá: overhead cao hơn và nhiều lỗi hơn so với nhân bản dựng sẵn, nên đây là lựa chọn khi bạn thật sự cần sự linh hoạt đó, không phải lựa chọn mặc định.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ “ai được ghi” đến “bao giờ thì thấy”</strong>
+      <strong class="en-only" lang="en">From “who may write” to “when do you see it”</strong>
+      <span class="standard-copy">Mô hình một-lãnh-đạo trả lời gọn ghẽ câu hỏi ai được ghi. Nhưng ngay cả khi mọi thứ chạy đúng, vẫn còn một khoảng trống không thể xoá: follower luôn chậm hơn leader một chút. Khoảng trống ấy nhỏ khi hệ nhàn và có thể phình lên vài giây, vài phút khi hệ tải nặng — và nó tạo ra những nghịch lý mà người dùng nhìn thấy trực tiếp. Trục 2 nói về khoảng trống đó.</span>
+      <span class="easy-only">Vậy là ta biết ai được viết vào sổ. Nhưng các cuốn chép theo luôn chậm hơn một nhịp. Chậm một nhịp thì có sao? Có — và phần sau kể những chuyện kỳ lạ mà người dùng gặp phải vì nó.</span>
+      <span class="en-only" lang="en">The single-leader model answers “who may write” neatly. But even when everything works, one gap can't be erased: a follower is always slightly behind the leader. That gap is small on an idle system and can swell to seconds or minutes under load — producing paradoxes users see directly. Axis 2 is about that gap.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="replication-lag" aria-labelledby="replication-lag-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · <span lang="en">Problems with replication lag</span></span><span class="en-only" lang="en">Axis 2 · Problems with replication lag</span></div>
+        <h2 id="replication-lag-title"><span class="vi-only">Độ trễ nhân bản: ba bảo đảm vá ba lỗ hổng</span><span class="en-only" lang="en">Replication lag: three guarantees for three holes</span></h2>
+      </div>
+      <p class="standard-copy">Nếu bạn đọc từ follower để rải tải, bạn đang mua tốc độ bằng <strong>dữ liệu có thể cũ</strong>. Kleppmann gọi tình trạng này là <em>eventual consistency</em> — nếu ngừng ghi và chờ đủ lâu, mọi follower rốt cuộc sẽ hội tụ về cùng một giá trị<span class="cite"><a href="#ref-1">1</a></span>. Chỗ mà ông gõ mạnh: chữ “rốt cuộc” (<span lang="en">eventually</span>) <strong>cố tình không nêu giới hạn thời gian nào</strong>. Werner Vogels — người đặt khái niệm này vào trung tâm kiến trúc của Amazon — cũng mô tả nó theo đúng cách đó: hệ chỉ bảo đảm rằng nếu không có cập nhật mới nào, cuối cùng mọi truy cập sẽ trả về giá trị cập nhật gần nhất<span class="cite"><a href="#ref-23">23</a></span>. Trong hệ bình thường, độ trễ có thể là một phần giây; khi gần chạm giới hạn năng lực, nó có thể là vài giây hoặc vài phút.</p>
+      <p class="easy-only">Bạn nhờ bạn cùng bàn chép hộ một câu vào vở. Rồi bạn nhìn vào vở bạn ấy — nhưng bạn ấy chưa chép xong! Bạn hoảng: “Câu của mình biến mất rồi!” Thật ra không mất, chỉ là chưa tới. Cái khoảng “chưa tới” đó chính là điều làm người ta bối rối nhất khi có nhiều cuốn sổ.</p>
+      <p class="en-only" lang="en">If you read from followers to spread load, you are buying speed with <strong>possibly stale data</strong>. Kleppmann calls this <em>eventual consistency</em> — stop writing, wait long enough, and every follower will converge on the same value<span class="cite"><a href="#ref-1">1</a></span>. What he hammers: the word “eventually” <strong>deliberately names no time bound</strong>. Werner Vogels, who put the idea at the centre of Amazon's architecture, describes it the same way: the system merely guarantees that if no new updates are made, eventually all accesses will return the last updated value<span class="cite"><a href="#ref-23">23</a></span>. On a healthy system the lag may be a fraction of a second; near capacity it may be seconds or minutes.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Three anomalies, three guarantees, in order of pain</div>
+        <p class="definition standard-copy">Kleppmann không liệt kê mọi sai lệch có thể xảy ra; ông chọn <strong>ba</strong> kiểu nghịch lý mà người dùng thật sự nhìn thấy, và với mỗi kiểu nêu một bảo đảm đúng mức để chữa nó. Điểm quan trọng: đây không phải ba mức mạnh dần của cùng một thứ, mà là <strong>ba lỗ hổng khác nhau</strong> — vá lỗ này không tự động vá lỗ kia, và hệ của bạn có thể cần một, hai, hoặc cả ba.</p>
+        <p class="definition easy-only">Có ba kiểu “chuyện lạ” xảy ra khi vở chép chậm: tự mình viết mà không thấy chữ mình; lúc thấy lúc không thấy; và câu trả lời hiện ra trước câu hỏi. Mỗi kiểu có một cách chữa riêng. Nhớ nhé: chữa được chuyện này chưa chắc chữa được chuyện kia.</p>
+        <p class="definition en-only" lang="en">Kleppmann doesn't enumerate every possible anomaly; he picks <strong>three</strong> that users actually see, and for each names a guarantee sized to fix it. The key point: these are not three strengths of one thing but <strong>three distinct holes</strong> — patching one does not patch another, and your system may need one, two or all three.</p>
+        <p class="deep-only">Ba bảo đảm này không phải phát minh của cuốn sách. Chúng đến từ bài báo năm 1994 của Douglas Terry và cộng sự tại Xerox PARC, đề xuất bốn <em>session guarantee</em> — Read Your Writes, Monotonic Reads, Writes Follow Reads, Monotonic Writes — cho dữ liệu nhân bản yếu nhất quán, với chủ ý trình cho ứng dụng một khung nhìn nhất quán với <em>chính hành động của nó</em>, ngay cả khi nó đọc và ghi từ nhiều máy chủ có thể không nhất quán với nhau<span class="cite"><a href="#ref-8">8</a></span>. Đây là một chi tiết đáng nhớ về mặt tư tưởng: các bảo đảm này gắn vào <strong>phiên làm việc của một người dùng</strong>, không phải vào trạng thái toàn cục của cơ sở dữ liệu. Chúng rẻ hơn nhất quán mạnh rất nhiều, chính vì chúng hứa ít hơn rất nhiều.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba bảo đảm chống lại độ trễ nhân bản">
+        <div class="equation-row">
+          <b>Read-your-writes</b>
+          <span>Tự mình ghi thì tự mình thấy. Không hứa gì về ghi của người khác.</span>
+        </div>
+        <div class="equation-row">
+          <b>Monotonic reads</b>
+          <span>Đã thấy rồi thì không được thấy mất. Thời gian không đi lùi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Consistent prefix</b>
+          <span>Ghi có quan hệ nhân quả phải xuất hiện đúng thứ tự nhân quả.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về độ trễ nhân bản">
+        <div class="equation-row">
+          <b>Thấy chữ mình</b>
+          <span>Vừa viết xong thì phải nhìn thấy, không được biến mất.</span>
+        </div>
+        <div class="equation-row">
+          <b>Không quay ngược</b>
+          <span>Đã thấy rồi thì lần sau không được mất đi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Hỏi trước, đáp sau</b>
+          <span>Không được thấy câu trả lời trước khi thấy câu hỏi.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three guarantees against replication lag">
+        <div class="equation-row">
+          <b>Read-your-writes</b>
+          <span>You see your own writes. It promises nothing about other people's.</span>
+        </div>
+        <div class="equation-row">
+          <b>Monotonic reads</b>
+          <span>Once seen, never unseen. Time does not run backwards.</span>
+        </div>
+        <div class="equation-row">
+          <b>Consistent prefix</b>
+          <span>Causally related writes appear in causal order.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Reading your own writes</div>
+          <h3><span class="vi-only">Ghi rồi mà không thấy chữ của chính mình</span><span class="en-only" lang="en">Writing, then not seeing your own write</span></h3>
+          <p class="standard-copy">Người dùng gửi một bình luận; lệnh ghi đi tới leader; rồi trang được tải lại và truy vấn rơi vào một follower chưa kịp nhận. Với người dùng, bình luận vừa <em>biến mất</em>. Bảo đảm cần ở đây là <em>read-after-write consistency</em>, còn gọi là <em>read-your-writes</em>: bảo đảm rằng người dùng luôn nhìn thấy những cập nhật <strong>do chính họ</strong> gửi lên — và chỉ thế thôi, không nói gì về cập nhật của người khác<span class="cite"><a href="#ref-1">1</a></span>. Cách hiện thực đơn giản nhất: khi đọc thứ gì đó mà người dùng <em>có thể</em> vừa sửa, hãy đọc từ leader; những thứ khác đọc từ follower.</p>
+          <p class="easy-only">Bạn viết tên mình lên bảng rồi quay đi. Lúc quay lại nhìn vào <em>ảnh chụp cũ</em> của bảng, tên bạn chưa có ở đó. Bạn tưởng mình chưa viết. Cách chữa đơn giản nhất: những gì chính bạn vừa viết thì phải nhìn vào bảng thật, chứ đừng nhìn ảnh cũ. Nhớ nhé: chữ của mình thì xem bản gốc.</p>
+          <p class="en-only" lang="en">A user posts a comment; the write goes to the leader; the page reloads and the query lands on a follower that hasn't received it. To the user, the comment has <em>vanished</em>. The guarantee needed is <em>read-after-write consistency</em>, also called <em>read-your-writes</em>: a promise that a user always sees the updates <strong>they themselves</strong> submitted — and nothing more, saying nothing about other users' updates<span class="cite"><a href="#ref-1">1</a></span>. The simplest implementation: when reading something the user <em>may</em> have modified, read it from the leader; read everything else from followers.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dùng khi nào</strong>Bất cứ giao diện nào mà người dùng vừa sửa xong là nhìn lại ngay: hồ sơ cá nhân, bình luận, giỏ hàng, bài đăng nháp. Đây là bảo đảm rẻ nhất và cũng là bảo đảm bạn sẽ thiếu đầu tiên nếu chỉ chăm chăm rải tải đọc.</div>
+            <div class="easy-only"><strong>Dùng sao</strong>Cái gì mình vừa sửa thì đọc lại từ chỗ gốc.</div>
+            <div class="en-only" lang="en"><strong>When to use</strong>Any screen where a user edits then immediately looks again: profiles, comments, carts, drafts. It's the cheapest guarantee, and the first one you'll be missing if you only think about spreading read load.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao “đọc từ leader” không đủ lâu dài</h4>
+              <p>Nếu phần lớn dữ liệu đều có thể bị người dùng sửa, quy tắc “sửa thì đọc từ leader” kéo gần hết tải đọc về lại leader, xoá sạch lợi ích của việc rải tải. Kleppmann nêu các cách tinh vi hơn: theo dõi thời điểm cập nhật gần nhất của người dùng và trong khoảng một phút sau đó thì đọc từ leader; hoặc client nhớ dấu thời gian logic của ghi gần nhất rồi buộc bản sao phục vụ nó phải đã bắt kịp ít nhất tới mốc ấy.</p>
+            </div>
+            <div class="info-block">
+              <h4>Nhiều thiết bị làm mọi thứ khó hơn</h4>
+              <p>Khi cùng một người dùng thao tác trên điện thoại rồi nhìn trên máy tính — Kleppmann gọi là <em>cross-device read-after-write consistency</em> — siêu dữ liệu về “ghi gần nhất” phải được tập trung ở nơi cả hai thiết bị đọc được, và hai thiết bị có thể đi qua hai trung tâm dữ liệu khác nhau, nên có thể phải định tuyến cả hai về cùng một trung tâm. Bảo đảm càng gắn với <em>người</em> thay vì với <em>phiên</em>, chi phí hạ tầng càng tăng.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Monotonic reads</div>
+          <h3><span class="vi-only">Thấy rồi lại mất: thời gian đi lùi</span><span class="en-only" lang="en">Seeing something, then unseeing it</span></h3>
+          <p class="standard-copy">Đọc lần đầu rơi vào follower đã bắt kịp và thấy bình luận mới; đọc lần sau rơi vào follower tụt hậu và bình luận biến mất. Người dùng vừa <strong>đi ngược thời gian</strong>. <em>Monotonic reads</em> là bảo đảm rằng chuyện này không xảy ra — Kleppmann xếp nó là bảo đảm <strong>yếu hơn nhất quán mạnh nhưng mạnh hơn nhất quán rốt cuộc</strong><span class="cite"><a href="#ref-1">1</a></span>. Cách đạt được thường rất thô sơ mà hiệu quả: đảm bảo mỗi người dùng luôn đọc từ <em>cùng một bản sao</em>, chọn theo băm của định danh người dùng chứ không phải ngẫu nhiên.</p>
+          <p class="easy-only">Bạn nhìn vào vở của bạn A, thấy đã có câu 20. Lát sau bạn nhìn vào vở bạn B, bạn B mới chép tới câu 15 — câu 20 “biến mất”. Cách chữa: từ đầu tới cuối chỉ nhìn vở của <strong>một bạn</strong> thôi. Nhớ nhé: đừng nhảy qua nhảy lại giữa nhiều cuốn sổ chép chậm khác nhau.</p>
+          <p class="en-only" lang="en">The first read lands on a caught-up follower and shows the new comment; the next read lands on a lagging one and the comment is gone. The user has just <strong>travelled backwards in time</strong>. <em>Monotonic reads</em> is the guarantee that this doesn't happen — Kleppmann ranks it as <strong>weaker than strong consistency but stronger than eventual consistency</strong><span class="cite"><a href="#ref-1">1</a></span>. The usual implementation is crude but effective: make sure each user always reads from the <em>same replica</em>, chosen by a hash of their user ID rather than at random.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thực tế</strong>Nếu load balancer của bạn rải truy vấn đọc ngẫu nhiên qua các bản sao, bạn đang tự chuốc lấy nghịch lý này. “Dính” người dùng vào một bản sao là lời giải rẻ — nhưng nhớ rằng khi bản sao đó chết, người dùng phải được chuyển sang bản khác và bảo đảm tạm thời đứt.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Mỗi người chỉ nên nhìn vào một cuốn sổ cố định.</div>
+            <div class="en-only" lang="en"><strong>The practical upshot</strong>If your load balancer spreads reads randomly across replicas, you are inviting this anomaly. Pinning a user to one replica is the cheap answer — but remember that when that replica dies the user must be moved and the guarantee briefly breaks.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Consistent prefix reads</div>
+          <h3><span class="vi-only">Câu trả lời đến trước câu hỏi</span><span class="en-only" lang="en">The answer arriving before the question</span></h3>
+          <p class="standard-copy">Nghịch lý thứ ba vi phạm chính quan hệ <em>nhân quả</em>. Nếu một chuỗi ghi có quan hệ nhân quả với nhau được người khác đọc thấy theo thứ tự đảo ngược, cuộc hội thoại trở nên vô nghĩa. <em>Consistent prefix reads</em> là bảo đảm rằng ai đọc một chuỗi ghi như vậy cũng sẽ thấy chúng theo đúng thứ tự chúng đã xảy ra<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann nói rõ đây là vấn đề đặc biệt của cơ sở dữ liệu <strong>phân mảnh</strong>: nếu các phần dữ liệu khác nhau nằm trên các phân mảnh khác nhau và mỗi phân mảnh nhân bản độc lập, thì không tồn tại thứ tự ghi toàn cục nào để mà tuân theo.</p>
+          <p class="easy-only">Có người hỏi “Mấy giờ rồi?” và người kia đáp “Ba giờ.” Nếu bạn nghe câu đáp trước câu hỏi, bạn sẽ thấy rất kỳ. Chuyện đó xảy ra khi câu hỏi và câu đáp được chép vào hai cuốn sổ khác nhau, mà một cuốn chép nhanh hơn cuốn kia. Nhớ nhé: chuyện gì có trước sau thì phải giữ đúng trước sau.</p>
+          <p class="en-only" lang="en">The third anomaly violates <em>causality</em> itself. If a sequence of causally related writes is read by someone else in reverse order, the conversation becomes nonsense. <em>Consistent prefix reads</em> is the guarantee that anyone reading such a sequence sees the writes in the order they occurred<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann is explicit that this is a particular problem for <strong>partitioned</strong> databases: if different pieces of data live on different partitions and each partition replicates independently, there is no global write order to respect.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc thế nào</strong>Ba bảo đảm này càng lên càng khó, và bảo đảm thứ ba dẫn thẳng tới chủ đề <em>nhân quả</em> mà chương sau khai thác. Một lời giải là giữ mọi ghi có quan hệ nhân quả trên cùng một phân mảnh; nhưng khi không làm được, phải theo dõi nhân quả một cách tường minh.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Giữ đúng thứ tự trước-sau của những việc có liên quan nhau.</div>
+            <div class="en-only" lang="en"><strong>How to read it</strong>The three guarantees get harder as you go, and the third leads straight to the theme of <em>causality</em> that the next chapters develop. One answer is to keep causally related writes on the same partition; when you can't, causality must be tracked explicitly.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao ứng dụng không nên tự vá</h4>
+              <p>Kleppmann kết trục này bằng một khuyến nghị sắc: nếu ứng dụng phải tự dựng mọi cơ chế chống lại độ trễ nhân bản, mã nguồn sẽ phức tạp và rất dễ sai. Sẽ tốt hơn nhiều nếu ứng dụng chỉ cần tin vào cơ sở dữ liệu — và đó chính là lý do <strong>giao dịch</strong> tồn tại. Đây là cầu nối có chủ ý sang Chương 7.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ba, hay bốn?</h4>
+              <p>Bài báo gốc của Terry và cộng sự đề xuất <strong>bốn</strong> session guarantee: ngoài Read Your Writes và Monotonic Reads còn có Monotonic Writes và Writes Follow Reads<span class="cite"><a href="#ref-8">8</a></span>. Chương 5 trình bày <strong>ba</strong> và thay Writes Follow Reads bằng cách đóng khung mang tính nhân quả hơn là <em>consistent prefix reads</em>. Khi bạn thấy tài liệu khác đếm ra bốn hoặc năm bảo đảm, khác biệt nằm ở cách đóng khung của từng nguồn chứ không phải ở chỗ có nguồn nào sai.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">“Eventually” has no deadline</div>
+          <h3><span class="vi-only">Chữ “rốt cuộc” không đi kèm hạn chót</span><span class="en-only" lang="en">“Eventually” comes with no deadline</span></h3>
+          <p class="standard-copy">Điểm tinh tế nhất của trục này là ngôn ngữ. <em>Eventual consistency</em> là một lời hứa <strong>về giới hạn, không phải về thời gian</strong>: nó nói các bản sao sẽ hội tụ, nhưng không nói khi nào<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-23">23</a></span>. Một hệ mà độ trễ nhân bản bình thường là 10ms và một hệ mà độ trễ có thể vọt lên 10 phút khi tải nặng đều là “eventually consistent” như nhau. Vì vậy nhãn ấy hầu như không nói gì về trải nghiệm mà người dùng của bạn sẽ gặp — số đo mới nói.</p>
+          <p class="easy-only">Có người hứa “kiểu gì rồi cũng chép xong”. Câu đó đúng, nhưng không cho biết là năm phút nữa hay ngày mai. Nhớ nhé: hứa “rồi cũng xong” thì chưa phải là hứa gì cả — phải hỏi “bao lâu?”.</p>
+          <p class="en-only" lang="en">The subtlest point on this axis is linguistic. <em>Eventual consistency</em> is a promise <strong>about a limit, not about time</strong>: it says replicas will converge, not when<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-23">23</a></span>. A system whose replication lag is normally 10ms and one whose lag can reach 10 minutes under load are equally “eventually consistent”. So the label tells you almost nothing about what your users will experience — only measurement does.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dùng khi nào</strong>Đưa độ trễ nhân bản vào bảng giám sát như một chỉ số hạng nhất, đo bằng percentile theo đúng tinh thần Chương 1. “Eventually consistent” là một nhãn kiến trúc; p99 của độ trễ nhân bản mới là con số bạn có thể cam kết.</div>
+            <div class="easy-only"><strong>Hỏi gì</strong>Chép chậm hơn bao lâu? Phải đo thì mới biết.</div>
+            <div class="en-only" lang="en"><strong>When to use</strong>Put replication lag on the dashboard as a first-class metric, measured in percentiles in the spirit of Chapter 1. “Eventually consistent” is an architectural label; the p99 of replication lag is the number you can actually commit to.</div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Nếu một leader là nút thắt thì sao?</strong>
+      <strong class="en-only" lang="en">And if one leader is the bottleneck?</strong>
+      <span class="standard-copy">Cả hai trục trên đều đứng trên một giả định: tồn tại đúng một nơi nhận ghi. Giả định đó cho ta thứ tự ghi toàn cục và nhờ đó không có xung đột — nhưng nó cũng là một điểm chết, một nút thắt ghi, và một nguồn độ trễ không thể gỡ với người dùng ở nửa kia địa cầu. Trục 3 hỏi: điều gì xảy ra nếu ta cho phép nhiều nơi cùng nhận ghi?</span>
+      <span class="easy-only">Từ nãy tới giờ, luôn chỉ có <em>một</em> người được viết vào sổ. Thế nếu cho nhiều người cùng được viết thì sao? Nhanh hơn thật, nhưng sẽ có lúc hai người viết hai thứ khác nhau vào cùng một chỗ.</span>
+      <span class="en-only" lang="en">Both axes so far rest on one assumption: exactly one place accepts writes. That assumption gives us a global write order and therefore no conflicts — but it is also a single point of failure, a write bottleneck, and an irreducible source of latency for users on the other side of the planet. Axis 3 asks: what if several places could accept writes?</span>
+    </aside>
+  </section>
+
+  <section class="section" id="multi-leader" aria-labelledby="multi-leader-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Multi-leader replication</span></span><span class="en-only" lang="en">Axis 3 · Multi-leader replication</span></div>
+        <h2 id="multi-leader-title"><span class="vi-only">Nhiều lãnh đạo: mua sẵn sàng bằng xung đột</span><span class="en-only" lang="en">Multi-leader: buying availability with conflict</span></h2>
+      </div>
+      <p class="standard-copy">Mở rộng tự nhiên của mô hình trên là cho phép <strong>nhiều nút cùng nhận ghi</strong>, mỗi nút đồng thời đóng vai follower của các nút kia. Kleppmann nói thẳng rằng bên trong một trung tâm dữ liệu, cấu hình này hiếm khi bõ công vì độ phức tạp tăng vượt lợi ích<span class="cite"><a href="#ref-1">1</a></span>. Nó chỉ trở nên hợp lý ở ba hoàn cảnh: vận hành <strong>nhiều trung tâm dữ liệu</strong>, nơi mỗi trung tâm có leader riêng và độ trễ liên trung tâm được giấu khỏi đường ghi; <strong>client hoạt động ngoại tuyến</strong>, nơi mỗi thiết bị thực chất là một trung tâm dữ liệu tí hon có leader riêng; và <strong>soạn thảo cộng tác</strong> thời gian thực, nơi mỗi người biên tập giữ một bản sao cục bộ.</p>
+      <p class="easy-only">Bây giờ cho phép <strong>nhiều bạn cùng được viết vào sổ của mình</strong>, rồi thỉnh thoảng đưa nhau xem để ghép lại. Lợi: ai cũng viết được ngay, không phải chờ. Hại: có lúc hai bạn cùng sửa một dòng thành hai thứ khác nhau — và lúc ghép sổ phải quyết định nghe theo ai.</p>
+      <p class="en-only" lang="en">The natural extension is to let <strong>several nodes accept writes</strong>, each also acting as a follower of the others. Kleppmann says plainly that within a single data centre this configuration is rarely worth it, because the added complexity outweighs the benefit<span class="cite"><a href="#ref-1">1</a></span>. It becomes reasonable in three situations: <strong>multi-data-centre operation</strong>, where each centre has its own leader and inter-centre latency is hidden from the write path; <strong>clients with offline operation</strong>, where every device is effectively a tiny data centre with its own leader; and real-time <strong>collaborative editing</strong>, where each editor holds a local replica.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">The biggest downside is one word: conflicts</div>
+        <p class="definition standard-copy">Kleppmann gói cả trục này vào một câu: nhược điểm lớn của multi-leader là <strong>cùng một dữ liệu có thể bị sửa đồng thời ở hai trung tâm khác nhau, và những ghi xung đột đó phải được hoá giải</strong><span class="cite"><a href="#ref-1">1</a></span>. Trong mô hình một-lãnh-đạo, xung đột không tồn tại vì leader áp đặt một thứ tự duy nhất. Bỏ leader duy nhất đi là bỏ luôn thứ tự duy nhất ấy — và bài toán xung đột không biến mất, nó chỉ chuyển từ tầng cơ sở dữ liệu lên tầng ứng dụng của bạn.</p>
+        <p class="definition easy-only">Nhiều người cùng được viết thì sẽ có lúc <strong>hai người viết hai câu khác nhau vào cùng một dòng</strong>. Lúc ghép sổ phải chọn: giữ câu nào, hay ghép cả hai lại? Nhớ nhé: cho nhiều người viết thì phải có cách xử lý lúc đụng nhau.</p>
+        <p class="definition en-only" lang="en">Kleppmann compresses the whole axis into one sentence: the big downside of multi-leader replication is that <strong>the same data may be concurrently modified in two different data centres, and those conflicting writes must be resolved</strong><span class="cite"><a href="#ref-1">1</a></span>. In the single-leader model conflicts don't exist because the leader imposes one order. Removing the single leader removes that single order — and the conflict problem doesn't vanish, it just moves from the database up into your application.</p>
+        <p class="deep-only">Đáng chú ý là Kleppmann xếp <strong>ứng dụng lịch ngoại tuyến</strong> và <strong>Google Docs</strong> vào cùng một họ kiến trúc với nhân bản đa trung tâm dữ liệu. Nhìn bề ngoài chúng chẳng liên quan gì; nhìn theo cấu trúc thì giống hệt: mỗi thiết bị giữ một bản sao cục bộ, ghi được chấp nhận ngay tại chỗ mà không chờ ai, và việc đồng bộ diễn ra bất đồng bộ sau đó. Ông còn nhận xét rằng dưới góc nhìn đó, <em>mỗi thiết bị là một “trung tâm dữ liệu”</em>, và kết nối mạng giữa chúng cực kỳ không đáng tin. Chính cách đóng khung này làm cho một bài toán tưởng là chuyện của ứng dụng di động trở thành cùng một bài toán với nhân bản liên lục địa.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định về nhân bản nhiều lãnh đạo">
+        <div class="equation-row">
+          <b>Ba hoàn cảnh</b>
+          <span>Đa trung tâm dữ liệu, client ngoại tuyến, soạn thảo cộng tác. Trong một trung tâm thì hiếm khi bõ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Cái giá là xung đột</b>
+          <span>Mất thứ tự ghi duy nhất nghĩa là phải tự định nghĩa “đúng” khi hai bên bất đồng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Topology quyết định nhân quả</b>
+          <span>Vòng, sao, toàn-nối-toàn: mỗi cách có kiểu hỏng riêng về thứ tự và về điểm chết.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về nhân bản nhiều lãnh đạo">
+        <div class="equation-row">
+          <b>Khi nào dùng</b>
+          <span>Khi ở xa nhau, khi mất mạng, hoặc khi nhiều người cùng sửa một tài liệu.</span>
+        </div>
+        <div class="equation-row">
+          <b>Sẽ có lúc đụng nhau</b>
+          <span>Hai người sửa một dòng thành hai kiểu — phải có cách chọn.</span>
+        </div>
+        <div class="equation-row">
+          <b>Truyền tin kiểu nào</b>
+          <span>Chuyền vòng tròn, qua một bạn trung tâm, hay ai cũng nói với ai.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three claims about multi-leader replication">
+        <div class="equation-row">
+          <b>Three situations</b>
+          <span>Multi-data-centre, offline clients, collaborative editing. Within one data centre it rarely pays.</span>
+        </div>
+        <div class="equation-row">
+          <b>The price is conflict</b>
+          <span>Losing the single write order means defining “correct” yourself when two sides disagree.</span>
+        </div>
+        <div class="equation-row">
+          <b>Topology shapes causality</b>
+          <span>Circular, star, all-to-all: each fails differently on ordering and on single points of failure.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Multi-datacenter operation</div>
+          <h3><span class="vi-only">Mỗi trung tâm dữ liệu một leader</span><span class="en-only" lang="en">One leader per data centre</span></h3>
+          <p class="standard-copy">Với một leader duy nhất, mọi ghi từ mọi nơi trên thế giới phải đi qua đúng một trung tâm dữ liệu. Đặt một leader ở mỗi trung tâm đổi bức tranh đó: ghi được xử lý cục bộ rồi nhân bản bất đồng bộ sang các trung tâm khác. Kleppmann so sánh trên ba mặt<span class="cite"><a href="#ref-1">1</a></span> — <em>hiệu năng</em>: độ trễ liên trung tâm bị giấu khỏi người dùng; <em>chịu lỗi trung tâm</em>: mỗi trung tâm tiếp tục chạy độc lập khi trung tâm khác sập; <em>chịu lỗi mạng</em>: vì lưu lượng giữa các trung tâm vốn bất đồng bộ, một sự cố mạng tạm thời không chặn được đường ghi.</p>
+          <p class="easy-only">Nếu cả trường chỉ có một cuốn sổ đặt ở phòng hiệu trưởng, thì ai muốn ghi cũng phải chạy lên đó. Thay vào đó, mỗi lớp giữ một cuốn sổ riêng và cuối ngày các lớp trao đổi cho khớp. Ghi nhanh hơn hẳn, và lớp này nghỉ thì lớp kia vẫn ghi được. Nhớ nhé: để sổ ở gần thì viết nhanh hơn.</p>
+          <p class="en-only" lang="en">With a single leader, every write from anywhere on Earth must pass through one data centre. Putting a leader in each centre changes the picture: writes are processed locally and replicated asynchronously to the others. Kleppmann compares on three fronts<span class="cite"><a href="#ref-1">1</a></span> — <em>performance</em>: inter-centre latency is hidden from users; <em>tolerance of centre outages</em>: each centre keeps running independently when another fails; <em>tolerance of network problems</em>: since inter-centre traffic is asynchronous anyway, a temporary network fault doesn't block the write path.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc thế nào</strong>Kleppmann kèm một cảnh báo đáng nhớ: multi-leader thường bị xếp thêm vào sau như một tính năng bổ sung, nên hay va chạm với những phần khác của cơ sở dữ liệu — khoá tự tăng, trigger, ràng buộc toàn vẹn. Ông gọi đây là vùng nguy hiểm, nên nếu dùng thì phải dùng rất cẩn thận.</div>
+            <div class="easy-only"><strong>Cẩn thận</strong>Cách này tiện nhưng dễ sinh rắc rối ở những chỗ không ngờ.</div>
+            <div class="en-only" lang="en"><strong>How to read it</strong>Kleppmann adds a memorable warning: multi-leader is often retrofitted as an add-on feature, so it collides with other parts of the database — autoincrementing keys, triggers, integrity constraints. He calls it dangerous territory, to be used with great care if at all.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Clients with offline operation</div>
+          <h3><span class="vi-only">Mỗi thiết bị là một trung tâm dữ liệu</span><span class="en-only" lang="en">Every device is a data centre</span></h3>
+          <p class="standard-copy">Ứng dụng lịch trên điện thoại phải cho bạn thêm sự kiện ngay cả khi máy bay đang bay và không có mạng. Nghĩa là mỗi thiết bị giữ một cơ sở dữ liệu cục bộ đóng vai <strong>leader</strong> — nó nhận ghi ngay — và khi có mạng trở lại, các bản sao trên nhiều thiết bị đồng bộ với nhau. Kleppmann mô tả đây đúng là nhân bản nhiều lãnh đạo, với đặc thù là độ trễ nhân bản có thể lên tới hàng giờ hoặc hàng ngày<span class="cite"><a href="#ref-1">1</a></span>. CouchDB được ông nêu như hệ thống thiết kế thẳng cho kiểu hoạt động này.</p>
+          <p class="easy-only">Bạn ghi lịch học vào sổ tay khi đang ở chỗ không có mạng. Điện thoại vẫn cho bạn ghi — nó ghi vào “cuốn sổ riêng” của nó. Khi có mạng, nó mới đem so với các cuốn khác. Nhớ nhé: ghi được ngay là vì mỗi máy giữ một cuốn sổ của riêng mình.</p>
+          <p class="en-only" lang="en">A calendar app on a phone must let you add an event mid-flight with no network. That means each device keeps a local database acting as a <strong>leader</strong> — it accepts writes immediately — and when connectivity returns, the replicas on your various devices sync with one another. Kleppmann describes this as exactly multi-leader replication, distinguished by a replication lag that may run to hours or days<span class="cite"><a href="#ref-1">1</a></span>. He names CouchDB as a system designed squarely for this mode of operation.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dùng khi nào</strong>Mọi ứng dụng phải dùng được khi mất mạng đều đã ngầm chọn multi-leader, dù đội phát triển có gọi tên nó hay không. Nếu bạn từng viết hàng đợi đồng bộ “tự chế” trong một app di động, bạn đã tự dựng một phiên bản nghiệp dư của mô hình này — kèm theo bài toán xung đột đi cùng.</div>
+            <div class="easy-only"><strong>Ý chính</strong>App dùng được lúc mất mạng thì máy nào cũng phải có sổ riêng.</div>
+            <div class="en-only" lang="en"><strong>When to use</strong>Any application that must work offline has already chosen multi-leader, whether or not the team ever named it. If you've written a homemade sync queue in a mobile app, you built an amateur version of this model — conflict problem included.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>CouchDB làm điều đó ra sao</h4>
+              <p>Tài liệu CouchDB dựng đúng ví dụ minh hoạ: Alice đồng bộ danh thiếp của Bob giữa máy bàn và laptop, sửa e-mail ở một máy và số điện thoại ở máy kia, rồi nhân bản hai chiều. Kết quả là <strong>cả hai phiên bản cùng tồn tại ở cả hai phía</strong>; CouchDB chọn một phiên bản “thắng” bằng thuật toán tất định để mọi bên chọn giống nhau, còn phiên bản kia được giữ lại như một nhánh xung đột trong cây phiên bản<span class="cite"><a href="#ref-16">16</a></span>. Nói cách khác, cơ sở dữ liệu không vứt dữ liệu — nó <em>giấu</em> dữ liệu, và ứng dụng phải chủ động trình cả hai phiên bản cho người dùng ghép lại, nếu không thì thay đổi coi như mất.</p>
+            </div>
+            <div class="info-block">
+              <h4>Trên một nút thì lại khác</h4>
+              <p>Vẫn theo tài liệu CouchDB, khi làm việc trên một nút duy nhất thì hệ tránh xung đột bằng cách yêu cầu client gửi kèm <span lang="en">_rev</span> của phiên bản trước; nếu bản đó đã bị thay thế, cập nhật bị từ chối với mã <span lang="en">409 Conflict</span><span class="cite"><a href="#ref-16">16</a></span>. Đây là minh hoạ sạch cho luận điểm của chương: xung đột không phải do dữ liệu nhiều bản sinh ra, mà do <em>đồng thời cộng với không có thứ tự chung</em>; có một nút thì vẫn có đồng thời, nhưng có thứ tự chung để mà từ chối.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Real-time collaborative editing</div>
+          <h3><span class="vi-only">Soạn thảo cộng tác: khoá càng nhỏ càng tốt</span><span class="en-only" lang="en">Collaborative editing: make the lock tiny</span></h3>
+          <p class="standard-copy">Google Docs cho nhiều người sửa cùng một tài liệu cùng lúc. Kleppmann chỉ ra đây cũng là bài toán nhân bản nhiều lãnh đạo: thay đổi được áp ngay lên bản sao cục bộ của từng người rồi mới đồng bộ bất đồng bộ với máy chủ và với người khác<span class="cite"><a href="#ref-1">1</a></span>. Muốn tránh xung đột thì phải khoá tài liệu trước khi sửa — nhưng khoá cả tài liệu thì hết cộng tác. Lời giải là <strong>thu đơn vị thay đổi xuống thật nhỏ</strong>, chẳng hạn từng lần gõ phím, và chấp nhận phải hoá giải xung đột. Chính đội Google Docs mô tả bước chuyển này khi họ viết lại sản phẩm năm 2010: chuyển từ đồng bộ theo tài liệu sang mô hình cộng tác ở mức từng ký tự<span class="cite"><a href="#ref-22">22</a></span>.</p>
+          <p class="easy-only">Nếu mỗi lần một bạn sửa bài là cả tờ giấy bị khoá lại, thì các bạn khác chỉ ngồi chờ — thế thì làm chung làm gì. Cách hay hơn: ai sửa chữ nào thì chỉ “giữ” đúng chữ đó, phần còn lại vẫn để mọi người viết. Nhớ nhé: chia nhỏ ra thì nhiều người mới cùng làm được.</p>
+          <p class="en-only" lang="en">Google Docs lets many people edit one document at once. Kleppmann points out this too is a multi-leader replication problem: changes are applied instantly to each person's local replica and only then synced asynchronously with the server and the others<span class="cite"><a href="#ref-1">1</a></span>. To avoid conflicts you would lock the document before editing — but locking the whole document ends collaboration. The answer is to <strong>shrink the unit of change until it is tiny</strong>, down to a single keystroke, and accept that conflicts must be resolved. The Google Docs team described exactly this shift when they rewrote the product in 2010: from document-level syncing to character-level collaboration<span class="cite"><a href="#ref-22">22</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thực tế</strong>Kích thước của đơn vị nhân bản là một tham số thiết kế, không phải một hằng số. Khoá to thì ít xung đột nhưng ít cộng tác; khoá nhỏ thì cộng tác mượt nhưng phải đầu tư vào cơ chế hoá giải. Chọn sai chỗ này là lý do nhiều tính năng “cùng chỉnh sửa” trong sản phẩm nội bộ chỉ chạy được trên giấy.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Khoá cả trang thì không ai làm chung được; khoá từng chữ thì mới làm chung được.</div>
+            <div class="en-only" lang="en"><strong>The practical upshot</strong>The size of the replication unit is a design parameter, not a constant. Big locks mean few conflicts and little collaboration; small ones mean smooth collaboration and real investment in resolution. Getting this wrong is why many in-house “co-editing” features only work on paper.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Hai dòng kỹ thuật</h4>
+              <p>Hai họ thuật toán cạnh tranh nhau ở đây. <em>Operational transformation</em> biến đổi các thao tác đồng thời sao cho áp theo thứ tự nào cũng ra cùng kết quả — đây là đường mà Google Docs và Etherpad đi<span class="cite"><a href="#ref-3">3</a></span>. <em>CRDT</em> (conflict-free replicated data types) thì thiết kế chính cấu trúc dữ liệu sao cho hợp nhất luôn hội tụ, không cần điều phối; công trình nền của Shapiro và cộng sự tại INRIA hệ thống hoá họ kiểu dữ liệu này<span class="cite"><a href="#ref-20">20</a></span>. Chính Kleppmann cùng Alastair Beresford sau đó đề xuất một kiểu dữ liệu JSON không-xung-đột, đưa CRDT lên cấu trúc lồng nhau tuỳ ý thay vì chỉ các kiểu đơn giản<span class="cite"><a href="#ref-19">19</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao phần này đáng đọc lại sau 2017</h4>
+              <p>Mục CRDT trong chương được viết khi họ kỹ thuật này còn non. Từ đó tới nay nó đã đi vào sản phẩm thật (thư viện Automerge chính là hậu duệ trực tiếp của bài báo JSON CRDT nói trên<span class="cite"><a href="#ref-19">19</a></span>). Khi đọc đoạn Kleppmann gọi CRDT là “một lĩnh vực nghiên cứu đang lên”, hãy đọc nó như một ảnh chụp thời điểm 2017 chứ không phải một đánh giá về hiện trạng.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Handling write conflicts</div>
+          <h3><span class="vi-only">Hoá giải xung đột: tránh, hội tụ, hoặc tự viết luật</span><span class="en-only" lang="en">Resolving conflicts: avoid, converge, or write the rule</span></h3>
+          <p class="standard-copy">Kleppmann xếp các lời giải thành ba tầng<span class="cite"><a href="#ref-1">1</a></span>. <em>Tránh xung đột</em> là chiến lược được khuyến nghị nhất và cũng đơn giản nhất: định tuyến mọi ghi cho một bản ghi cụ thể luôn về cùng một leader — nhưng nó vỡ ngay khi leader đó phải đổi, ví dụ khi một trung tâm dữ liệu hỏng. <em>Hội tụ về một trạng thái nhất quán</em> là yêu cầu bắt buộc khi xung đột đã xảy ra: mọi bản sao phải kết thúc ở cùng một giá trị. Các cách phổ biến là gán mỗi ghi một ID duy nhất rồi giữ ghi có ID lớn nhất — tức <strong>last write wins</strong> — hoặc ưu tiên theo bản sao, hoặc ghép các giá trị lại, hoặc <strong>ghi lại toàn bộ thông tin xung đột rồi để người dùng quyết định sau</strong>. <em>Logic riêng</em> là tầng thứ ba: nhiều hệ cho phép chạy mã hoá giải của bạn lúc ghi hoặc lúc đọc.</p>
+          <p class="easy-only">Khi hai bạn sửa cùng một dòng, có ba cách xử lý. Một: sắp xếp sao cho mỗi dòng chỉ do một bạn phụ trách, khỏi đụng nhau. Hai: đặt ra một luật máy móc để luôn chọn được một câu, ví dụ “ai viết sau thì thắng”. Ba: giữ lại cả hai câu và hỏi người thật xem chọn cái nào. Nhớ nhé: luật máy móc thì nhanh nhưng có thể vứt mất bài của một bạn.</p>
+          <p class="en-only" lang="en">Kleppmann sorts the answers into three tiers<span class="cite"><a href="#ref-1">1</a></span>. <em>Conflict avoidance</em> is the most recommended and the simplest: route all writes for a given record to the same leader — but it breaks the moment that leader must change, for instance when a data centre fails. <em>Converging toward a consistent state</em> is mandatory once a conflict has occurred: every replica must end up at the same value. Common ways are to give each write a unique ID and keep the highest — <strong>last write wins</strong> — or to prefer one replica, or to merge the values, or to <strong>record the conflict explicitly and let the user decide later</strong>. <em>Custom logic</em> is the third tier: many systems let you run your own resolution code on write or on read.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cảnh báo</strong>Kleppmann nói rõ rằng last write wins <strong>dễ gây mất dữ liệu</strong>, dù nó phổ biến. Hãy đọc mọi cấu hình “LWW” như một quyết định vứt bỏ dữ liệu có chủ ý, không phải như một cơ chế sửa lỗi. Chi tiết ở trục 4.</div>
+            <div class="easy-only"><strong>Cẩn thận</strong>“Ai viết sau thì thắng” nghĩa là bài của người viết trước bị xoá hẳn.</div>
+            <div class="en-only" lang="en"><strong>A warning</strong>Kleppmann states plainly that last write wins is <strong>prone to data loss</strong>, popular though it is. Read any “LWW” setting as a deliberate decision to throw data away, not as an error-correction mechanism. Details on axis 4.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Xung đột không nhất thiết là một dòng</h4>
+              <p>Ông cũng lưu ý rằng phần lớn cơ chế hoá giải xung đột hoạt động ở mức <em>một hàng hoặc một tài liệu</em>, chứ không ở mức giao dịch. Nếu một giao dịch của bạn sửa nhiều bản ghi, mỗi ghi có thể được hoá giải độc lập với nhau, và kết quả cuối cùng có thể không tương ứng với bất kỳ giao dịch nào đã từng được gửi lên. Đây là một trong những chỗ dễ khiến người mới đánh giá thấp rủi ro của multi-leader.</p>
+            </div>
+            <div class="info-block">
+              <h4>Lúc ghi hay lúc đọc</h4>
+              <p>Hoá giải <em>lúc ghi</em> chạy ngay khi hệ phát hiện bất đồng trong log nhân bản, thường trong một tiến trình nền không có ngữ cảnh người dùng. Hoá giải <em>lúc đọc</em> thì trả về tất cả phiên bản xung đột và để ứng dụng — hoặc con người — quyết định, như cách CouchDB giữ nhánh xung đột trong cây phiên bản<span class="cite"><a href="#ref-16">16</a></span>. Lựa chọn ở đây là lựa chọn về <em>ai</em> có đủ thông tin để phán: mã nền, ứng dụng, hay người dùng.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Multi-leader replication topologies</div>
+          <h3><span class="vi-only">Topology: vòng, sao, hay toàn-nối-toàn</span><span class="en-only" lang="en">Topologies: circular, star, or all-to-all</span></h3>
+          <p class="standard-copy">Khi có nhiều hơn hai leader, còn phải chọn <em>đường đi</em> của các ghi. Kleppmann nêu ba topology<span class="cite"><a href="#ref-1">1</a></span>: <strong>vòng tròn</strong>, mỗi nút chuyển ghi cho nút kế tiếp; <strong>hình sao</strong>, một nút gốc chuyển tiếp cho tất cả; và <strong>toàn-nối-toàn</strong>, mỗi leader gửi thẳng cho mọi leader khác. Vòng và sao có chung điểm yếu: một nút hỏng là dòng nhân bản đứt. Toàn-nối-toàn tránh được điều đó nhưng đẻ ra một vấn đề khác — các đường mạng có tốc độ khác nhau, nên <strong>một ghi có thể tới đích trước cái ghi mà nó phụ thuộc nhân quả</strong>.</p>
+          <p class="easy-only">Truyền tin trong lớp có ba kiểu. Chuyền dây: bạn này nói cho bạn kế bên, cứ thế vòng quanh — một bạn nghỉ là đứt. Qua lớp trưởng: ai cũng nói với lớp trưởng, lớp trưởng báo lại cả lớp — lớp trưởng nghỉ là im hết. Ai cũng nói với ai: chắc chắn hơn, nhưng tin có thể tới lộn xộn, câu sau nghe được trước câu trước. Nhớ nhé: mỗi cách truyền tin hỏng theo một kiểu riêng.</p>
+          <p class="en-only" lang="en">With more than two leaders you must also choose the <em>route</em> writes take. Kleppmann names three topologies<span class="cite"><a href="#ref-1">1</a></span>: <strong>circular</strong>, each node forwarding to the next; <strong>star</strong>, one root node forwarding to all; and <strong>all-to-all</strong>, every leader sending directly to every other. Circular and star share a weakness: one failed node breaks the replication flow. All-to-all avoids that but introduces another problem — network links have different speeds, so <strong>a write can arrive before the write it causally depends on</strong>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc thế nào</strong>Topology không phải chi tiết vận hành mà là một quyết định về nhân quả. Nếu bạn chọn toàn-nối-toàn, bạn đã nhận lấy trách nhiệm theo dõi thứ tự nhân quả một cách tường minh — và Kleppmann lưu ý rằng dấu thời gian vật lý không làm nổi việc đó vì đồng hồ giữa các máy không đủ tin cậy.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Cách truyền tin quyết định chuyện tin có tới đúng thứ tự hay không.</div>
+            <div class="en-only" lang="en"><strong>How to read it</strong>Topology is not an operational detail but a decision about causality. Choosing all-to-all means taking on the job of tracking causal order explicitly — and Kleppmann notes that physical timestamps can't do it, because clocks across machines aren't trustworthy enough.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vòng lặp vô hạn là chuyện có thật</h4>
+              <p>Trong topology vòng và sao, mỗi ghi mang theo danh sách các nút nó đã đi qua để không bị chuyền mãi không dứt. Chuyện xảy ra khi cơ chế này sai được ghi lại trong chính hệ thống theo dõi lỗi của Apache HBase: báo cáo HBASE-7709 mô tả khả năng xuất hiện vòng lặp vô hạn trong nhân bản master/master<span class="cite"><a href="#ref-24">24</a></span>. Kleppmann dẫn đúng báo cáo này trong danh mục tham chiếu của chương<span class="cite"><a href="#ref-3">3</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao dấu thời gian không cứu được</h4>
+              <p>Cách vá thường thấy cho chuyện nhân quả bị đảo là gắn dấu thời gian vào mỗi ghi rồi sắp lại theo đó. Nhưng đồng hồ giữa các máy lệch nhau, và độ lệch ấy có thể lớn hơn khoảng cách thời gian giữa hai ghi có quan hệ nhân quả — nên cách vá này không đáng tin. Đây chính là cây cầu dẫn tới khái niệm <em>happens-before</em> và <em>version vector</em> ở trục 4: cần một cách sắp thứ tự dựa trên <strong>quan hệ nhân quả quan sát được</strong>, không dựa vào đồng hồ.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Bỏ luôn khái niệm leader thì sao?</strong>
+      <strong class="en-only" lang="en">What if we drop the idea of a leader entirely?</strong>
+      <span class="standard-copy">Multi-leader vẫn giữ khái niệm leader, chỉ nhân nó lên. Trục cuối cùng bỏ hẳn khái niệm ấy: bất kỳ bản sao nào cũng nhận ghi trực tiếp từ client, và “đúng” được định nghĩa bằng số lượng bản sao đồng ý thay vì bằng vai trò. Cách đặt vấn đề này sinh ra một công thức nổi tiếng, và cũng sinh ra một danh sách dài những trường hợp công thức ấy không giữ lời.</span>
+      <span class="easy-only">Nãy giờ vẫn có người “cầm trịch”. Phần cuối bỏ luôn chuyện đó: ai cũng được viết, và muốn biết đúng sai thì <strong>hỏi nhiều cuốn sổ cùng lúc rồi xem đa số nói gì</strong>.</span>
+      <span class="en-only" lang="en">Multi-leader keeps the notion of a leader and merely multiplies it. The last axis drops the notion altogether: any replica accepts writes directly from clients, and “correct” is defined by how many replicas agree rather than by role. That framing produces a famous formula — and a long list of cases where the formula doesn't keep its promise.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="leaderless" aria-labelledby="leaderless-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · <span lang="en">Leaderless replication</span></span><span class="en-only" lang="en">Axis 4 · Leaderless replication</span></div>
+        <h2 id="leaderless-title"><span class="vi-only">Không lãnh đạo: quorum, và chỗ quorum không giữ lời</span><span class="en-only" lang="en">Leaderless: quorums, and where they break their promise</span></h2>
+      </div>
+      <p class="standard-copy">Họ thứ ba bỏ hẳn vai leader: client gửi mỗi lệnh ghi tới <em>nhiều</em> bản sao song song, và gửi mỗi lệnh đọc tới <em>nhiều</em> bản sao song song, rồi so các phiên bản nhận về<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann gọi họ này là kiểu <em>Dynamo</em>, theo hệ kho khoá-giá trị của Amazon mà Riak, Cassandra và Voldemort lấy làm hình mẫu. Ý tưởng gốc còn cũ hơn nhiều: từ năm 1979, David Gifford đã trình bày cơ chế <em>bỏ phiếu có trọng số</em> cho dữ liệu nhân bản, trong đó mỗi thao tác đọc và ghi phải thu đủ số phiếu, và giao nhau giữa hai tập phiếu là thứ bảo đảm tính đúng đắn<span class="cite"><a href="#ref-6">6</a></span>. Chỗ khác biệt của Dynamo là biến các tham số ấy thành <strong>núm vặn cho người vận hành</strong>, đổi lấy tính sẵn sàng gần như tuyệt đối cho đường ghi.</p>
+      <p class="easy-only">Bây giờ không ai làm chủ cuốn sổ nữa. Bạn muốn ghi thì đi ghi vào <strong>ba cuốn cùng lúc</strong>; muốn đọc thì cũng đi hỏi <strong>ba cuốn cùng lúc</strong> rồi xem cuốn nào ghi mới nhất. Miễn là số cuốn bạn ghi cộng với số cuốn bạn hỏi nhiều hơn tổng số cuốn, thì kiểu gì cũng có ít nhất một cuốn vừa được ghi vừa được hỏi.</p>
+      <p class="en-only" lang="en">The third family abandons the leader role entirely: the client sends every write to <em>several</em> replicas in parallel, sends every read to <em>several</em> replicas in parallel, and compares the versions it gets back<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann calls this the <em>Dynamo</em> style, after Amazon's key-value store on which Riak, Cassandra and Voldemort are modelled. The underlying idea is far older: in 1979 David Gifford described <em>weighted voting</em> for replicated data, in which every read and write must collect enough votes and the intersection of the two vote sets is what guarantees correctness<span class="cite"><a href="#ref-6">6</a></span>. Dynamo's contribution was to turn those parameters into <strong>operator-facing dials</strong>, in exchange for near-total availability on the write path.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">w + r &gt; n — a condition, not a guarantee</div>
+        <p class="definition standard-copy">Với <em>n</em> bản sao, nếu mỗi ghi được xác nhận bởi ít nhất <em>w</em> nút và mỗi đọc hỏi ít nhất <em>r</em> nút, thì điều kiện <strong>w + r &gt; n</strong> buộc hai tập nút phải giao nhau ở ít nhất một nút — nên lệnh đọc <em>thường</em> chạm được bản mới nhất<span class="cite"><a href="#ref-1">1</a></span>. Bài báo Dynamo viết cùng bất đẳng thức ấy dưới dạng <span lang="en">R + W &gt; N</span> và nói rõ nó “cho ra một hệ kiểu quorum”<span class="cite"><a href="#ref-5">5</a></span>. Chữ quan trọng nhất trong cả đoạn này là chữ <strong>“thường”</strong>: Kleppmann dành hẳn một mục để liệt kê những trường hợp biên mà điều kiện vẫn đúng còn tính nhất quán thì không.</p>
+        <p class="definition easy-only">Lớp có 3 cuốn sổ. Bạn ghi vào 2 cuốn, rồi hỏi 2 cuốn. Vì 2 + 2 lớn hơn 3, kiểu gì cũng có ít nhất một cuốn nằm trong cả hai lần — nên bạn sẽ gặp lại chữ mình vừa ghi. Nhớ nhé: ghi nhiều cộng hỏi nhiều mà lớn hơn tổng số cuốn thì mới chắc gặp nhau.</p>
+        <p class="definition en-only" lang="en">With <em>n</em> replicas, if every write is confirmed by at least <em>w</em> nodes and every read queries at least <em>r</em> nodes, the condition <strong>w + r &gt; n</strong> forces the two node sets to overlap in at least one node — so a read <em>usually</em> reaches the newest value<span class="cite"><a href="#ref-1">1</a></span>. The Dynamo paper writes the same inequality as <span lang="en">R + W &gt; N</span> and says it “yields a quorum-like system”<span class="cite"><a href="#ref-5">5</a></span>. The most important word in the whole passage is <strong>“usually”</strong>: Kleppmann devotes a section to listing the edge cases where the condition still holds but consistency does not.</p>
+        <p class="deep-only">Ký hiệu khác nhau giữa các nguồn, nội dung thì như nhau. Sách dùng chữ thường <em>w, r, n</em>; bài Dynamo dùng chữ hoa <span lang="en">R, W, N</span><span class="cite"><a href="#ref-5">5</a></span>; tài liệu Cassandra viết <span lang="en">W + R &gt; RF</span>, trong đó <span lang="en">RF</span> là hệ số nhân bản, và mô tả các mức nhất quán của mình đúng là “một phiên bản của cơ chế <span lang="en">R + W &gt; N</span> của Dynamo”<span class="cite"><a href="#ref-13">13</a></span>. Con số cụ thể đáng nhớ: cấu hình <span lang="en">(N, R, W)</span> phổ biến ở nhiều thực thể Dynamo trong Amazon là <strong>(3, 2, 2)</strong>, và các phép đo trong bài báo được lấy trên hệ thật chạy đúng cấu hình đó<span class="cite"><a href="#ref-5">5</a></span>. Khi thấy tài liệu nào viết công thức bằng ký hiệu khác, hãy kiểm tra ký hiệu chứ đừng vội cho là nguồn ấy sai.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định về nhân bản không lãnh đạo">
+        <div class="equation-row">
+          <b>w + r &gt; n</b>
+          <span>Điều kiện giao nhau giữa tập ghi và tập đọc. Là điều kiện cần, không phải bảo đảm tuyệt đối.</span>
+        </div>
+        <div class="equation-row">
+          <b>Sloppy quorum</b>
+          <span>Ghi vào nút “tạm trú” khi nút đúng không tới được — tăng sẵn sàng, phá tính giao nhau.</span>
+        </div>
+        <div class="equation-row">
+          <b>LWW vứt dữ liệu</b>
+          <span>Hoá giải bằng dấu thời gian đạt hội tụ bằng cách xoá hẳn ghi của bên thua.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về nhân bản không lãnh đạo">
+        <div class="equation-row">
+          <b>Ghi nhiều, hỏi nhiều</b>
+          <span>Ghi vào mấy cuốn cộng hỏi mấy cuốn phải lớn hơn tổng số cuốn.</span>
+        </div>
+        <div class="equation-row">
+          <b>Ghi tạm chỗ khác</b>
+          <span>Cuốn đúng không có thì ghi tạm cuốn khác — tiện, nhưng lúc hỏi có thể không gặp.</span>
+        </div>
+        <div class="equation-row">
+          <b>“Ai sau thì thắng”</b>
+          <span>Cách này gọn, nhưng bài của người viết trước bị xoá mất thật.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three claims about leaderless replication">
+        <div class="equation-row">
+          <b>w + r &gt; n</b>
+          <span>The overlap condition between write set and read set. A necessary condition, not an absolute guarantee.</span>
+        </div>
+        <div class="equation-row">
+          <b>Sloppy quorum</b>
+          <span>Writing to stand-in nodes when the right ones are unreachable — more availability, no overlap.</span>
+        </div>
+        <div class="equation-row">
+          <b>LWW discards data</b>
+          <span>Timestamp resolution reaches convergence by permanently deleting the losing write.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Read repair &amp; anti-entropy</div>
+          <h3><span class="vi-only">Hai cơ chế giữ các bản sao hội tụ</span><span class="en-only" lang="en">Two mechanisms that keep replicas converging</span></h3>
+          <p class="standard-copy">Không có leader nghĩa là không có ai chủ động đẩy thay đổi tới bản sao bị lỡ. Kleppmann nêu hai cơ chế bù lại<span class="cite"><a href="#ref-1">1</a></span>. <em>Read repair</em>: khi client đọc song song nhiều bản sao và phát hiện một bản mang giá trị cũ, nó ghi đè giá trị mới xuống bản đó — hiệu quả với dữ liệu hay được đọc. <em>Anti-entropy</em>: một tiến trình nền liên tục dò tìm khác biệt giữa các bản sao và chép phần thiếu. Cơ chế thứ hai quan trọng vì có những giá trị hiếm khi ai đọc; nếu chỉ trông vào read repair thì chúng có thể nằm lệch rất lâu, làm giảm độ bền vững.</p>
+          <p class="easy-only">Không có cô giáo đọc cho cả lớp chép, nên phải có hai cách khác để các cuốn sổ khớp nhau. Một: mỗi lần ai đó mở nhiều cuốn ra so, thấy cuốn nào thiếu thì chép bù ngay. Hai: có một bạn rảnh đi so từng cuốn với nhau đều đặn. Nhớ nhé: cuốn nào chẳng ai mở ra xem thì phải có người đi kiểm tra định kỳ.</p>
+          <p class="en-only" lang="en">No leader means nobody actively pushes changes to a replica that missed them. Kleppmann names two compensating mechanisms<span class="cite"><a href="#ref-1">1</a></span>. <em>Read repair</em>: when a client reads several replicas in parallel and spots a stale one, it writes the newer value back to it — effective for frequently-read data. <em>Anti-entropy</em>: a background process constantly looks for differences between replicas and copies what's missing. The second matters because some values are rarely read; relying on read repair alone would leave them divergent for a long time, reducing durability.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Trong sản phẩm thật</strong>Tài liệu Cassandra mô tả đúng cặp cơ chế này — read repair ở đường đọc, hinted handoff ở đường ghi — và nói rõ cả hai chỉ là <em>best-effort</em>; để bảo đảm nhất quán rốt cuộc, hệ dựa vào <em>anti-entropy repair</em> dùng cây Merkle để so dữ liệu giữa các bản sao<span class="cite"><a href="#ref-13">13</a></span>. Bài báo Dynamo cũng dùng cây Merkle cho đúng mục đích đó<span class="cite"><a href="#ref-5">5</a></span>.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Vừa chép bù lúc mở sổ ra xem, vừa có người đi kiểm tra định kỳ.</div>
+            <div class="en-only" lang="en"><strong>In real products</strong>Cassandra's documentation describes exactly this pair — read repair on the read path, hinted handoff on the write path — and states that both are only <em>best-effort</em>; to guarantee eventual consistency the system relies on <em>anti-entropy repair</em> using Merkle trees to compare data across replicas<span class="cite"><a href="#ref-13">13</a></span>. The Dynamo paper uses Merkle trees for the same purpose<span class="cite"><a href="#ref-5">5</a></span>.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Limitations of quorum consistency</div>
+          <h3><span class="vi-only">Năm chỗ công thức vẫn đúng mà dữ liệu vẫn sai</span><span class="en-only" lang="en">Five places the formula holds and the data still lies</span></h3>
+          <p class="standard-copy">Đây là mục quan trọng nhất của cả trục, và cũng là mục hay bị bỏ qua nhất. Kleppmann liệt kê những tình huống mà <strong>w + r &gt; n vẫn được thoả mà đọc vẫn không thấy giá trị mới nhất</strong><span class="cite"><a href="#ref-1">1</a></span>: khi dùng <em>sloppy quorum</em>, tập nút ghi và tập nút đọc có thể không giao nhau; khi hai lệnh ghi xảy ra <em>đồng thời</em>, không có cách nào xác định cái nào “mới hơn” nếu chỉ dựa vào đồng hồ; khi một lệnh ghi <em>đồng thời</em> với một lệnh đọc, ghi có thể mới chỉ tới một phần các bản sao; khi một lệnh ghi <strong>thất bại một phần</strong> — thành công trên ít hơn <em>w</em> nút và không được hoàn tác trên những nút đã nhận; và khi một nút mang dữ liệu mới chết rồi được <strong>khôi phục từ bản sao cũ</strong>, làm số bản sao mang giá trị mới tụt xuống dưới <em>w</em>.</p>
+          <p class="easy-only">Công thức “ghi mấy cuốn + hỏi mấy cuốn > tổng số cuốn” nghe rất chắc, nhưng có mấy lúc nó vẫn hụt: khi bạn ghi tạm vào cuốn khác vì cuốn đúng không có ở đó; khi hai người ghi cùng lúc nên không biết ai trước ai sau; khi ghi mới được nửa chừng; và khi một cuốn bị hỏng rồi người ta chép lại từ bản cũ. Nhớ nhé: công thức đúng không có nghĩa là <strong>lúc nào cũng</strong> đúng.</p>
+          <p class="en-only" lang="en">This is the most important part of the axis and the most often skipped. Kleppmann lists situations where <strong>w + r &gt; n is satisfied and a read still misses the newest value</strong><span class="cite"><a href="#ref-1">1</a></span>: with a <em>sloppy quorum</em>, the write set and the read set may not overlap at all; when two writes are <em>concurrent</em>, there is no way to say which is “newer” from clocks alone; when a write is concurrent with a read, the write may have reached only some replicas; when a write <strong>partially fails</strong> — succeeding on fewer than <em>w</em> nodes and not being rolled back on those that did take it; and when a node carrying new data dies and is <strong>restored from an old replica</strong>, dropping the count of up-to-date replicas below <em>w</em>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cách đọc đúng</strong>Hãy đọc w + r &gt; n như một điều kiện <em>cần</em> để tập ghi và tập đọc giao nhau, chứ không phải một bảo đảm rằng bạn luôn đọc thấy ghi mới nhất. Kleppmann nói rõ rằng quorum trong Dynamo <strong>không</strong> cho các bảo đảm mạnh mà giao dịch ACID cung cấp, và rằng ngay cả read-your-writes hay monotonic reads cũng không được bảo đảm sẵn ở đây.</div>
+            <div class="easy-only"><strong>Cẩn thận</strong>Công thức đúng trên giấy vẫn có lúc hụt trong thực tế.</div>
+            <div class="en-only" lang="en"><strong>How to read it properly</strong>Read w + r &gt; n as a <em>necessary</em> condition for the write and read sets to overlap, not as a guarantee that you always see the newest write. Kleppmann is explicit that Dynamo-style quorums do <strong>not</strong> give the strong guarantees ACID transactions provide, and that even read-your-writes or monotonic reads are not guaranteed here.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Giám sát thay cho niềm tin</h4>
+              <p>Vì không có bảo đảm cứng, Kleppmann nhấn mạnh việc <em>đo</em> độ cũ của dữ liệu. Với hệ leader-based, độ trễ nhân bản đo được trực tiếp vì có một thứ tự ghi duy nhất để so. Với hệ leaderless, không có thứ tự ghi cố định nên việc đo khó hơn nhiều — và nếu hệ chỉ dùng read repair mà không có anti-entropy, một giá trị hiếm khi được đọc có thể nằm lệch vô hạn định, khiến không thể nói bất cứ điều gì chắc chắn về độ cũ.</p>
+            </div>
+            <div class="info-block">
+              <h4>Có thể nói xác suất</h4>
+              <p>Ngay cả khi không có bảo đảm tuyệt đối, vẫn đo được <em>khả năng</em> đọc thấy dữ liệu mới. Kleppmann dẫn công trình “Quantifying Eventual Consistency with PBS” của Peter Bailis và cộng sự — một khung phân tích tính tươi của dữ liệu trong hệ quorum theo xác suất thay vì theo mệnh đề tuyệt đối<span class="cite"><a href="#ref-3">3</a></span>. Đây là thái độ đúng với loại hệ này: thay câu hỏi “có bảo đảm không” bằng câu hỏi “xác suất bao nhiêu, và bạn có đo được nó không”.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Sloppy quorums &amp; hinted handoff</div>
+          <h3><span class="vi-only">Quorum “lỏng”: sẵn sàng đổi bằng lời hứa</span><span class="en-only" lang="en">Sloppy quorums: availability bought with the promise</span></h3>
+          <p class="standard-copy">Khi một phân vùng mạng cắt client khỏi đúng những nút <em>“nhà”</em> của một khoá, hệ có hai lựa chọn: trả về lỗi, hoặc chấp nhận ghi vào <em>bất kỳ</em> <em>w</em> nút nào tới được — dù không phải nút phụ trách khoá đó. Lựa chọn thứ hai là <em>sloppy quorum</em>; khi phân vùng lành lại, các ghi tạm trú được chuyển về đúng nhà của chúng, cơ chế gọi là <em>hinted handoff</em><span class="cite"><a href="#ref-1">1</a></span>. Bài báo Dynamo mô tả chính xác cơ chế này: vì quorum chặt sẽ làm hệ mất khả dụng khi có sự cố, Dynamo không áp đặt thành viên quorum chặt mà dùng “sloppy quorum” trên <em>n</em> nút khoẻ mạnh đầu tiên trong danh sách ưu tiên; bản sao được gửi nhờ mang theo một <em>hint</em> ghi rõ nút nhận đúng là ai, và được chuyển trả khi nút đó hồi phục<span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <p class="easy-only">Bạn muốn ghi vào ba cuốn sổ của tổ 1, nhưng tổ 1 đi vắng hết. Bạn ghi tạm vào sổ của tổ 2, kèm một mẩu giấy: “cái này là của tổ 1 nhé”. Khi tổ 1 về, tổ 2 đưa lại. Lợi: bạn không phải chờ. Hại: trong lúc đó ai đi hỏi sổ tổ 1 sẽ <strong>không thấy</strong> chữ bạn vừa ghi. Nhớ nhé: ghi tạm chỗ khác thì người đi hỏi đúng chỗ vẫn không tìm ra.</p>
+          <p class="en-only" lang="en">When a network partition cuts a client off from precisely the <em>“home”</em> nodes for a key, the system has two options: return an error, or accept the write on <em>any</em> <em>w</em> reachable nodes, even ones not responsible for that key. The second is a <em>sloppy quorum</em>; once the partition heals, the temporarily-hosted writes are forwarded to their proper homes, a mechanism called <em>hinted handoff</em><span class="cite"><a href="#ref-1">1</a></span>. The Dynamo paper describes exactly this: because a traditional quorum would be unavailable during failures, Dynamo does not enforce strict quorum membership but uses a “sloppy quorum” over the first <em>n</em> healthy nodes in the preference list; the stand-in replica carries a <em>hint</em> naming the intended recipient and is delivered back when that node recovers<span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc thế nào</strong>Kleppmann nói thẳng: sloppy quorum <strong>không phải là quorum theo nghĩa truyền thống</strong> mà chỉ là một cam kết về độ bền vững. Nó rất hữu ích để tăng khả năng chấp nhận ghi, nhưng nó có nghĩa là ngay cả khi w + r &gt; n, bạn <em>không</em> thể chắc lệnh đọc sẽ chạm bản mới nhất — vì bản mới nhất có thể đang nằm nhờ ở một nút khác.</div>
+            <div class="easy-only"><strong>Cẩn thận</strong>Ghi tạm ở chỗ khác thì hỏi đúng chỗ vẫn có thể không thấy.</div>
+            <div class="en-only" lang="en"><strong>How to read it</strong>Kleppmann says it flatly: a sloppy quorum <strong>is not a quorum in the traditional sense</strong>, only a durability assurance. It is very useful for raising write acceptance, but it means that even with w + r &gt; n you <em>cannot</em> be sure a read reaches the newest value — that value may be lodging on some other node.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Núm vặn nào cho việc gì</h4>
+              <p>Bài báo Dynamo chỉ rõ các tham số này mua những thứ khác nhau: đặt <span lang="en">W = 1</span> cho mức sẵn sàng cao nhất — ghi được chấp nhận miễn là <em>một</em> nút đã lưu bền được khoá xuống kho cục bộ — nhưng phần lớn dịch vụ trong sản xuất ở Amazon vẫn đặt <span lang="en">W</span> cao hơn để đạt mức bền vững mong muốn<span class="cite"><a href="#ref-5">5</a></span>. Đọc ngược lại: mỗi lần bạn hạ <em>w</em> để hệ “sẵn sàng hơn”, bạn đang rút ngắn cửa sổ an toàn của độ bền vững.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao Dynamo chọn như vậy</h4>
+              <p>Lựa chọn này bắt nguồn từ một yêu cầu nghiệp vụ rất cụ thể: giỏ hàng của Amazon phải cho khách thêm và bớt món <em>ngay cả khi mạng và máy chủ đang có sự cố</em>, nên bài báo nói rõ rằng yêu cầu đó buộc họ đẩy độ phức tạp của việc hoá giải xung đột sang phía đọc để bảo đảm <strong>ghi không bao giờ bị từ chối</strong><span class="cite"><a href="#ref-5">5</a></span>. Toàn bộ họ kiến trúc leaderless là hệ quả kỹ thuật của một quyết định sản phẩm.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Last write wins (LWW)</div>
+          <h3><span class="vi-only">LWW: hội tụ bằng cách vứt bỏ dữ liệu</span><span class="en-only" lang="en">LWW: converging by throwing data away</span></h3>
+          <p class="standard-copy">Một cách đạt hội tụ là tuyên bố mỗi bản sao chỉ giữ giá trị “mới nhất” và cho phép ghi đè các giá trị “cũ hơn”. Kleppmann chỉ ra chỗ hỏng ngay trong tiền đề: khi các lệnh ghi <em>đồng thời</em>, thứ tự giữa chúng <strong>không xác định</strong>, nên “mới nhất” là một khái niệm được áp đặt một cách tuỳ tiện — thường bằng dấu thời gian<span class="cite"><a href="#ref-1">1</a></span>. Cơ chế này đạt hội tụ, nhưng <strong>phải trả bằng mất bền vững</strong>: nếu nhiều ghi đồng thời cùng báo thành công cho client, chỉ một cái sống sót, những cái còn lại bị lặng lẽ vứt bỏ. LWW là <em>lựa chọn đánh đổi dữ liệu lấy sự đơn giản</em>, không phải một cơ chế sửa lỗi.</p>
+          <p class="easy-only">Hai bạn cùng viết vào một dòng. Luật “ai viết sau thì thắng” sẽ chọn một bạn — và <strong>xoá hẳn</strong> bài của bạn kia. Cả hai đều được khen là “đã nộp bài”, nhưng chỉ một bài còn tồn tại. Nhớ nhé: luật này gọn thật, nhưng nó làm mất bài của người ta.</p>
+          <p class="en-only" lang="en">One way to converge is to declare that each replica keeps only the “most recent” value and lets it overwrite “older” ones. Kleppmann finds the flaw in the premise: when writes are <em>concurrent</em>, the order between them is <strong>undefined</strong>, so “most recent” is a notion imposed arbitrarily — usually by timestamp<span class="cite"><a href="#ref-1">1</a></span>. The mechanism achieves convergence, but <strong>at the cost of durability</strong>: if several concurrent writes all reported success to their clients, only one survives and the rest are silently discarded. LWW is a <em>choice to trade data for simplicity</em>, not an error-correction mechanism.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dùng khi nào</strong>Kleppmann nêu một trường hợp LWW <em>an toàn</em>: khi khoá chỉ được ghi đúng một lần rồi bất biến sau đó — chẳng hạn dùng UUID làm khoá cho mỗi thao tác ghi, khiến không bao giờ có hai ghi cùng khoá. Ngoài tình huống đó, bật LWW là chấp nhận mất dữ liệu.</div>
+            <div class="easy-only"><strong>Khi nào được dùng</strong>Chỉ an toàn khi mỗi chỗ chỉ được viết đúng một lần rồi thôi.</div>
+            <div class="en-only" lang="en"><strong>When to use</strong>Kleppmann names one <em>safe</em> case for LWW: when a key is written exactly once and thereafter immutable — for instance using a UUID as the key for each write, so two writes never share a key. Outside that, enabling LWW is accepting data loss.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Khung của sách, 2017</h4>
+              <p>Trong chương, Cassandra được nêu là hệ <strong>chỉ</strong> cung cấp LWW, còn Riak cho phép bật cấu trúc dữ liệu giữ mọi phiên bản xung đột thay vì vứt bớt. Đây là ảnh chụp ở thời điểm sách viết và nên được đọc như vậy.</p>
+            </div>
+            <div class="info-block">
+              <h4>Tài liệu hiện thời nói gì</h4>
+              <p>Tài liệu Cassandra hiện nay xác nhận cơ chế vẫn là vậy: hệ dùng dấu thời gian của mutation — từ đồng hồ client hoặc đồng hồ nút điều phối — và “các cập nhật được hoá giải theo quy tắc last write wins”, kèm lưu ý rằng <strong>tính đúng đắn của Cassandra phụ thuộc vào những đồng hồ này</strong>, nên phải chạy đồng bộ thời gian kiểu NTP<span class="cite"><a href="#ref-13">13</a></span>. Về phía Riak, tài liệu mô tả hai núm vặn: nếu <span lang="en">allow_mult</span> đặt <em>false</em>, Riak tự hoá giải và không trả sibling về cho client; nếu <span lang="en">last_write_wins</span> đặt <em>false</em>, hệ hoá giải theo dấu thời gian — và tài liệu nói thẳng rằng dấu thời gian <strong>không phải cơ chế hoá giải đáng tin trong hệ phân tán</strong><span class="cite"><a href="#ref-15">15</a></span>. Chính tài liệu Riak khuyến nghị <em>luôn</em> đặt <span lang="en">allow_mult</span> là <em>true</em><span class="cite"><a href="#ref-14">14</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Happens-before &amp; version vectors</div>
+          <h3><span class="vi-only">“Đồng thời” là một khái niệm nhân quả, không phải đồng hồ</span><span class="en-only" lang="en">“Concurrent” is a causal notion, not a clock one</span></h3>
+          <p class="standard-copy">Để phát hiện ghi đồng thời, cần một định nghĩa không dựa vào thời gian vật lý. Kleppmann dùng quan hệ <em>happens-before</em>: thao tác B <strong>xảy ra sau</strong> A nếu B biết về A, phụ thuộc vào A, hoặc xây trên A; nếu <em>không</em> thao tác nào biết về thao tác kia thì chúng <strong>đồng thời</strong><span class="cite"><a href="#ref-1">1</a></span>. Định nghĩa này đến thẳng từ bài báo năm 1978 của Leslie Lamport, nơi ông xây một thứ tự bộ phận cho các sự kiện trong hệ phân tán mà không cần đồng hồ vật lý<span class="cite"><a href="#ref-7">7</a></span>. Điểm mấu chốt: <em>đồng thời</em> ở đây không có nghĩa “xảy ra cùng một khoảnh khắc”, mà nghĩa <strong>không cái nào biết về cái nào</strong> — hai ghi cách nhau vài ngày vẫn có thể là đồng thời.</p>
+          <p class="easy-only">Hai bạn viết hai câu. Nếu bạn thứ hai <em>đã đọc</em> câu của bạn thứ nhất rồi mới viết, thì câu sau là “viết tiếp” — rõ ràng có trước có sau. Còn nếu hai bạn viết mà không ai đọc của ai, thì gọi là <strong>viết đồng thời</strong>, dù có cách nhau cả tuần. Nhớ nhé: “đồng thời” ở đây nghĩa là <em>không ai biết về ai</em>, chứ không phải cùng một giây.</p>
+          <p class="en-only" lang="en">Detecting concurrent writes needs a definition that doesn't rest on physical time. Kleppmann uses the <em>happens-before</em> relation: operation B <strong>happened after</strong> A if B knows about A, depends on A, or builds upon A; if <em>neither</em> operation knows about the other, they are <strong>concurrent</strong><span class="cite"><a href="#ref-1">1</a></span>. The definition comes straight from Leslie Lamport's 1978 paper, which constructs a partial ordering of events in a distributed system with no physical clock<span class="cite"><a href="#ref-7">7</a></span>. The crucial point: <em>concurrent</em> here does not mean “at the same instant” but <strong>neither knows about the other</strong> — two writes days apart can still be concurrent.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thực tế</strong>Khi có nhiều bản sao cùng nhận ghi, mỗi bản phải giữ một số phiên bản riêng và theo dõi cả số phiên bản mình <em>từng thấy</em> từ các bản khác. Tập hợp các số đó là <em>version vector</em>. Client đọc sẽ nhận về mọi phiên bản không bị phiên bản nào khác vượt qua — Riak gọi chúng là <em>sibling</em> — và phải ghép chúng lại khi ghi tiếp.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Mỗi cuốn sổ phải nhớ mình đã thấy gì của các cuốn khác, thì mới biết ai viết tiếp ai.</div>
+            <div class="en-only" lang="en"><strong>The practical upshot</strong>When several replicas accept writes, each must keep its own version number and track the version numbers it has <em>seen</em> from the others. That collection is a <em>version vector</em>. A reading client gets back every version not superseded by another — Riak calls them <em>siblings</em> — and must merge them on the next write.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Ghép nghĩa là gì</h4>
+              <p>Kleppmann minh hoạ bằng giỏ hàng: hợp nhất hai phiên bản bằng phép hợp các món là đúng cho việc <em>thêm</em>, nhưng sai cho việc <em>xoá</em> — món đã bị xoá sẽ quay lại. Muốn xoá đúng, hệ phải để lại một dấu mộ (<span lang="en">tombstone</span>) ghi rằng món này đã bị bỏ đi. Bài báo Dynamo mô tả đúng hệ quả này khi nói về giỏ hàng của Amazon: nhờ cơ chế hoà giải, thao tác “thêm vào giỏ” không bao giờ bị mất — nhưng <strong>các món đã xoá có thể nổi trở lại</strong><span class="cite"><a href="#ref-5">5</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Version vector không phải vector clock</h4>
+              <p>Hai thuật ngữ hay bị dùng lẫn. Carlos Baquero — một trong các tác giả của công trình về dotted version vector — viết hẳn một bài để tách bạch: chúng là hai cơ chế khác nhau dù cùng mang hình dạng một vector các bộ đếm<span class="cite"><a href="#ref-18">18</a></span>. Tài liệu Riak thừa nhận sự lẫn lộn này ngay trong sản phẩm: API HTTP vẫn dùng header <span lang="en">X-Riak-Vclock</span> kể cả khi hệ đang chạy dotted version vector<span class="cite"><a href="#ref-15">15</a></span>. Bản thân dotted version vector được đề xuất trong bài báo của Preguiça, Baquero, Almeida và cộng sự như một loại đồng hồ logic cho nhân bản lạc quan<span class="cite"><a href="#ref-17">17</a></span>, và Riak chuyển sang dùng nó từ phiên bản 2.0<span class="cite"><a href="#ref-14">14</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận thường gặp về nhân bản</span><span class="en-only" lang="en">Three common misreadings of replication</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“w + r &gt; n là bảo đảm đọc thấy ghi mới nhất”</span><span class="en-only" lang="en">"w + r &gt; n guarantees reading the newest write"</span></h4>
+          <p class="standard-copy">Sai: đó là điều kiện để hai tập nút <em>giao nhau</em>, và Kleppmann liệt kê hàng loạt trường hợp biên nó vẫn đúng mà tính nhất quán vẫn hỏng — sloppy quorum, ghi đồng thời, ghi thất bại một phần, nút phục hồi từ bản sao cũ<span class="cite"><a href="#ref-1">1</a></span>. Hãy đọc nó như một điều kiện cần, kèm giám sát, chứ không như một lời hứa.</p>
+          <p class="en-only" lang="en">Wrong: it's the condition for the two node sets to <em>overlap</em>, and Kleppmann lists edge cases where it holds while consistency fails — sloppy quorums, concurrent writes, partially failed writes, nodes restored from old replicas<span class="cite"><a href="#ref-1">1</a></span>. Read it as a necessary condition backed by monitoring, not as a promise.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“LWW là cách hoá giải xung đột đúng đắn”</span><span class="en-only" lang="en">"LWW is the correct way to resolve conflicts"</span></h4>
+          <p class="standard-copy">Sai: nó đạt hội tụ bằng cách <em>xoá hẳn</em> các ghi thua cuộc, dù những ghi đó đã được báo thành công. Nó chỉ an toàn khi mỗi khoá được ghi đúng một lần rồi bất biến<span class="cite"><a href="#ref-1">1</a></span>. Tài liệu Riak nói thẳng rằng dấu thời gian không phải cơ chế hoá giải đáng tin trong hệ phân tán<span class="cite"><a href="#ref-15">15</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: it converges by <em>permanently deleting</em> the losing writes, even though they were acknowledged. It is safe only when each key is written once and thereafter immutable<span class="cite"><a href="#ref-1">1</a></span>. Riak's own documentation states that timestamps are not a reliable resolution mechanism in distributed systems<span class="cite"><a href="#ref-15">15</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Nhân bản = sao lưu”</span><span class="en-only" lang="en">"Replication = backup"</span></h4>
+          <p class="standard-copy">Sai: bản sao <em>đang phục vụ</em> và đang bám theo leader, nên một lệnh <span lang="en">DELETE</span> nhầm hay một bản ghi hỏng sẽ được nhân bản trung thực sang mọi bản sao. Nhân bản chống lại <em>mất máy</em>; nó không chống lại <em>thao tác sai</em> — vốn là nguồn sự cố hàng đầu mà Chương 1 đã nêu.</p>
+          <p class="en-only" lang="en">Wrong: replicas are <em>serving traffic</em> and tracking the leader, so a mistaken <span lang="en">DELETE</span> or a corrupt row is faithfully replicated everywhere. Replication protects against <em>losing a machine</em>; it does not protect against <em>a wrong operation</em> — the leading incident source Chapter 1 named.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi chiến lược nhân bản của chính hệ bạn</span><span class="en-only" lang="en">Audit your own replication strategy</span></h2>
+        <p class="standard-copy">Gần như mọi hệ có cơ sở dữ liệu đều đang nhân bản một thứ gì đó, kể cả khi đội phát triển chưa bao giờ gọi tên nó. Những câu hỏi dưới đây không đo hệ của bạn “phân tán” tới đâu; chúng soi xem bạn đã <em>nói thành lời</em> được các đánh đổi mà chương này bày ra hay chưa — và đặc biệt là những đánh đổi mà bạn đã ngầm chấp nhận mà không biết.</p>
+        <p class="easy-only">Thử soi một hệ thật mà bạn đang làm bằng mấy câu dưới. Không phải để xem nó to hay nhỏ, mà để xem bạn đã biết rõ nó chép dữ liệu kiểu gì và hỏng thì mất gì chưa.</p>
+        <p class="en-only" lang="en">Nearly every system with a database is replicating something, even if the team never named it. The questions below don't measure how “distributed” your system is; they test whether you can yet <em>put into words</em> the trade-offs this chapter lays out — especially the ones you've silently accepted without noticing.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Hệ của bạn thuộc họ nào: một lãnh đạo, nhiều lãnh đạo, hay không lãnh đạo?</strong><span class="deep-only">Câu hỏi nghe hiển nhiên nhưng rất hay bị trả lời sai, vì nhiều đội có cả ba trong cùng một kiến trúc: cơ sở dữ liệu chính chạy leader–follower, cache chạy kiểu khác, còn ứng dụng di động thì đang làm multi-leader mà không ai gọi tên. Hãy vẽ ra chứ đừng trả lời bằng trí nhớ.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nhân bản của bạn đồng bộ hay bất đồng bộ — và bạn biết điều đó từ đâu?</strong><span class="deep-only">Phần lớn hệ mặc định bất đồng bộ: PostgreSQL chỉ chuyển sang đồng bộ khi người vận hành đặt <span lang="en">synchronous_standby_names</span>. Nếu bạn chưa từng bật nó, câu trả lời của bạn là “bất đồng bộ”, và bạn đã chấp nhận rằng một failover có thể làm mất những ghi đã báo thành công.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Khi leader chết, bạn mất bao nhiêu ghi — và số đó có được viết ra ở đâu không?</strong><span class="deep-only">Đây là câu hỏi trung tâm của failover. Nếu chưa ai trong đội trả lời được bằng một con số hoặc một khoảng, thì bạn chưa có cam kết bền vững, chỉ có hy vọng. Và hãy hỏi tiếp: có hệ nào <em>ngoài</em> cơ sở dữ liệu phụ thuộc vào những ghi có thể bị vứt không — cache, chỉ mục tìm kiếm, hàng đợi, kho phân tích?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn chặn split brain bằng cơ chế gì, và timeout của bạn dựa trên số đo nào?</strong><span class="deep-only">“Chúng tôi dùng công cụ X” không phải câu trả lời — hãy nói rõ điều gì ngăn hai nút cùng nhận ghi, và chuyện gì xảy ra nếu cơ chế đó cũng hỏng. Về timeout: quá dài thì kéo dài gián đoạn, quá ngắn thì một đợt tải cao sẽ kích failover thừa và đẩy hệ vào vòng xoáy chuyển vai liên tục.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có đọc từ bản sao không — và giao diện nào sẽ vỡ nếu bản sao đó tụt hậu 30 giây?</strong><span class="deep-only">Hãy đi qua từng màn hình mà người dùng sửa xong là nhìn lại ngay. Những chỗ đó cần read-your-writes. Còn những chỗ người dùng đọc nhiều lần liên tiếp thì cần monotonic reads. Nếu load balancer của bạn rải đọc ngẫu nhiên, bạn đang thiếu cái thứ hai.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Độ trễ nhân bản của bạn có nằm trên bảng giám sát không, và ở percentile nào?</strong><span class="deep-only">“Eventually consistent” không phải một số đo. Đo p50 và p99 của độ trễ nhân bản, và đặt ngưỡng cảnh báo. Với hệ leaderless thì việc đo này khó hơn nhiều vì không có thứ tự ghi cố định để so — hãy biết trước rằng bạn đang ở trường hợp khó.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu hai người sửa cùng một bản ghi ở hai nơi, hệ của bạn làm gì?</strong><span class="deep-only">Có ba câu trả lời có thể chấp nhận: hệ ngăn chuyện đó xảy ra (định tuyến mọi ghi của bản ghi ấy về một nơi), hệ giữ cả hai rồi hỏi lại, hoặc hệ có một luật hoá giải mà bạn viết ra và hiểu được. Câu trả lời “chắc là nó tự xử lý” nghĩa là bạn đang chạy LWW mà không biết.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Ở đâu trong hệ bạn đang bật last-write-wins, và bạn có ý thức rằng đó là mất dữ liệu không?</strong><span class="deep-only">Hãy kiểm tra cấu hình thật chứ đừng đoán: <span lang="en">last_write_wins</span> và <span lang="en">allow_mult</span> trong Riak, mức nhất quán và dấu thời gian mutation trong Cassandra, hoặc chính logic “ghi đè bản mới nhất” trong mã ứng dụng của bạn. LWW chỉ an toàn khi mỗi khoá được ghi đúng một lần rồi bất biến.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có nhầm nhân bản với sao lưu không?</strong><span class="deep-only">Thử một phép thử đơn giản: nếu ai đó chạy nhầm một lệnh xoá trên leader lúc 3 giờ chiều, bạn khôi phục bằng cách nào? Nếu câu trả lời là “chúng tôi có bản sao”, thì bạn chưa có câu trả lời — vì bản sao đã sao chép trung thực lệnh xoá đó rồi.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Hệ của bạn có mấy “cuốn sổ”, và ai được viết vào?</strong><span>Biết ai được viết thì mới biết lúc đụng nhau phải xử lý ra sao.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Người viết xong có nhìn thấy ngay chữ của mình không?</strong><span>Nếu không thấy, người dùng sẽ tưởng là mất và viết lại lần nữa.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Các cuốn sổ chép chậm hơn cuốn chính bao lâu — bạn có đo không?</strong><span>Nói “rồi cũng khớp” thì chưa đủ. Phải biết là mấy giây.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Hai người cùng sửa một dòng thì hệ giữ cả hai hay bỏ một?</strong><span>Nếu bỏ một, có ai biết là đã bỏ không?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu ai đó xoá nhầm, bạn lấy lại bằng cách nào?</strong><span>Chép ra nhiều bản không cứu được chuyện xoá nhầm — vì bản nào cũng bị xoá theo.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>Which family is your system: single-leader, multi-leader or leaderless?</strong><span>Obvious-sounding but often answered wrong, because many teams run all three at once: the main database is leader–follower, the cache is something else, and the mobile app is doing multi-leader that nobody named. Draw it; don't answer from memory.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is your replication synchronous or asynchronous — and how do you know?</strong><span>Most systems default to asynchronous: PostgreSQL only becomes synchronous when an operator sets <span lang="en">synchronous_standby_names</span>. If you never turned it on, your answer is “asynchronous”, and you've accepted that a failover can lose acknowledged writes.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>When the leader dies, how many writes do you lose — and is that number written down anywhere?</strong><span>This is the central failover question. If nobody on the team can answer with a number or a range, you have no durability commitment, only hope. Then ask: does any system <em>outside</em> the database depend on the writes that may be discarded?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>What prevents split brain, and what measurement sets your timeout?</strong><span>“We use tool X” isn't an answer — say what stops two nodes accepting writes, and what happens if that mechanism also fails. Too long a timeout prolongs outages; too short and a load spike triggers needless failovers.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Do you read from replicas — and which screens break if one lags 30 seconds?</strong><span>Walk through every screen where a user edits and immediately looks again; those need read-your-writes. Screens read repeatedly need monotonic reads. If your load balancer spreads reads randomly, you're missing the second.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is replication lag on your dashboard, and at which percentile?</strong><span>“Eventually consistent” is not a measurement. Track p50 and p99 of replication lag and set an alert. For leaderless systems this is much harder because there's no fixed write order to compare against — know in advance that you're in the hard case.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>If two people edit the same record in two places, what does your system do?</strong><span>Three acceptable answers: it prevents that (routing all writes for the record to one place), it keeps both and asks, or it has a resolution rule you wrote and understand. “It probably handles it” means you're running LWW without knowing.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Where is last-write-wins enabled, and do you know that it means data loss?</strong><span>Check the actual configuration rather than guessing: <span lang="en">last_write_wins</span> and <span lang="en">allow_mult</span> in Riak, consistency levels and mutation timestamps in Cassandra, or your own “overwrite with the newest” logic. LWW is safe only when each key is written once and thereafter immutable.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Are you confusing replication with backup?</strong><span>A simple test: if someone runs a mistaken delete on the leader at 3pm, how do you recover? If the answer is “we have replicas”, you don't have an answer — the replicas faithfully copied that delete.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Nhân bản không phải bài toán sao chép mà là bài toán <span class="closing-accent">thoả thuận về sự thật</span> giữa những máy không bao giờ nhìn thấy nhau cùng lúc. Một lãnh đạo mua sự đơn giản bằng một điểm chết và một nút thắt ghi; nhiều lãnh đạo mua sự sẵn sàng bằng <span class="closing-accent">xung đột mà bạn phải tự hoá giải</span>; không lãnh đạo mua khả năng ghi gần như luôn thành công bằng việc bắt ứng dụng phải hiểu thế nào là <span class="closing-accent">đồng thời</span>. Mọi công thức trong chương — kể cả w + r &gt; n — đều là điều kiện có kèm trường hợp biên, chứ không phải lời hứa. Điều còn lại sau chương này không phải một kiến trúc để chọn, mà một thói quen: <span class="closing-accent">nói rõ bạn đang trả giá ở đâu</span>.</span><span class="easy-only">Chép dữ liệu ra nhiều nơi thì <span class="closing-accent">dễ</span>. Khó là lúc <span class="closing-accent">có người sửa</span>: sửa ở đâu, ai được sửa, và khi hai người sửa khác nhau thì <span class="closing-accent">nghe theo ai</span>. Nhớ nhé: cách nào cũng phải trả giá ở một chỗ — chỉ cần bạn biết rõ mình đang trả ở chỗ nào.</span><span class="en-only" lang="en">Replication is not a copying problem but a problem of <span class="closing-accent">agreeing on truth</span> between machines that never see each other at the same moment. Single-leader buys simplicity with a single point of failure and a write bottleneck; multi-leader buys availability with <span class="closing-accent">conflicts you must resolve yourself</span>; leaderless buys near-always-accepted writes by making the application understand what <span class="closing-accent">concurrent</span> means. Every formula in the chapter — w + r &gt; n included — is a condition with edge cases, not a promise. What survives this chapter is not an architecture to pick but a habit: <span class="closing-accent">say plainly where you are paying</span>.</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-4-encoding-and-evolution.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 4 · Mã hóa &amp; tiến hóa</span><span class="en-only" lang="en">Chapter 4 · Encoding &amp; Evolution</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="chapter-6-partitioning.html">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 6 · Phân mảnh</span><span class="en-only" lang="en">Chapter 6 · Partitioning</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 5 <span lang="en">“Replication”</span><span class="cite"><a href="#ref-4">4</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách<span class="cite"><a href="#ref-2">2</a></span>. Các ví von trong chế độ Dễ hiểu (lớp học chép chính tả, cuốn sổ của từng tổ, mẩu giấy gửi nhờ…) là minh họa do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. Số liệu Dynamo (SLA 300ms ở phân vị 99,9%, cấu hình <span lang="en">(N, R, W)</span> = (3, 2, 2)) là số trong bài báo SOSP 2007 của Amazon<span class="cite"><a href="#ref-5">5</a></span>, không phải số vận hành hiện thời của dịch vụ nào. Những khẳng định về hành vi sản phẩm cụ thể (PostgreSQL, MySQL, Cassandra, Riak, CouchDB) được dẫn từ tài liệu hiện thời của chính sản phẩm đó và có thể đã khác so với khung mô tả năm 2017 của sách; các chỗ như vậy được tách riêng trong khối Đầy đủ.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 5 “Replication”<span class="cite"><a href="#ref-4">4</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter<span class="cite"><a href="#ref-2">2</a></span>. The Dễ hiểu-mode analogies (the dictation class, each group's notebook, the note left with a stand-in…) are illustrations added by this companion, not examples from the book. The Dynamo figures (a 300ms SLA at the 99.9th percentile, the <span lang="en">(N, R, W)</span> = (3, 2, 2) configuration) come from Amazon's SOSP 2007 paper<span class="cite"><a href="#ref-5">5</a></span>, not from any service's current operational numbers. Claims about specific product behaviour (PostgreSQL, MySQL, Cassandra, Riak, CouchDB) are taken from those products' current documentation and may differ from the book's 2017 framing; such places are kept in separate Đầy đủ-mode blocks.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 5, “Replication”.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách (mục lục, khung Phần II về dữ liệu phân tán)</a></li>
+        <li id="ref-3"><a href="https://github.com/ept/ddia-references/blob/master/chapter-05-refs.md" target="_blank" rel="noopener noreferrer">Martin Kleppmann — ept/ddia-references, danh mục tham chiếu Chương 5 (Dynamo, Gifford, Lamport, Terry, GitHub 2012, HBASE-7709, PBS, Etherpad/Google Docs, CRDT…)</a></li>
+        <li id="ref-4"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O’Reilly — trang sách chính thức (định danh ấn bản, mục lục, số hiệu chương)</a> <em>(oreilly.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-5"><a href="https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf" target="_blank" rel="noopener noreferrer">Giuseppe DeCandia, Deniz Hastorun, Madan Jampani và cộng sự, “Dynamo: Amazon’s Highly Available Key-Value Store”, SOSP 2007 — R + W &gt; N, sloppy quorum, hinted handoff, vector clock, (3, 2, 2), SLA 300ms ở phân vị 99,9%</a></li>
+        <li id="ref-6"><a href="https://www.cs.cmu.edu/~15-749/READINGS/required/availability/gifford79.pdf" target="_blank" rel="noopener noreferrer">David K. Gifford, “Weighted Voting for Replicated Data”, SOSP 1979 — nguồn gốc của cơ chế quorum đọc/ghi</a></li>
+        <li id="ref-7"><a href="https://lamport.azurewebsites.net/pubs/time-clocks.pdf" target="_blank" rel="noopener noreferrer">Leslie Lamport, “Time, Clocks, and the Ordering of Events in a Distributed System”, Communications of the ACM 21(7), 1978 — quan hệ happens-before</a></li>
+        <li id="ref-8"><a href="https://www.cs.cornell.edu/courses/cs734/2000FA/cached%20papers/SessionGuaranteesPDIS_1.html" target="_blank" rel="noopener noreferrer">Douglas B. Terry, Alan J. Demers, Karin Petersen và cộng sự, “Session Guarantees for Weakly Consistent Replicated Data”, PDIS 1994 — Read Your Writes, Monotonic Reads, Writes Follow Reads, Monotonic Writes</a></li>
+        <li id="ref-9"><a href="https://www.postgresql.org/docs/current/warm-standby.html" target="_blank" rel="noopener noreferrer">PostgreSQL Documentation — Log-Shipping Standby Servers (§26.2.5 streaming replication mặc định bất đồng bộ; §26.2.8 synchronous replication, <span lang="en">synchronous_standby_names</span>, <span lang="en">synchronous_commit</span>, <span lang="en">wal_keep_size</span> / replication slot, log sequence number)</a></li>
+        <li id="ref-10"><a href="https://www.postgresql.org/docs/current/logicaldecoding.html" target="_blank" rel="noopener noreferrer">PostgreSQL Documentation — Logical Decoding (giải mã WAL thành dòng thay đổi mức hàng cho consumer bên ngoài)</a></li>
+        <li id="ref-11"><a href="https://dev.mysql.com/doc/refman/en/replication-formats.html" target="_blank" rel="noopener noreferrer">MySQL Reference Manual — Replication Formats (statement-based, row-based, mixed; <span lang="en">binlog_format</span>)</a> <em>(dev.mysql.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-12"><a href="https://dev.mysql.com/doc/refman/en/replication-semisync.html" target="_blank" rel="noopener noreferrer">MySQL Reference Manual — Semisynchronous Replication (plugin phải bật riêng, nguồn chờ xác nhận từ bản sao)</a> <em>(dev.mysql.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-13"><a href="https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html" target="_blank" rel="noopener noreferrer">Apache Cassandra Documentation — Dynamo (tunable consistency <span lang="en">W + R &gt; RF</span>, data versioning theo dấu thời gian mutation &amp; last-write-wins, read repair, hinted handoff, anti-entropy repair bằng cây Merkle)</a></li>
+        <li id="ref-14"><a href="https://docs.riak.com/riak/kv/latest/learn/concepts/causal-context/index.html" target="_blank" rel="noopener noreferrer">Riak KV Documentation — Causal Context (vector clock, dotted version vector từ Riak 2.0, sibling, khuyến nghị <span lang="en">allow_mult = true</span>)</a></li>
+        <li id="ref-15"><a href="https://docs.riak.com/riak/kv/latest/developing/usage/conflict-resolution/index.html" target="_blank" rel="noopener noreferrer">Riak KV Documentation — Conflict Resolution (<span lang="en">allow_mult</span>, <span lang="en">last_write_wins</span>, “dấu thời gian không phải cơ chế hoá giải đáng tin”, header <span lang="en">X-Riak-Vclock</span>)</a></li>
+        <li id="ref-16"><a href="https://docs.couchdb.org/en/stable/replication/conflicts.html" target="_blank" rel="noopener noreferrer">Apache CouchDB Documentation — Replication and Conflict Model (ví dụ danh thiếp của Alice, phiên bản “thắng” chọn tất định, cây phiên bản, <span lang="en">409 Conflict</span>)</a></li>
+        <li id="ref-17"><a href="https://arxiv.org/abs/1011.5808" target="_blank" rel="noopener noreferrer">Nuno Preguiça, Carlos Baquero, Paulo Sérgio Almeida và cộng sự, “Dotted Version Vectors: Logical Clocks for Optimistic Replication”, arXiv:1011.5808, 2010</a></li>
+        <li id="ref-18"><a href="https://haslab.wordpress.com/2011/07/08/version-vectors-are-not-vector-clocks/" target="_blank" rel="noopener noreferrer">Carlos Baquero, “Version Vectors Are Not Vector Clocks”, haslab.wordpress.com, 8.7.2011</a> <em>(haslab.wordpress.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-19"><a href="https://arxiv.org/abs/1608.03960" target="_blank" rel="noopener noreferrer">Martin Kleppmann &amp; Alastair R. Beresford, “A Conflict-Free Replicated JSON Datatype”, arXiv:1608.03960, 2016 — nền tảng của thư viện Automerge</a></li>
+        <li id="ref-20"><a href="https://hal.inria.fr/inria-00555588/" target="_blank" rel="noopener noreferrer">Marc Shapiro, Nuno Preguiça, Carlos Baquero, Marek Zawirski, “A Comprehensive Study of Convergent and Commutative Replicated Data Types”, INRIA Research Report 7506, 2011</a></li>
+        <li id="ref-21"><a href="https://github.blog/2012-09-14-github-availability-this-week/" target="_blank" rel="noopener noreferrer">Jesse Newland, “GitHub Availability This Week”, github.blog, 14.9.2012 — failover, phân mảnh trạng thái cụm, nút lỗi thời được bầu, lệch dữ liệu giữa MySQL và Redis</a></li>
+        <li id="ref-22"><a href="https://drive.googleblog.com/2010/09/whats-different-about-new-google-docs.html" target="_blank" rel="noopener noreferrer">John Day-Richter, “What’s Different About the New Google Docs: Making Collaboration Fast”, Google Drive Blog, 23.9.2010 — cộng tác ở mức từng ký tự</a></li>
+        <li id="ref-23"><a href="https://www.allthingsdistributed.com/2008/12/eventually_consistent.html" target="_blank" rel="noopener noreferrer">Werner Vogels, “Eventually Consistent — Revisited”, allthingsdistributed.com, 2008 — định nghĩa eventual consistency (bản ACM Queue tương ứng: “Eventually Consistent”, ACM Queue 6(6), 2008)</a></li>
+        <li id="ref-24"><a href="https://issues.apache.org/jira/browse/HBASE-7709" target="_blank" rel="noopener noreferrer">Lars Hofhansl, “HBASE-7709: Infinite loop possible in Master/Master replication”, issues.apache.org, 29.1.2013</a></li>
+        <li id="ref-25"><a href="https://static.usenix.org/legacy/events/osdi04/tech/full_papers/renesse/renesse.pdf" target="_blank" rel="noopener noreferrer">Robbert van Renesse &amp; Fred B. Schneider, “Chain Replication for Supporting High Throughput and Availability”, OSDI 2004</a></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-4-encoding-and-evolution.html">Chương 4 — Mã hóa &amp; tiến hóa</a> · <a href="chapter-6-partitioning.html">Chương 6 — Phân mảnh</a>.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-4-encoding-and-evolution.html">Chapter 4 — Encoding &amp; Evolution</a> · <a href="chapter-6-partitioning.html">Chapter 6 — Partitioning</a>.</p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

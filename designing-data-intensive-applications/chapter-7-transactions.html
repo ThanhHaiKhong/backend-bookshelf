@@ -1,0 +1,2107 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 7 &quot;Transactions&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: ACID và sự mơ hồ của chính nó, các mức cô lập yếu (read committed, snapshot isolation, mất cập nhật), write skew &amp; phantom, và ba con đường tới khả tuần tự hoá — thực thi tuần tự, 2PL, SSI.">
+<title>Transactions</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 07";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 7</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 7</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 7</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 7 · Giao dịch</span><span class="easy-only">DDIA · Chương 7 · Giao dịch</span><span class="en-only" lang="en">DDIA · Chapter 7 · Transactions</span></div>
+      <h1 id="page-title"><span class="standard-copy">Giao dịch và <span class="hero-title-accent">những cái nhãn</span> nói dối</span><span class="easy-only">Làm trọn gói, hoặc không làm gì</span><span class="en-only" lang="en">Transactions and the <span class="hero-title-accent">labels that lie</span></span></h1>
+      <p class="standard-copy">Giao dịch là công cụ được dựng lên để <strong>giấu đi một mớ hỗn độn</strong>: phần cứng chết giữa chừng, ứng dụng sập sau khi mới ghi được nửa dữ liệu, mạng đứt, nhiều client cùng ghi đè lên nhau. Nó gom vài thao tác đọc/ghi thành <strong>một đơn vị logic duy nhất</strong> — hoặc thành công trọn vẹn (<span lang="en">commit</span>), hoặc thất bại trọn vẹn (<span lang="en">abort</span>, <span lang="en">rollback</span>). Nhưng Kleppmann cảnh báo ngay từ đầu chương: giao dịch không phải quy luật tự nhiên, mà là <strong>một lựa chọn kỹ thuật có giá</strong>, và cái nhãn <span lang="en">ACID</span> dán lên nó nói được ít hơn ta tưởng rất nhiều<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>.</p>
+      <p class="easy-only">Giao dịch giống như mua hàng: hoặc bạn trả tiền <strong>và</strong> nhận hàng, hoặc không có chuyện gì xảy ra cả — chứ không có kiểu trả tiền rồi mất hàng. Máy tính cũng vậy: chuyển tiền phải trừ bên này <strong>và</strong> cộng bên kia, không được làm nửa vời. Cái khó là: nhiều người cùng bấm một lúc, và cái nhãn "an toàn" dán trên cơ sở dữ liệu không phải lúc nào cũng nói thật.</p>
+      <p class="en-only" lang="en">A transaction is a device built to <strong>hide a mess</strong>: hardware dying mid-write, an application crashing after writing only half its data, networks cutting out, several clients overwriting each other. It groups a few reads and writes into <strong>one logical unit</strong> — either it all succeeds (commit) or it all fails (abort, rollback). But Kleppmann warns from the opening pages: transactions are not a law of nature, they are <strong>an engineering choice with a price</strong>, and the ACID label stuck on them says far less than we assume<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Đây là chương về <strong>một bộ từ vựng bị lạm dụng</strong>. <span lang="en">ACID</span> nghe như một bảo đảm chặt chẽ, nhưng ba chữ <span lang="en">Atomicity</span>, <span lang="en">Isolation</span>, <span lang="en">Durability</span> mới có nghĩa tương đối rõ; còn <span lang="en">Consistency</span> là <strong>chữ thuộc về ứng dụng chứ không phải cơ sở dữ liệu</strong><span class="cite"><a href="#ref-1">1</a></span>. Tệ hơn: hầu hết hệ thực tế không chạy ở mức cô lập tuần tự mà ở các <strong>mức cô lập yếu</strong>, và tên gọi của những mức ấy khác nhau giữa các sản phẩm — cái PostgreSQL gọi <span lang="en">“repeatable read”</span> chính là <span lang="en">snapshot isolation</span><span class="cite"><a href="#ref-9">9</a></span>, còn cái Oracle gọi <span lang="en">“serializable”</span> cũng là <span lang="en">snapshot isolation</span><span class="cite"><a href="#ref-5">5</a></span>. Hiểu chương này nghĩa là bỏ cái nhãn xuống và hỏi một câu duy nhất: <strong>chính xác thì hệ này chặn được race condition nào?</strong></p>
+          <p class="easy-only">Người ta hay khoe cơ sở dữ liệu của mình "an toàn tuyệt đối". Nhưng mỗi hãng hiểu chữ "an toàn" một kiểu, thậm chí dùng cùng một cái tên để chỉ hai thứ khác nhau. Nhớ nhé: đừng tin cái nhãn, hãy hỏi xem nó chặn được đúng những lỗi nào khi nhiều người cùng làm một lúc.</p>
+          <p class="en-only" lang="en">This is a chapter about <strong>an abused vocabulary</strong>. ACID sounds like a tight guarantee, but only Atomicity, Isolation and Durability have reasonably clear meanings; <strong>Consistency belongs to the application, not to the database</strong><span class="cite"><a href="#ref-1">1</a></span>. Worse: most real systems do not run at serializable isolation but at <strong>weak isolation levels</strong>, and the names of those levels differ between products — what PostgreSQL calls “repeatable read” <em>is</em> snapshot isolation<span class="cite"><a href="#ref-9">9</a></span>, and what Oracle calls “serializable” is also snapshot isolation<span class="cite"><a href="#ref-5">5</a></span>. Understanding this chapter means putting the label down and asking one question: <strong>exactly which race conditions does this system prevent?</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Ba trục của Chương 7: ACID và phạm vi giao dịch, các mức cô lập yếu, và khả tuần tự hoá / Three axes of Chapter 7: ACID and transaction scope, weak isolation levels, and serializability">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">GIAO DỊCH<br>HỨA GÌ?</span><span class="en-only" lang="en">WHAT DOES A<br>TRANSACTION<br>PROMISE?</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">ACID</span><span class="en-only" lang="en">ACID</span></b>
+        <small class="standard-copy">A, I, D có nghĩa rõ; C là chữ của ứng dụng</small>
+        <small class="easy-only">Bốn chữ, nhưng chỉ ba chữ là việc của máy.</small>
+        <small class="en-only" lang="en">A, I and D are clear; C belongs to the app</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Weak isolation</span><span class="en-only" lang="en">Weak isolation</span></b>
+        <small class="standard-copy">Nhanh hơn, nhưng vẫn còn race condition</small>
+        <small class="easy-only">Chạy nhanh nhưng còn kẽ hở.</small>
+        <small class="en-only" lang="en">Faster, but race conditions remain</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Serializability</span><span class="en-only" lang="en">Serializability</span></b>
+        <small class="standard-copy">Tuần tự thật: serial execution, 2PL, SSI</small>
+        <small class="easy-only">Xếp hàng thật sự — nhưng phải trả giá.</small>
+        <small class="en-only" lang="en">Truly serial: serial execution, 2PL, SSI</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#acid-and-scope"><span><span class="vi-only">ACID</span><span class="en-only" lang="en">ACID</span></span><b class="standard-copy">Bốn chữ, và chữ đi lạc</b><b class="easy-only">Bốn chữ nghe oách</b><b class="en-only" lang="en">Four letters, and the odd one out</b></a>
+    <a href="#weak-isolation"><span><span class="vi-only">Cô lập yếu</span><span class="en-only" lang="en">Weak isolation</span></span><b class="standard-copy">Read committed, snapshot, mất cập nhật</b><b class="easy-only">Nhanh nhưng còn kẽ hở</b><b class="en-only" lang="en">Read committed, snapshots, lost updates</b></a>
+    <a href="#write-skew"><span><span class="vi-only">Write skew</span><span class="en-only" lang="en">Write skew</span></span><b class="standard-copy">Đọc chung, ghi riêng, vỡ bất biến</b><b class="easy-only">Hai người cùng rút lui</b><b class="en-only" lang="en">Read together, write apart, invariant breaks</b></a>
+    <a href="#serializability"><span><span class="vi-only">Tuần tự hoá</span><span class="en-only" lang="en">Serializability</span></span><b class="standard-copy">Serial execution, 2PL, SSI</b><b class="easy-only">Ba cách xếp hàng thật</b><b class="en-only" lang="en">Serial execution, 2PL, SSI</b></a>
+  </nav>
+
+  <section class="section" id="acid-and-scope" aria-labelledby="acid-and-scope-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">ACID</span> &amp; phạm vi</span><span class="en-only" lang="en">Axis 1 · ACID &amp; scope</span></div>
+        <h2 id="acid-and-scope-title"><span class="vi-only">Bốn chữ, và một chữ đi lạc</span><span class="en-only" lang="en">Four letters, and one that wandered off</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann mở chương bằng việc tháo tung từ viết tắt nổi tiếng nhất ngành. <span lang="en">ACID</span> được Theo Härder và Andreas Reuter đặt ra năm 1983 để có một thuật ngữ chính xác cho khả năng chịu lỗi của hệ cơ sở dữ liệu<span class="cite"><a href="#ref-7">7</a></span>. Nhưng mức độ hiện thực của nó khác nhau rất xa giữa các sản phẩm, đến mức ông kết luận rằng ngày nay <span lang="en">ACID</span> phần lớn đã thành <strong>một từ khoá tiếp thị</strong>: nghe "hệ này có <span lang="en">ACID</span>" gần như không cho bạn biết điều gì cụ thể<span class="cite"><a href="#ref-1">1</a></span>. Chính vì thế ông tự viết một bộ kiểm thử — <span lang="en">Hermitage</span> — để đo xem mỗi hệ <em>thật sự</em> làm gì<span class="cite"><a href="#ref-5">5</a></span><span class="cite"><a href="#ref-6">6</a></span>.</p>
+      <p class="easy-only">Bạn sẽ hay nghe người ta khoe "cơ sở dữ liệu của tôi có <span lang="en">ACID</span>". Bốn chữ đó nghe rất oách. Nhưng mỗi hãng lại làm một kiểu, nên nghe xong bạn vẫn chưa biết nó <strong>thật sự</strong> bảo vệ bạn khỏi cái gì. Nhớ nhé: nghe cái nhãn xong thì phải hỏi tiếp một câu — "cụ thể là chặn được lỗi nào?".</p>
+      <p class="en-only" lang="en">Kleppmann opens by taking apart the industry's most famous acronym. ACID was coined by Theo Härder and Andreas Reuter in 1983 to give a precise term for a database system's fault tolerance<span class="cite"><a href="#ref-7">7</a></span>. But how far it is actually implemented varies so widely between products that he concludes ACID has largely become <strong>a marketing term</strong>: hearing "this system is ACID" tells you almost nothing concrete<span class="cite"><a href="#ref-1">1</a></span>. Which is why he wrote a test suite of his own — Hermitage — to measure what each system <em>really</em> does<span class="cite"><a href="#ref-5">5</a></span><span class="cite"><a href="#ref-6">6</a></span>.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">ACID · atomicity, consistency, isolation, durability</div>
+        <p class="definition standard-copy">Bốn chữ không cùng hạng với nhau. <strong>Atomicity</strong> là "huỷ được": hỏng giữa chừng thì mọi ghi bị vứt bỏ. <strong>Isolation</strong> là "cứ coi như mình chạy một mình". <strong>Durability</strong> là "đã <span lang="en">commit</span> thì không mất". Còn <strong>Consistency</strong> — tính đúng đắn của dữ liệu — là thứ <em>ứng dụng</em> định nghĩa; cơ sở dữ liệu chỉ ép giúp được một mảnh rất hẹp<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <p class="definition easy-only">Bốn chữ nghe như một bộ, nhưng ba chữ là việc của máy, còn một chữ là việc của người viết ứng dụng. Máy lo: hỏng thì huỷ, không giẫm chân nhau, ghi rồi thì còn. Người lo: thế nào mới gọi là dữ liệu "đúng". Nhớ nhé: máy không biết tài khoản của bạn không được âm — bạn phải nói cho nó.</p>
+        <p class="definition en-only" lang="en">The four letters are not of the same rank. <strong>Atomicity</strong> means abortable: if it fails midway, all its writes are thrown away. <strong>Isolation</strong> means "pretend you are running alone". <strong>Durability</strong> means "once committed, it stays". <strong>Consistency</strong> — the correctness of the data — is defined by the <em>application</em>; the database can only enforce a very narrow slice of it<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <p class="deep-only">Kleppmann nhận xét thẳng rằng chữ <span lang="en">C</span> gần như được "nhét vào" cho từ viết tắt đọc xuôi tai, chứ không cùng loại với ba chữ kia<span class="cite"><a href="#ref-1">1</a></span>. Đối trọng thường được nêu — <span lang="en">BASE</span> (<span lang="en">Basically Available, Soft state, Eventual consistency</span>) — theo ông còn mơ hồ hơn nữa: định nghĩa rõ ràng duy nhất của nó là "không phải <span lang="en">ACID</span>". Bài học thực dụng: khi ai đó nói hệ của họ "có <span lang="en">ACID</span>", câu hỏi cần đặt không phải là đúng hay sai, mà là <em>mức cô lập mặc định là gì</em> và <em>nó đã được kiểm chứng ra sao</em> — đúng tinh thần bộ kiểm thử <span lang="en">Hermitage</span><span class="cite"><a href="#ref-5">5</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Bốn chữ ACID và nghĩa thực của chúng">
+        <div class="equation-row">
+          <b lang="en">Atomicity</b>
+          <span>Không phải "đồng thời" mà là "huỷ được": lỗi giữa chừng thì vứt sạch mọi ghi.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Consistency</b>
+          <span>Bất biến của ứng dụng. CSDL chỉ ép được ràng buộc hẹp: <span lang="en">unique</span>, khoá ngoại.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Isolation</b>
+          <span>Như thể các giao dịch chạy nối đuôi. Thực tế hầu hết chỉ chạy ở mức yếu hơn.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Durability</b>
+          <span>Commit rồi thì còn — nhưng không có durability tuyệt đối, chỉ có giảm rủi ro.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Bốn chữ ACID nói đơn giản">
+        <div class="equation-row">
+          <b lang="en">Atomicity</b>
+          <span>Làm trọn gói, hoặc không làm gì.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Consistency</b>
+          <span>"Thế nào là đúng" do bạn quy định, không phải máy.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Isolation</b>
+          <span>Nhiều người cùng làm mà không giẫm chân nhau.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Durability</b>
+          <span>Ghi xong là còn đó, kể cả khi mất điện.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="The four ACID letters and what they really mean">
+        <div class="equation-row">
+          <b>Atomicity</b>
+          <span>Not "concurrent" but "abortable": fail midway and every write is discarded.</span>
+        </div>
+        <div class="equation-row">
+          <b>Consistency</b>
+          <span>The application's invariant. The database enforces only narrow constraints: unique, foreign keys.</span>
+        </div>
+        <div class="equation-row">
+          <b>Isolation</b>
+          <span>As if transactions ran one after another. In practice most run weaker than that.</span>
+        </div>
+        <div class="equation-row">
+          <b>Durability</b>
+          <span>Committed means it stays — but there is no absolute durability, only reduced risk.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Atomicity · not concurrency, but abortability</div>
+          <h3><span class="vi-only">Nguyên tử nghĩa là "huỷ được"</span><span class="en-only" lang="en">Atomic really means abortable</span></h3>
+          <p class="standard-copy">Chữ <span lang="en">atomic</span> trong <span lang="en">ACID</span> không cùng nghĩa với <span lang="en">atomic</span> trong lập trình đồng thời (nơi nó nói về việc luồng khác không thấy được trạng thái giữa chừng). Trong giao dịch, nó nói về <strong>cái gì xảy ra khi có lỗi</strong>: nếu client mất kết nối, đĩa hết chỗ, hay ràng buộc bị vi phạm sau khi đã ghi vài dòng, thì mọi ghi của giao dịch bị vứt bỏ như chưa từng có. Kleppmann nói <span lang="en">abortability</span> mới là cái tên mô tả đúng<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">"Nguyên tử" nghe như vật lý, nhưng ý rất đơn giản: <strong>không có nửa vời</strong>. Giống như viết thư — hoặc bạn gửi cả bức, hoặc bạn vò nó đi và không ai đọc được dòng nào. Nhớ nhé: làm hỏng giữa chừng thì xoá sạch, chứ đừng để lại một nửa.</p>
+          <p class="en-only" lang="en">The word <em>atomic</em> in ACID does not mean what <em>atomic</em> means in concurrent programming (where it is about other threads not seeing an intermediate state). In transactions it is about <strong>what happens when something goes wrong</strong>: if the client loses its connection, the disk fills up, or a constraint is violated after a few rows were written, every write of that transaction is thrown away as if it never happened. Kleppmann says <em>abortability</em> would be the more accurate name<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao quan trọng</strong>Có <span lang="en">abort</span> thì ứng dụng mới dám thử lại an toàn: thất bại không để lại dấu vết nửa vời cần đi dọn bằng tay.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Có nút "huỷ" đáng tin thì mới dám làm lại từ đầu mà không sợ dữ liệu lộn xộn.</div>
+            <div class="en-only" lang="en"><strong>Why it matters</strong>Abort is what makes retrying safe: a failure leaves no half-finished mess to clean up by hand.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cơ chế</h4>
+              <p>Thử lại một giao dịch bị <span lang="en">abort</span> là cách xử lỗi đơn giản nhưng không hoàn hảo: nếu mạng đứt <em>sau</em> khi server đã commit mà trước khi client nhận xác nhận, thử lại sẽ làm hai lần. Kleppmann nêu rõ giới hạn này — cần cơ chế khử trùng lặp ở tầng ứng dụng, và tránh thử lại vô hạn khi nguyên nhân là quá tải.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ranh giới hay bị trộn</h4>
+              <p>Trong lập trình đa luồng, "atomic" nói về khả năng quan sát trạng thái giữa chừng — đó chính là việc của <span lang="en">isolation</span> trong <span lang="en">ACID</span>, không phải của <span lang="en">atomicity</span>. Trộn hai nghĩa này là nguồn hiểu lầm kinh điển khi đọc tài liệu CSDL.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Consistency · the application's word, not the database's</div>
+          <h3><span class="vi-only">Chữ C không thuộc về cơ sở dữ liệu</span><span class="en-only" lang="en">The C does not belong to the database</span></h3>
+          <p class="standard-copy">Đây là điểm sắc nhất của phần đầu chương. "Nhất quán" ở đây nghĩa là <strong>dữ liệu thoả những bất biến mà ứng dụng coi là đúng</strong> — ví dụ tổng tiền hai tài khoản sau khi chuyển khoản phải không đổi. Cơ sở dữ liệu <em>không biết</em> bất biến ấy. Nó chỉ giúp được một mảnh hẹp: ràng buộc <span lang="en">unique</span>, khoá ngoại, <span lang="en">check</span>. Phần còn lại là trách nhiệm của ứng dụng — và vì thế Kleppmann nói chữ <span lang="en">C</span> không thật sự thuộc về <span lang="en">ACID</span><span class="cite"><a href="#ref-1">1</a></span>. Tài liệu PostgreSQL cũng nói đúng điều đó theo cách của nó: ở mức <span lang="en">repeatable read</span>, "các nỗ lực ép quy tắc nghiệp vụ bằng giao dịch nhiều khả năng sẽ không chạy đúng nếu không dùng khoá tường minh một cách cẩn thận"<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="easy-only">Máy tính không biết "đúng" nghĩa là gì trong câu chuyện của bạn. Nó không biết tài khoản không được âm tiền, hay một lớp học không được quá 30 bạn. Bạn phải viết luật đó ra, còn máy chỉ giữ vài luật đơn giản như "không được trùng tên". Nhớ nhé: luật của bài toán là do bạn đặt, máy chỉ giúp canh vài luật nhỏ.</p>
+          <p class="en-only" lang="en">This is the sharpest point in the first half of the chapter. "Consistency" here means <strong>the data satisfies invariants the application considers true</strong> — for example that the total across two accounts is unchanged after a transfer. The database <em>does not know</em> that invariant. It only helps with a narrow slice: unique constraints, foreign keys, checks. The rest is the application's job — which is why Kleppmann says the C does not really belong in ACID<span class="cite"><a href="#ref-1">1</a></span>. PostgreSQL's manual says the same thing in its own words: at repeatable read, "attempts to enforce business rules by transactions … are not likely to work correctly without careful use of explicit locks"<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thực tế</strong>Đừng kỳ vọng chọn đúng mức cô lập là dữ liệu tự "đúng". Cô lập chỉ chặn race condition; tính đúng đắn vẫn phải do bạn phát biểu và ép.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Chọn chế độ an toàn của máy không thay được việc bạn phải nói rõ "thế nào là đúng".</div>
+            <div class="en-only" lang="en"><strong>The practical consequence</strong>Don't expect the right isolation level to make data "correct" by itself. Isolation only blocks race conditions; correctness is still yours to state and enforce.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Một chữ, bốn nghĩa</h4>
+              <p>Kleppmann liệt kê mấy nghĩa khác hẳn nhau của từ "consistency" trong ngành: <span lang="en">replica consistency</span> và <span lang="en">eventual consistency</span> ở Chương 5, <span lang="en">consistent hashing</span> ở Chương 6, <span lang="en">linearizability</span> ở Chương 9, và chữ <span lang="en">C</span> của <span lang="en">ACID</span> ở đây. Chúng không nói về cùng một thứ.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao vẫn hữu ích</h4>
+              <p>Dù chữ <span lang="en">C</span> lạc chỗ, ý đứng sau nó thì không: <span lang="en">atomicity</span> và <span lang="en">isolation</span> tồn tại chính là để giúp ứng dụng <em>giữ</em> được bất biến của nó. Nói cách khác, ba chữ kia là công cụ; chữ <span lang="en">C</span> là mục tiêu mà bạn đặt ra.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Isolation &amp; durability · promises with fine print</div>
+          <h3><span class="vi-only">Hai lời hứa kèm điều kiện</span><span class="en-only" lang="en">Two promises with conditions attached</span></h3>
+          <p class="standard-copy"><strong>Isolation</strong> hứa rằng các giao dịch chạy đồng thời được cách ly khỏi nhau — như thể chúng nối đuôi. Nhưng đó là định nghĩa của mức <span lang="en">serializable</span>, mà hầu hết hệ không chạy ở mức ấy vì cái giá hiệu năng. <strong>Durability</strong> hứa dữ liệu đã <span lang="en">commit</span> thì không mất; trên một nút đơn nó nghĩa là ghi xuống đĩa kèm <span lang="en">write-ahead log</span>, trong hệ nhân bản là sao chép sang các nút khác. Kleppmann nhấn rằng <strong>không có <span lang="en">durability</span> tuyệt đối</strong>: đĩa hỏng, firmware có bug, toàn bộ nút mất điện cùng lúc, bản sao lỗi thời — mọi kỹ thuật chỉ <em>giảm</em> rủi ro<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Hai lời hứa này nghe chắc nịch nhưng đều có chữ nhỏ ở dưới. "Không giẫm chân nhau" thì phần lớn hệ chỉ làm được một phần, vì làm đủ thì chậm. "Ghi rồi là còn mãi" thì đúng trong hầu hết trường hợp, nhưng ổ cứng vẫn có thể hỏng. Nhớ nhé: an toàn là chuyện nhiều lớp, không có lớp nào chắc 100%.</p>
+          <p class="en-only" lang="en"><strong>Isolation</strong> promises that concurrent transactions are shielded from each other — as if they ran one after another. But that is the definition of <em>serializable</em>, and most systems do not run there because of the performance cost. <strong>Durability</strong> promises committed data will not be lost; on a single node that means writing to disk with a write-ahead log, in a replicated system copying to other nodes. Kleppmann stresses there is <strong>no absolute durability</strong>: disks fail, firmware has bugs, whole nodes lose power at once, replicas lag — every technique only <em>reduces</em> the risk<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cách đọc đúng</strong>Cả hai đều là mệnh đề có điều kiện. Câu hỏi đúng không phải "có isolation không" mà "ở mức nào", không phải "có bền không" mà "bền trước những sự cố nào".</div>
+            <div class="easy-only"><strong>Ý chính</strong>Hỏi "an toàn tới đâu", đừng hỏi "có an toàn không".</div>
+            <div class="en-only" lang="en"><strong>How to read it</strong>Both are conditional claims. The right question is not "is there isolation" but "at what level", not "is it durable" but "durable against which failures".</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao isolation bị hạ cấp</h4>
+              <p>Cô lập tuần tự đúng nghĩa hiếm khi là mặc định. Theo bảng kiểm thử <span lang="en">Hermitage</span>, PostgreSQL, Oracle và SQL Server đều mặc định ở <span lang="en">read committed</span>, còn MySQL/InnoDB mặc định ở cái nó gọi là <span lang="en">repeatable read</span><span class="cite"><a href="#ref-5">5</a></span><span class="cite"><a href="#ref-9">9</a></span><span class="cite"><a href="#ref-10">10</a></span>. Nghĩa là: nếu bạn không chủ động đổi, bạn đang chạy ở mức yếu.</p>
+            </div>
+            <div class="info-block">
+              <h4>Durability nhiều lớp</h4>
+              <p>Không kỹ thuật nào đủ một mình: ghi đĩa chống mất điện tiến trình nhưng không chống đĩa hỏng; nhân bản chống đĩa hỏng nhưng không chống bug lan ra mọi bản sao; bản sao lưu chống bug nhưng có độ trễ. Thực tế là xếp chồng nhiều lớp và chấp nhận xác suất còn lại.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Single-object vs multi-object operations</div>
+          <h3><span class="vi-only">Một đối tượng hay nhiều đối tượng?</span><span class="en-only" lang="en">One object, or many?</span></h3>
+          <p class="standard-copy">Gần như mọi kho dữ liệu đều đảm bảo nguyên tử và cô lập <strong>ở mức một đối tượng</strong>: ghi một tài liệu <span lang="en">JSON</span> lớn không để lại nửa tài liệu, một phép tăng bộ đếm hay <span lang="en">compare-and-set</span> trên một khoá là không thể chia nhỏ. Nhưng đó <em>không phải</em> giao dịch theo nghĩa thông thường. Giao dịch <strong>đa đối tượng</strong> mới là cái nhiều hệ phi quan hệ bỏ đi — và ta cần nó khi: có khoá ngoại giữa các bảng, có dữ liệu phi chuẩn hoá bị nhân bản ở nhiều chỗ, hoặc có chỉ mục thứ cấp phải cập nhật cùng nhịp với hàng dữ liệu<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Sửa <strong>một</strong> ô dữ liệu thì hầu như hệ nào cũng làm gọn ghẽ. Khó là khi phải sửa <strong>nhiều</strong> ô cùng lúc mà không được lệch nhau: trừ tiền ở ô này thì phải cộng ở ô kia. Nhớ nhé: một ô thì dễ, nhiều ô mới cần "giao dịch" thật.</p>
+          <p class="en-only" lang="en">Almost every datastore guarantees atomicity and isolation <strong>at the level of a single object</strong>: writing a large JSON document never leaves half of it, and an increment or compare-and-set on one key is indivisible. But that is <em>not</em> a transaction in the usual sense. It is <strong>multi-object</strong> transactions that many non-relational systems dropped — and you need them when there are foreign keys between tables, denormalised data duplicated in several places, or secondary indexes that must be updated in step with the row<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Câu hỏi kiểm tra</strong>Khi một hệ quảng cáo "thao tác nguyên tử", hãy hỏi: nguyên tử trên <em>một</em> khoá, hay trên nhiều khoá? Khoảng cách giữa hai câu trả lời là toàn bộ chương này.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Hỏi cho rõ: nguyên tử một ô, hay nhiều ô một lúc?</div>
+            <div class="en-only" lang="en"><strong>The test question</strong>When a system advertises "atomic operations", ask: atomic on <em>one</em> key, or across several? The gap between those two answers is this whole chapter.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao nhiều hệ bỏ giao dịch</h4>
+              <p>Kleppmann chỉ ra rằng làn sóng NoSQL cuối những năm 2000 bỏ giao dịch đa đối tượng vì nó khó hiện thực trên kiến trúc phân mảnh và có chi phí hiệu năng — chứ không phải vì giao dịch là ý tưởng sai. Ông dành cả chương để chống lại cách đọc "giao dịch và co giãn là hai thứ loại trừ nhau".</p>
+            </div>
+            <div class="info-block">
+              <h4>Không phải mọi thứ cần giao dịch</h4>
+              <p>Ông cũng nói rõ chiều ngược lại: nhiều ứng dụng thật sự sống tốt không cần giao dịch đa đối tượng, đặc biệt khi mô hình dữ liệu gom mọi thứ cần sửa cùng lúc vào một tài liệu. Lựa chọn ở đây là đánh đổi, không phải giáo điều.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Nối sang phần sau</strong>
+      <strong class="easy-only">Tiếp theo là gì</strong>
+      <strong class="en-only" lang="en">Where this leads</strong>
+      <div class="standard-copy">Nếu <span lang="en">isolation</span> là lời hứa mơ hồ nhất trong bốn chữ, thì phần lớn phần còn lại của chương là việc bóc nó ra thành từng nấc cụ thể. Mỗi nấc chặn được một số race condition và để lọt số còn lại — và tên gọi của từng nấc lại không thống nhất giữa các sản phẩm. Đó là chỗ chúng ta đi tiếp.</div>
+      <div class="easy-only">Chữ khó nhất trong bốn chữ là "không giẫm chân nhau". Phần sau sẽ tách nó thành từng nấc: nấc này chặn được lỗi nào, nấc kia để lọt lỗi nào.</div>
+      <div class="en-only" lang="en">If isolation is the vaguest of the four promises, most of the rest of the chapter is spent unpacking it into concrete rungs. Each rung blocks some race conditions and lets others through — and the names of those rungs are not consistent between products. That is where we go next.</div>
+    </aside>
+  </section>
+
+  <section class="section" id="weak-isolation" aria-labelledby="weak-isolation-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · Mức cô lập yếu</span><span class="en-only" lang="en">Axis 2 · Weak isolation levels</span></div>
+        <h2 id="weak-isolation-title"><span class="vi-only">Tên gọi không phải là bảo đảm</span><span class="en-only" lang="en">The label is not the guarantee</span></h2>
+      </div>
+      <p class="standard-copy">Cô lập tuần tự là bảo đảm sạch nhất, nhưng đắt — nên hầu hết cơ sở dữ liệu mặc định ở một mức yếu hơn, chặn <em>một số</em> race condition và để lọt số còn lại<span class="cite"><a href="#ref-1">1</a></span>. Rắc rối là ở tên gọi. Chuẩn <span lang="en">ANSI SQL</span> định nghĩa các mức cô lập qua ba "hiện tượng" — <span lang="en">dirty read</span>, <span lang="en">non-repeatable read</span>, <span lang="en">phantom</span><span class="cite"><a href="#ref-9">9</a></span> — và Berenson cùng cộng sự đã chỉ ra ngay từ 1995 rằng những định nghĩa đó <strong>không đủ để đặc tả nhiều mức cô lập phổ biến</strong>, kể cả cách hiện thực bằng khoá của chính chúng<span class="cite"><a href="#ref-8">8</a></span>. Kết quả là mỗi sản phẩm dùng cùng một cái tên cho những bảo đảm khác nhau.</p>
+      <p class="easy-only">Muốn thật an toàn thì phải xếp hàng từng người một — nhưng như thế chậm. Nên cơ sở dữ liệu cho bạn chọn mấy nấc "nhanh hơn nhưng hở hơn". Rắc rối là mỗi hãng gọi các nấc ấy bằng những cái tên na ná nhau mà nghĩa lại khác. Nhớ nhé: cùng một cái tên chưa chắc là cùng một lời hứa.</p>
+      <p class="en-only" lang="en">Serializable isolation is the cleanest guarantee, but it is expensive — so most databases default to something weaker that blocks <em>some</em> race conditions and lets the rest through<span class="cite"><a href="#ref-1">1</a></span>. The trouble is the naming. The ANSI SQL standard defines isolation levels through three "phenomena" — dirty read, non-repeatable read, phantom<span class="cite"><a href="#ref-9">9</a></span> — and Berenson et al. showed back in 1995 that those definitions <strong>fail to characterise several popular isolation levels</strong>, including their own standard locking implementations<span class="cite"><a href="#ref-8">8</a></span>. The result: each product uses the same name for a different guarantee.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Weak isolation · read committed, snapshot isolation, lost updates</div>
+        <p class="definition standard-copy">Mức cô lập là một <strong>danh sách những race condition được chặn</strong>, không phải một thang điểm an toàn. <span lang="en">Read committed</span> chặn <span lang="en">dirty read</span> và <span lang="en">dirty write</span>. <span lang="en">Snapshot isolation</span> chặn thêm <span lang="en">read skew</span>. Không mức nào trong hai mức đó chặn <span lang="en">write skew</span>. Và tuỳ hệ, <span lang="en">lost update</span> có thể được chặn hoặc không — ngay cả khi cái tên trên nhãn là giống nhau<span class="cite"><a href="#ref-5">5</a></span>.</p>
+        <p class="definition easy-only">Hãy hình dung mỗi mức cô lập là một cái rổ có lỗ. Rổ thưa thì nước chảy nhanh nhưng lọt nhiều; rổ dày thì chậm mà giữ được nhiều. Điều bạn cần biết là <strong>lỗ nào còn hở</strong>, chứ không phải cái tên in trên rổ. Nhớ nhé: hỏi "còn lọt lỗi gì" chứ đừng hỏi "có an toàn không".</p>
+        <p class="definition en-only" lang="en">An isolation level is a <strong>list of race conditions it blocks</strong>, not a safety score. Read committed blocks dirty reads and dirty writes. Snapshot isolation additionally blocks read skew. Neither blocks write skew. And depending on the system, lost updates may or may not be blocked — even when the name on the label is identical<span class="cite"><a href="#ref-5">5</a></span>.</p>
+        <p class="deep-only">Vì sao chuẩn lại mơ hồ đến thế? Berenson và cộng sự giải thích rằng cách định nghĩa qua hiện tượng của <span lang="en">ANSI SQL-92</span> để lọt nhiều cách diễn giải, và họ phải đưa ra định nghĩa chặt hơn cùng những hiện tượng mới — trong đó <span lang="en">snapshot isolation</span> được định nghĩa chính thức, dù chuẩn <span lang="en">SQL</span> không hề có nấc nào mang tên ấy<span class="cite"><a href="#ref-8">8</a></span>. Tài liệu PostgreSQL nói thẳng khoảng cách này: <span lang="en">repeatable read</span> của họ không cho phép <span lang="en">phantom read</span> — mạnh hơn mức chuẩn đòi hỏi — và điều đó vẫn hợp chuẩn, vì chuẩn chỉ quy định mức bảo vệ <em>tối thiểu</em><span class="cite"><a href="#ref-9">9</a></span>. Nói cách khác: chuẩn là sàn, không phải hợp đồng.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nấc cô lập yếu và cái chúng chặn được">
+        <div class="equation-row">
+          <b lang="en">Read committed</b>
+          <span>Không đọc bẩn, không ghi bẩn. Mặc định của PostgreSQL, Oracle và SQL Server.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Snapshot isolation</b>
+          <span>Mỗi giao dịch đọc một ảnh chụp nhất quán. PostgreSQL gọi "repeatable read"; Oracle gọi "serializable".</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Lost update</b>
+          <span>Read-modify-write bị đè mất. Cần thao tác nguyên tử, khoá tường minh, CAS, hoặc phát hiện tự động.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba nấc cô lập yếu nói đơn giản">
+        <div class="equation-row">
+          <b lang="en">Read committed</b>
+          <span>Không đọc phải dữ liệu người khác đang viết dở.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Snapshot isolation</b>
+          <span>Suốt giao dịch, bạn nhìn một "bức ảnh" duy nhất không đổi.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Lost update</b>
+          <span>Hai người cùng sửa một ô, một người bị mất công.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three weak isolation rungs and what they block">
+        <div class="equation-row">
+          <b>Read committed</b>
+          <span>No dirty reads, no dirty writes. The default in PostgreSQL, Oracle and SQL Server.</span>
+        </div>
+        <div class="equation-row">
+          <b>Snapshot isolation</b>
+          <span>Each transaction reads a consistent snapshot. PostgreSQL calls it "repeatable read"; Oracle calls it "serializable".</span>
+        </div>
+        <div class="equation-row">
+          <b>Lost update</b>
+          <span>A read-modify-write gets overwritten. Needs atomic ops, explicit locks, CAS, or automatic detection.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Read committed · no dirty reads, no dirty writes</div>
+          <h3><span class="vi-only">Nấc thấp nhất còn dùng được</span><span class="en-only" lang="en">The lowest usable rung</span></h3>
+          <p class="standard-copy"><span lang="en">Read committed</span> hứa đúng hai điều: bạn chỉ đọc dữ liệu đã <span lang="en">commit</span> (không <span lang="en">dirty read</span>), và bạn chỉ ghi đè dữ liệu đã <span lang="en">commit</span> (không <span lang="en">dirty write</span>). Cách hiện thực thông thường: ghi thì giữ khoá hàng tới khi kết thúc giao dịch, còn đọc thì <em>không</em> dùng khoá — cơ sở dữ liệu giữ cả giá trị cũ lẫn giá trị mới và trả giá trị cũ cho tới khi giao dịch ghi <span lang="en">commit</span><span class="cite"><a href="#ref-1">1</a></span>. PostgreSQL mô tả chính xác điều này: một câu <span lang="en">SELECT</span> chỉ thấy dữ liệu đã commit trước khi <em>câu lệnh đó</em> bắt đầu<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="easy-only">Nấc này chặn hai điều đơn giản: bạn không đọc được bài viết dở của người khác, và bạn không đè lên bài viết dở của người khác. Thế thôi. Nó chưa hứa gì về chuyện bạn đọc hai lần ra hai kết quả khác nhau. Nhớ nhé: nấc thấp nhất chỉ chặn chuyện "viết dở", chưa chặn chuyện "đổi giữa chừng".</p>
+          <p class="en-only" lang="en">Read committed promises exactly two things: you only read committed data (no dirty reads), and you only overwrite committed data (no dirty writes). The usual implementation: writes hold a row lock until the transaction ends, while reads take <em>no</em> lock — the database keeps both the old and the new value and serves the old one until the writing transaction commits<span class="cite"><a href="#ref-1">1</a></span>. PostgreSQL describes precisely this: a SELECT sees only data committed before <em>that statement</em> began<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao không khoá khi đọc</strong>Nếu đọc cũng phải chờ khoá, một giao dịch ghi dài sẽ chặn mọi người đọc — trải nghiệm rất tệ. Nguyên tắc "người đọc không chặn người ghi, người ghi không chặn người đọc" là lý do nấc này nhanh.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Người đọc không phải xếp hàng chờ người viết — nhờ vậy mới nhanh.</div>
+            <div class="en-only" lang="en"><strong>Why reads take no lock</strong>If reads had to wait for locks, one long write would block every reader — a terrible experience. The principle "readers never block writers and writers never block readers" is why this rung is fast.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Dirty write</h4>
+              <p>Ít được nói tới hơn <span lang="en">dirty read</span> nhưng tai hại không kém: nếu giao dịch B ghi đè lên giá trị mà giao dịch A đã ghi nhưng chưa commit, kết quả có thể là một sự pha trộn không tương ứng với bất kỳ thứ tự chạy nào. Khoá hàng cho tới khi kết thúc giao dịch là cách chặn kinh điển.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cái nó không chặn</h4>
+              <p>PostgreSQL nêu rõ ở <span lang="en">read committed</span>, hai câu <span lang="en">SELECT</span> liên tiếp trong <em>cùng</em> một giao dịch có thể thấy dữ liệu khác nhau<span class="cite"><a href="#ref-9">9</a></span>. Đó chính là cửa ngõ dẫn tới hiện tượng tiếp theo — và là lý do <span lang="en">snapshot isolation</span> ra đời.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Read skew · the bank balance seen mid-transfer</div>
+          <h3><span class="vi-only">Nhìn hai lần, thấy hai thế giới</span><span class="en-only" lang="en">Look twice, see two worlds</span></h3>
+          <p class="standard-copy">Kleppmann minh hoạ bằng một ví dụ ngân hàng: Alice có tiền chia đều trong hai tài khoản, và đúng lúc một giao dịch chuyển tiền từ tài khoản này sang tài khoản kia đang chạy, cô mở màn hình xem số dư. Truy vấn thứ nhất chạy <em>trước</em> khi khoản tiền được cộng vào, truy vấn thứ hai chạy <em>sau</em> khi nó đã bị trừ đi — tổng hiện ra bị thiếu đúng khoản đang chuyển, như thể tiền bốc hơi<span class="cite"><a href="#ref-1">1</a></span>. Đây là <span lang="en">read skew</span> (chuẩn gọi là <span lang="en">non-repeatable read</span>): không có gì bị mất thật, nhưng <em>một cái nhìn</em> đã bắt được trạng thái giữa chừng.</p>
+          <p class="easy-only">Tưởng tượng bạn đếm kẹo trong hai cái hộp, đúng lúc có người đang bê kẹo từ hộp này sang hộp kia. Bạn đếm hộp thứ nhất trước khi kẹo tới, đếm hộp thứ hai sau khi kẹo đi — thế là bạn tưởng kẹo bị mất. Thật ra chẳng mất gì cả, chỉ là bạn nhìn hai thời điểm khác nhau. Nhớ nhé: muốn đếm đúng thì phải chụp một tấm ảnh, đừng nhìn từng chỗ một.</p>
+          <p class="en-only" lang="en">Kleppmann illustrates with a banking example: Alice's money is split evenly across two accounts, and just as a transfer between them is running, she opens her balance screen. The first query runs <em>before</em> the money lands, the second <em>after</em> it has been deducted — the total comes up short by exactly the amount in flight, as if it had evaporated<span class="cite"><a href="#ref-1">1</a></span>. This is read skew (the standard calls it a non-repeatable read): nothing is actually lost, but <em>one view</em> caught an intermediate state.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Khi nó không thể chấp nhận</strong>Với màn hình số dư, chờ vài giây rồi tải lại là xong. Nhưng sao lưu và truy vấn phân tích chạy hàng giờ trên cả cơ sở dữ liệu thì không có "tải lại" — một bản sao lưu bị lệch sẽ biến sự cố tạm thời thành hỏng hóc vĩnh viễn.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Nhìn nhầm một giây thì tải lại là xong; nhưng sao lưu nhầm thì cái sai được lưu lại mãi.</div>
+            <div class="en-only" lang="en"><strong>When it's unacceptable</strong>For a balance screen, waiting and reloading fixes it. But backups and analytic queries run for hours across the whole database, and there is no "reload" — a skewed backup turns a momentary glitch into permanent damage.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao read committed không đủ</h4>
+              <p>Ở <span lang="en">read committed</span>, mỗi <em>câu lệnh</em> lấy một ảnh chụp mới<span class="cite"><a href="#ref-9">9</a></span>. Một giao dịch gồm nhiều câu lệnh vì thế nhìn qua nhiều thời điểm khác nhau. Muốn cả giao dịch nhìn một thời điểm duy nhất, phải nâng lên nấc trên.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ba ca kinh điển cần ảnh chụp</h4>
+              <p>Kleppmann liệt kê những loại tải công việc không chịu được <span lang="en">read skew</span>: sao lưu, truy vấn phân tích và kiểm tra tính toàn vẹn. Điểm chung: chúng đọc rất nhiều dữ liệu trong một khoảng thời gian dài, nên xác suất bắt phải một trạng thái giữa chừng gần như chắc chắn.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Snapshot isolation &amp; MVCC · one consistent picture</div>
+          <h3><span class="vi-only">Ảnh chụp nhất quán và MVCC</span><span class="en-only" lang="en">The consistent snapshot, and MVCC</span></h3>
+          <p class="standard-copy">Giải pháp là <span lang="en">snapshot isolation</span>: mỗi giao dịch đọc từ <strong>một ảnh chụp nhất quán</strong> của cơ sở dữ liệu tại thời điểm nó bắt đầu, bất kể dữ liệu thay đổi thế nào sau đó. Hiện thực phổ biến là <span lang="en">multi-version concurrency control</span> (MVCC): CSDL giữ nhiều phiên bản đã commit của mỗi đối tượng, và mỗi giao dịch chỉ nhìn các phiên bản phù hợp với ảnh chụp của mình<span class="cite"><a href="#ref-1">1</a></span>. Tài liệu PostgreSQL nói thẳng: mức <span lang="en">Repeatable Read</span> của họ <em>"được hiện thực bằng một kỹ thuật mà tài liệu học thuật và một số sản phẩm khác gọi là Snapshot Isolation"</em><span class="cite"><a href="#ref-9">9</a></span>. MySQL/InnoDB thì mặc định ở cái nó cũng gọi là <span lang="en">repeatable read</span>, nơi các lần đọc nhất quán trong cùng giao dịch đọc ảnh chụp do lần đọc <em>đầu tiên</em> thiết lập<span class="cite"><a href="#ref-10">10</a></span>.</p>
+          <p class="easy-only">Thay vì nhìn từng chỗ một, cơ sở dữ liệu <strong>chụp một tấm ảnh</strong> lúc bạn bắt đầu, rồi cho bạn xem tấm ảnh đó suốt từ đầu đến cuối. Người khác vẫn được sửa dữ liệu thật, nhưng ảnh của bạn không đổi. Cách làm là giữ lại nhiều bản cũ của mỗi món dữ liệu. Nhớ nhé: muốn đếm đúng thì chụp ảnh rồi hãy đếm.</p>
+          <p class="en-only" lang="en">The fix is snapshot isolation: each transaction reads from <strong>one consistent snapshot</strong> of the database as of the moment it began, whatever changes afterwards. The common implementation is multi-version concurrency control (MVCC): the database keeps several committed versions of each object, and each transaction sees only the versions belonging to its own snapshot<span class="cite"><a href="#ref-1">1</a></span>. The PostgreSQL manual says it outright: their Repeatable Read level <em>"is implemented using a technique known in academic database literature and in some other database products as Snapshot Isolation"</em><span class="cite"><a href="#ref-9">9</a></span>. MySQL/InnoDB defaults to what it also calls repeatable read, where consistent reads within a transaction read the snapshot established by the <em>first</em> read<span class="cite"><a href="#ref-10">10</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bẫy tên gọi</strong>Chuẩn SQL không có nấc nào tên là "snapshot isolation". Vì thế mỗi hãng nhét nó vào một cái tên sẵn có — và bạn phải tra tài liệu của <em>chính</em> hệ đó để biết mình đang ở đâu.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Cùng một kỹ thuật nhưng mỗi hãng gọi một tên khác nhau — phải đọc tài liệu của đúng hãng đó.</div>
+            <div class="en-only" lang="en"><strong>The naming trap</strong>The SQL standard has no level called "snapshot isolation". So each vendor files it under some existing name — and you must read <em>that</em> system's own docs to know where you stand.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cùng tên, khác bảo đảm</h4>
+              <p>Bộ kiểm thử <span lang="en">Hermitage</span> của Kleppmann chạy thẳng các kịch bản bất thường lên từng hệ và xếp loại: cái PostgreSQL gọi <span lang="en">"repeatable read"</span> đạt đúng <span lang="en">snapshot isolation</span>; cái MySQL/InnoDB gọi <span lang="en">"repeatable read"</span> chỉ đạt tới <span lang="en">monotonic atomic view</span> — yếu hơn một bậc<span class="cite"><a href="#ref-5">5</a></span>. Cùng một chuỗi ký tự trong câu <span lang="en">SET TRANSACTION</span>, hai lời hứa khác nhau.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cái giá của nhiều phiên bản</h4>
+              <p>MVCC phải dọn rác: những phiên bản cũ không còn giao dịch nào cần tới phải được thu hồi, nếu không bảng phình ra. Một giao dịch đọc mở quá lâu sẽ giữ cả một đoàn phiên bản cũ sống dai — đây là nguyên nhân kinh điển của hiện tượng phình bảng trong các hệ MVCC.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Preventing lost updates · four routes, unevenly supported</div>
+          <h3><span class="vi-only">Chống mất cập nhật: bốn con đường</span><span class="en-only" lang="en">Preventing lost updates: four routes</span></h3>
+          <p class="standard-copy"><span lang="en">Lost update</span> xảy ra với chu trình <strong>đọc – sửa – ghi</strong>: hai giao dịch cùng đọc một giá trị, cùng tính ra giá trị mới, cùng ghi — và một trong hai bị đè mất. Kleppmann nêu bốn cách chống<span class="cite"><a href="#ref-1">1</a></span>: <strong>(1) thao tác nguyên tử</strong>, để CSDL tự làm cả chu trình trong một câu lệnh; <strong>(2) khoá tường minh</strong>, dùng <span lang="en">SELECT … FOR UPDATE</span> để giữ chỗ trước khi sửa<span class="cite"><a href="#ref-12">12</a></span>; <strong>(3) compare-and-set</strong>, chỉ ghi nếu giá trị chưa đổi kể từ lúc đọc; và <strong>(4) phát hiện tự động</strong>, để CSDL bắt lỗi rồi buộc thử lại.</p>
+          <p class="easy-only">Hai bạn cùng mở một tờ giấy ghi "5 cái kẹo", cùng viết đè thành "6", vậy là một bạn cộng thừa mà không ai biết. Cách chữa: hoặc bảo máy tự cộng giúp, hoặc giữ tờ giấy lại khi đang sửa, hoặc kiểm tra "nó còn là 5 không" trước khi viết. Nhớ nhé: đọc rồi mới ghi là chỗ dễ mất công nhất.</p>
+          <p class="en-only" lang="en">A lost update happens in a <strong>read-modify-write</strong> cycle: two transactions read the same value, both compute a new one, both write — and one of them is overwritten. Kleppmann lists four defences<span class="cite"><a href="#ref-1">1</a></span>: <strong>(1) atomic operations</strong>, letting the database do the whole cycle in one statement; <strong>(2) explicit locking</strong>, using SELECT … FOR UPDATE to claim the row before changing it<span class="cite"><a href="#ref-12">12</a></span>; <strong>(3) compare-and-set</strong>, writing only if the value has not changed since you read it; and <strong>(4) automatic detection</strong>, letting the database catch it and force a retry.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Chỗ dễ sai nhất</strong>Cách (4) chỉ dùng được nếu hệ của bạn <em>thật sự</em> phát hiện. Theo bảng Hermitage, ở PostgreSQL mức <span lang="en">repeatable read</span> và Oracle mức <span lang="en">serializable</span>, mất cập nhật bị chặn; ở MySQL/InnoDB mức <span lang="en">repeatable read</span> thì không<span class="cite"><a href="#ref-5">5</a></span>.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Đừng trông chờ máy tự bắt lỗi giúp — có hệ bắt, có hệ không.</div>
+            <div class="en-only" lang="en"><strong>The easiest mistake</strong>Route (4) only works if your system <em>actually</em> detects it. Per the Hermitage table, PostgreSQL's repeatable read and Oracle's serializable prevent lost updates; MySQL/InnoDB's repeatable read does not<span class="cite"><a href="#ref-5">5</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Thông điệp lỗi có thật</h4>
+              <p>PostgreSQL huỷ giao dịch <span lang="en">repeatable read</span> đụng độ bằng thông báo <span lang="en">"could not serialize access due to concurrent update"</span><span class="cite"><a href="#ref-9">9</a></span>; Oracle huỷ giao dịch <span lang="en">serializable</span> tương tự bằng <span lang="en">ORA-08177: can't serialize access for this transaction</span><span class="cite"><a href="#ref-11">11</a></span>. Ứng dụng phải bắt và thử lại — nếu không, cách (4) chỉ chuyển một lỗi âm thầm thành một lỗi ồn ào.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khi có nhân bản</h4>
+              <p>Trong hệ đa-leader hay không-leader, khoá và <span lang="en">compare-and-set</span> mất hiệu lực vì không còn một bản dữ liệu duy nhất để khoá. Ở đó, cách tiếp cận là cho phép ghi đồng thời rồi hợp nhất các phiên bản xung đột sau — chủ đề của Chương 5. Kleppmann lưu ý <span lang="en">last-write-wins</span> là cách hợp nhất dễ gây mất cập nhật nhất, dù nó là mặc định ở nhiều hệ.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Cùng một cái tên, ba lời hứa khác nhau</span><span class="en-only" lang="en">One name, three different promises</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">PostgreSQL · "repeatable read"</span><span class="en-only" lang="en">PostgreSQL · "repeatable read"</span></h4>
+          <p class="standard-copy">Là <span lang="en">snapshot isolation</span> đúng nghĩa, và mạnh hơn chuẩn đòi hỏi: nó <em>không</em> cho phép <span lang="en">phantom read</span>. Tài liệu còn ghi rõ trước phiên bản 9.1, yêu cầu <span lang="en">serializable</span> cho ra đúng hành vi này<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="en-only" lang="en">Genuine snapshot isolation, and stronger than the standard requires: it does <em>not</em> allow phantom reads. The manual also records that before version 9.1, requesting serializable gave exactly this behaviour<span class="cite"><a href="#ref-9">9</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">Oracle · "serializable"</span><span class="en-only" lang="en">Oracle · "serializable"</span></h4>
+          <p class="standard-copy">Cái nhãn nói <span lang="en">serializable</span>, nhưng các kịch bản kiểm thử của <span lang="en">Hermitage</span> xếp nó là <span lang="en">snapshot isolation</span><span class="cite"><a href="#ref-5">5</a></span>. Tài liệu Oracle cho thấy cơ chế: giao dịch đọc nhất quán ở mức giao dịch, và ghi vào hàng bị commit sau khi nó bắt đầu thì thất bại với <span lang="en">ORA-08177</span><span class="cite"><a href="#ref-11">11</a></span>.</p>
+          <p class="en-only" lang="en">The label says serializable, but Hermitage's test scenarios classify it as snapshot isolation<span class="cite"><a href="#ref-5">5</a></span>. Oracle's own documentation shows the mechanism: transaction-level read consistency, and a write to a row committed after the transaction began fails with ORA-08177<span class="cite"><a href="#ref-11">11</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">MySQL/InnoDB · "repeatable read"</span><span class="en-only" lang="en">MySQL/InnoDB · "repeatable read"</span></h4>
+          <p class="standard-copy">Cùng tên với PostgreSQL nhưng yếu hơn: tài liệu MySQL mô tả các lần đọc nhất quán dùng ảnh chụp của lần đọc đầu tiên<span class="cite"><a href="#ref-10">10</a></span>, còn <span lang="en">Hermitage</span> xếp nó là <span lang="en">monotonic atomic view</span> và ghi nhận mất cập nhật <em>không</em> được chặn<span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <p class="en-only" lang="en">Same name as PostgreSQL's, weaker guarantee: MySQL's docs describe consistent reads using the snapshot of the first read<span class="cite"><a href="#ref-10">10</a></span>, while Hermitage classifies it as monotonic atomic view and records that lost updates are <em>not</em> prevented<span class="cite"><a href="#ref-5">5</a></span>.</p>
+        </div>
+      </div>
+    </div>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Nối sang phần sau</strong>
+      <strong class="easy-only">Tiếp theo là gì</strong>
+      <strong class="en-only" lang="en">Where this leads</strong>
+      <div class="standard-copy">Ảnh chụp nhất quán giải quyết được <span lang="en">read skew</span>, và bốn con đường ở trên xử lý được <span lang="en">lost update</span>. Nhưng còn một họ race condition tinh vi hơn mà cả hai đều không chạm tới — vì nó không hề có hai giao dịch nào ghi vào cùng một chỗ. Đó là <span lang="en">write skew</span>.</div>
+      <div class="easy-only">Chụp ảnh xong vẫn còn một loại lỗi nữa, khó thấy hơn: hai người cùng nhìn một tình huống rồi mỗi người sửa <strong>một chỗ khác nhau</strong>, và cộng lại thì hỏng.</div>
+      <div class="en-only" lang="en">A consistent snapshot fixes read skew, and the four routes above handle lost updates. But there is a subtler family of race conditions neither touches — because no two transactions ever write to the same place. That is write skew.</div>
+    </aside>
+  </section>
+
+  <section class="section" id="write-skew" aria-labelledby="write-skew-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Write skew</span> &amp; <span lang="en">phantom</span></span><span class="en-only" lang="en">Axis 3 · Write skew &amp; phantoms</span></div>
+        <h2 id="write-skew-title"><span class="vi-only">Cái mà ảnh chụp không cứu được</span><span class="en-only" lang="en">What the snapshot cannot save you from</span></h2>
+      </div>
+      <p class="standard-copy">Đây là phần tinh vi nhất của chương, và cũng là chỗ dễ đọc ẩu nhất. <span lang="en">Write skew</span> không phải <span lang="en">dirty write</span>, cũng không phải <span lang="en">lost update</span>: trong cả hai loại kia, hai giao dịch cùng ghi vào <em>một</em> đối tượng. Ở <span lang="en">write skew</span>, hai giao dịch đọc cùng một tập đối tượng chồng lấn rồi mỗi bên cập nhật <strong>một đối tượng khác nhau</strong> — nên không có gì để khoá, và kết quả kết hợp phá vỡ một bất biến mà từng giao dịch riêng lẻ vẫn giữ được<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Hai bạn cùng nhìn vào một tình huống, ai cũng thấy "còn đủ người, mình rút lui được", rồi mỗi bạn tự rút. Từng quyết định đều hợp lý, nhưng cộng lại thì chẳng còn ai. Điều đáng sợ là hai bạn <strong>không sửa cùng một chỗ</strong> nên máy không thấy gì bất thường. Nhớ nhé: lỗi này không nằm ở chỗ ghi, mà nằm ở chỗ đọc.</p>
+      <p class="en-only" lang="en">This is the subtlest part of the chapter, and the easiest to read carelessly. Write skew is not a dirty write, nor a lost update: in both of those, two transactions write to <em>the same</em> object. In write skew, two transactions read the same overlapping set of objects and then each updates <strong>a different object</strong> — so there is nothing to lock, and the combined result breaks an invariant that each transaction alone would have preserved<span class="cite"><a href="#ref-1">1</a></span>.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Write skew · read together, write apart</div>
+        <p class="definition standard-copy">Công thức của <span lang="en">write skew</span>: mỗi giao dịch chạy một truy vấn <strong>tìm kiếm</strong> (<span lang="en">SELECT</span> theo một điều kiện), lấy kết quả ra để <strong>quyết định</strong>, rồi <strong>ghi</strong> một thay đổi làm đổi tiền đề của truy vấn kia. Vì hai bên ghi vào hai hàng khác nhau, ảnh chụp nhất quán không thấy có gì đụng độ — và cả hai cùng <span lang="en">commit</span><span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <p class="definition easy-only">Công thức là: <strong>nhìn – quyết định – làm</strong>. Hai người cùng nhìn một lúc, cùng quyết định dựa trên cái mình thấy, rồi mỗi người làm một việc khác nhau. Cái mình nhìn thấy đã bị việc của người kia làm cho sai — nhưng lúc nhìn thì chưa. Nhớ nhé: quyết định đúng dựa trên tin cũ vẫn ra kết quả sai.</p>
+        <p class="definition en-only" lang="en">The write-skew recipe: each transaction runs a <strong>search</strong> query (a SELECT over some condition), uses the result to <strong>decide</strong>, then <strong>writes</strong> a change that invalidates the other's premise. Because the two write to different rows, the consistent snapshot sees no conflict — and both commit<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <p class="deep-only">Đừng trộn <span lang="en">write skew</span> với <span lang="en">phantom</span>: chúng là hai khái niệm khác nhau nhưng hay đi cùng nhau. <strong>Phantom</strong> là <em>hiện tượng</em> — một lệnh ghi ở giao dịch này làm đổi kết quả của một truy vấn tìm kiếm ở giao dịch khác. <strong>Write skew</strong> là <em>bất thường</em> ở mức ứng dụng mà phantom thường gây ra. Snapshot isolation chặn được phantom trong các truy vấn <em>chỉ đọc</em>, nhưng không chặn được phantom trong chu trình đọc-rồi-ghi — đó chính là kẽ hở<span class="cite"><a href="#ref-1">1</a></span>. Chuẩn <span lang="en">ANSI SQL</span> có nhắc tên <span lang="en">phantom</span>, nhưng theo Berenson và cộng sự, cách định nghĩa bằng hiện tượng của chuẩn quá mơ hồ để phân biệt được những ca này<span class="cite"><a href="#ref-8">8</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba mảnh của write skew">
+        <div class="equation-row">
+          <b>Đọc chung, ghi riêng</b>
+          <span>Cả hai đọc cùng một điều kiện; mỗi bên ghi một hàng khác; bất biến vỡ mà không ai đụng ai.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Phantom</b>
+          <span>Một lệnh ghi làm đổi kết quả của truy vấn tìm kiếm ở giao dịch khác — kể cả hàng chưa tồn tại.</span>
+        </div>
+        <div class="equation-row">
+          <b>Materializing conflicts</b>
+          <span>Tạo sẵn hàng để "có cái mà khoá". Giải pháp cuối cùng, không phải lựa chọn đầu tiên.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba mảnh của write skew nói đơn giản">
+        <div class="equation-row">
+          <b>Đọc chung, ghi riêng</b>
+          <span>Hai người nhìn cùng một chỗ rồi sửa hai chỗ khác nhau.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">Phantom</b>
+          <span>Không thể giữ chỗ cho một thứ còn chưa tồn tại.</span>
+        </div>
+        <div class="equation-row">
+          <b>Materializing conflicts</b>
+          <span>Tạo sẵn chỗ trống để còn giữ được — cách chữa cháy.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="The three pieces of write skew">
+        <div class="equation-row">
+          <b>Read together, write apart</b>
+          <span>Both read the same condition; each writes a different row; the invariant breaks with no collision.</span>
+        </div>
+        <div class="equation-row">
+          <b>Phantom</b>
+          <span>A write changes the result of another transaction's search query — including rows that don't exist yet.</span>
+        </div>
+        <div class="equation-row">
+          <b>Materializing conflicts</b>
+          <span>Create rows just so there is something to lock. A last resort, not a first choice.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The on-call doctors</div>
+          <h3><span class="vi-only">Ca trực bác sĩ: cả hai cùng rút</span><span class="en-only" lang="en">On-call doctors: both step away</span></h3>
+          <p class="standard-copy">Ví dụ trung tâm của Kleppmann: bệnh viện quy định <strong>luôn phải có ít nhất một bác sĩ trực</strong>. Alice và Bob cùng đang trực và cùng thấy không khoẻ. Hai người cùng lúc bấm xin nghỉ. Giao dịch của Alice đếm số bác sĩ đang trực, thấy 2, kết luận "bỏ mình vẫn còn một người", rồi cập nhật hàng của <em>Alice</em>. Giao dịch của Bob làm y hệt trên ảnh chụp của nó, thấy 2, rồi cập nhật hàng của <em>Bob</em>. Hai hàng khác nhau, không đụng độ, cả hai commit — và ca trực trống trơn<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Bệnh viện có luật: <strong>lúc nào cũng phải còn ít nhất một bác sĩ trực</strong>. Alice và Bob đang trực, cả hai cùng mệt. Alice nhìn: "còn hai người, mình về được". Bob cũng nhìn đúng lúc đó: "còn hai người, mình về được". Thế là cả hai cùng về, chẳng còn ai. Nhớ nhé: hai người cùng nhìn một lúc rồi cùng rút lui thì luật bị phá.</p>
+          <p class="en-only" lang="en">Kleppmann's central example: a hospital requires that <strong>at least one doctor is always on call</strong>. Alice and Bob are both on call and both feel unwell. They click to request leave at the same moment. Alice's transaction counts the doctors on call, sees 2, concludes "one will remain without me", and updates <em>Alice's</em> row. Bob's transaction does the same on its own snapshot, sees 2, and updates <em>Bob's</em> row. Different rows, no collision, both commit — and the shift is empty<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao ảnh chụp thua</strong>Bất biến "≥ 1 bác sĩ trực" trải trên <em>nhiều hàng</em>. Ảnh chụp bảo vệ từng hàng khỏi bị sửa lén, nhưng không bảo vệ được một mệnh đề tính trên cả tập hàng.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Luật đếm cả nhóm thì không thể canh bằng cách giữ từng người một.</div>
+            <div class="en-only" lang="en"><strong>Why the snapshot loses</strong>The invariant "at least one doctor on call" spans <em>many rows</em>. A snapshot protects each row from being changed behind your back, but not a claim computed across the whole set.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cách chữa đúng</h4>
+              <p>Với ca này, hai lối thoát đáng tin: nâng lên mức <span lang="en">serializable</span>, hoặc khoá tường minh mọi hàng mà quyết định phụ thuộc vào — <span lang="en">SELECT … FOR UPDATE</span> trên tất cả bác sĩ đang trực<span class="cite"><a href="#ref-12">12</a></span>. Chỉ khoá hàng mình sắp sửa thì vô dụng, vì hai giao dịch sửa hai hàng khác nhau.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao dễ lọt lưới kiểm thử</h4>
+              <p>Bất thường này chỉ hiện ra khi hai giao dịch chồng nhau đúng một khoảng thời gian rất hẹp. Kiểm thử tuần tự sẽ luôn đúng; chỉ tải thật, đồng thời thật mới lộ. Đó là lý do <span lang="en">write skew</span> thường được phát hiện bởi khách hàng chứ không phải bởi CI.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Phantoms · locking something that does not exist yet</div>
+          <h3><span class="vi-only">Khoá một thứ chưa tồn tại</span><span class="en-only" lang="en">Locking what isn't there yet</span></h3>
+          <p class="standard-copy">Kleppmann gọi hiệu ứng "một lệnh ghi ở giao dịch này làm đổi kết quả truy vấn tìm kiếm ở giao dịch kia" là <span lang="en">phantom</span>, và liệt kê một loạt ca cùng một khuôn: <strong>đặt phòng họp</strong> (hai người cùng kiểm tra khung giờ trống rồi cùng đặt), <strong>game nhiều người</strong> (hai nước đi cùng dời quân vào một ô), <strong>đăng ký tên người dùng</strong> (hai người cùng kiểm tra tên chưa có rồi cùng tạo), và <strong>chống thấu chi tài khoản</strong> (hai lệnh chi cùng thấy đủ số dư)<span class="cite"><a href="#ref-1">1</a></span>. Điểm chung: thứ gây xung đột là <em>hàng chưa tồn tại</em>, nên không có gì để khoá.</p>
+          <p class="easy-only">Bạn không thể giữ chỗ cho một cái ghế <strong>chưa được kê ra</strong>. Hai người cùng xem lịch thấy phòng họp 3 giờ chiều còn trống, cùng đặt — và phòng bị đặt hai lần. Cái hai người "tranh nhau" là một dòng đặt phòng <em>chưa hề tồn tại</em> lúc họ nhìn. Nhớ nhé: chỗ trống cũng cần được canh, không chỉ chỗ đã có người.</p>
+          <p class="en-only" lang="en">Kleppmann calls the effect "a write in one transaction changing the result of a search query in another" a <em>phantom</em>, and lists a family of cases with the same shape: <strong>meeting-room booking</strong> (two people check a slot is free and both book it), <strong>multiplayer games</strong> (two moves put pieces on the same square), <strong>claiming a username</strong> (two people check the name is free and both create it), and <strong>preventing account overdraft</strong> (two payments both see enough balance)<span class="cite"><a href="#ref-1">1</a></span>. The common thread: the thing in conflict is a <em>row that does not exist yet</em>, so there is nothing to lock.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Ranh giới cần giữ</strong><span lang="en">Phantom</span> là cơ chế; <span lang="en">write skew</span> là hậu quả ở mức ứng dụng. Snapshot isolation chặn phantom cho truy vấn chỉ đọc, nhưng không chặn khi truy vấn ấy dẫn tới một lệnh ghi.</div>
+            <div class="easy-only"><strong>Ý chính</strong>"Bóng ma" là cách lỗi xảy ra; "lệch ghi" là hậu quả bạn nhìn thấy.</div>
+            <div class="en-only" lang="en"><strong>The boundary to keep</strong>A phantom is the mechanism; write skew is the application-level consequence. Snapshot isolation blocks phantoms for read-only queries, but not when the query leads to a write.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Khi CSDL tự lo được</h4>
+              <p>Ca "tên người dùng trùng" có lối thoát gọn: đặt một ràng buộc <span lang="en">unique</span> lên cột tên. Giao dịch thứ hai sẽ bị từ chối ngay ở tầng CSDL. Đây là ví dụ hiếm hoi mà bất biến của ứng dụng đủ hẹp để rơi đúng vào mảnh mà CSDL ép giúp được — đúng như phần chữ <span lang="en">C</span> ở trên đã nói.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cả serializable cũng có chữ nhỏ</h4>
+              <p>Tài liệu PostgreSQL cảnh báo rằng ngay ở mức <span lang="en">serializable</span>, bạn vẫn có thể gặp lỗi vi phạm ràng buộc <span lang="en">unique</span> do đụng độ giữa các giao dịch chồng nhau, kể cả sau khi đã chủ động kiểm tra khoá chưa tồn tại<span class="cite"><a href="#ref-9">9</a></span>. Nghĩa là ứng dụng vẫn phải xử lý lỗi, không chỉ xử lý <span lang="en">serialization failure</span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Materializing conflicts · an ugly last resort</div>
+          <h3><span class="vi-only">Vật chất hoá xung đột</span><span class="en-only" lang="en">Materializing the conflict</span></h3>
+          <p class="standard-copy">Nếu không có hàng nào để khoá, một mẹo là <strong>tạo ra hàng đó trước</strong>. Với bài toán đặt phòng họp: điền sẵn vào bảng mọi tổ hợp (phòng × khung giờ) cho khoảng thời gian tới, rồi bắt mỗi giao dịch đặt phòng phải khoá đúng hàng tương ứng. Xung đột vốn là "bóng ma" nay trở thành đụng độ trên một hàng có thật. Kleppmann gọi đây là <span lang="en">materializing conflicts</span> và nói thẳng: đây là <strong>giải pháp xấu</strong>, khó và dễ sai, chỉ nên dùng khi mọi lựa chọn khác đã hết<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Không giữ chỗ được cho cái ghế chưa kê? Thì kê sẵn hết ghế ra, đánh số, rồi ai muốn ngồi thì phải cầm đúng số ghế đó. Cách này chạy được, nhưng bạn phải kê rất nhiều ghế mà phần lớn chẳng ai ngồi. Nhớ nhé: mẹo này chữa được bệnh nhưng khá tốn kém, chỉ dùng khi hết cách.</p>
+          <p class="en-only" lang="en">If there is no row to lock, one trick is to <strong>create that row in advance</strong>. For the meeting-room problem: pre-fill a table with every (room × time-slot) combination for the coming period, then require each booking transaction to lock the matching row. What was a phantom conflict becomes a collision on a real row. Kleppmann calls this <em>materializing conflicts</em> and says it plainly: it is an <strong>ugly solution</strong>, hard to get right and error-prone, to be used only when nothing else works<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao ông không thích nó</strong>Nó rò rỉ chi tiết cơ chế đồng thời ra mô hình dữ liệu của ứng dụng: bảng khung giờ tồn tại không vì nghiệp vụ mà vì giới hạn của mức cô lập.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Bạn phải thêm dữ liệu vô nghĩa vào chỉ để máy có chỗ mà canh.</div>
+            <div class="en-only" lang="en"><strong>Why he dislikes it</strong>It leaks concurrency-control detail into the application's data model: the time-slot table exists not for the business, but for the limits of the isolation level.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Thứ tự nên thử</h4>
+              <p>Kleppmann xếp rõ thứ tự ưu tiên: nếu được thì dùng mức <span lang="en">serializable</span>; nếu không thì khoá tường minh toàn bộ tiền đề bằng <span lang="en">SELECT … FOR UPDATE</span><span class="cite"><a href="#ref-12">12</a></span>; và chỉ khi cả hai bất khả thi mới tới lượt <span lang="en">materializing conflicts</span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ranh giới bảo trì</h4>
+              <p>Bảng vật chất hoá phải được duy trì: sinh thêm khung giờ cho tương lai, dọn khung giờ quá khứ, giữ đồng bộ khi thêm phòng mới. Mỗi công việc bảo trì ấy là một chỗ có thể quên — và khi quên thì bất biến lại vỡ trong im lặng.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Write skew in the wild</div>
+          <h3><span class="vi-only">Không phải chuyện trong phòng thí nghiệm</span><span class="en-only" lang="en">Not a laboratory curiosity</span></h3>
+          <p class="standard-copy">Dễ nghĩ <span lang="en">write skew</span> là ví dụ giáo khoa. Không phải. Jorwekar, Fekete, Ramamritham và Sudarshan đã xây một phương pháp <strong>phân tích tĩnh mã ứng dụng để tự động phát hiện các bất thường của <span lang="en">snapshot isolation</span></strong>, và áp dụng nó lên các ứng dụng doanh nghiệp thật đang chạy trên nền <span lang="en">snapshot isolation</span><span class="cite"><a href="#ref-17">17</a></span>. Bài báo ấy nằm trong chính danh mục tham chiếu Chương 7 của Kleppmann<span class="cite"><a href="#ref-4">4</a></span> — dấu hiệu rằng vấn đề đủ phổ biến để đáng xây công cụ riêng mà tìm.</p>
+          <p class="easy-only">Đây không phải ví dụ bịa ra cho vui. Người ta đã phải viết hẳn công cụ đi dò mã nguồn của các phần mềm doanh nghiệp thật để tìm loại lỗi này — vì nó xuất hiện đủ nhiều. Nhớ nhé: lỗi khó thấy không có nghĩa là lỗi hiếm gặp.</p>
+          <p class="en-only" lang="en">It is tempting to think write skew is a textbook toy. It is not. Jorwekar, Fekete, Ramamritham and Sudarshan built a method for <strong>statically analysing application code to automatically detect snapshot-isolation anomalies</strong>, and applied it to real enterprise applications running on snapshot isolation<span class="cite"><a href="#ref-17">17</a></span>. That paper sits in Kleppmann's own Chapter 7 reference list<span class="cite"><a href="#ref-4">4</a></span> — a sign the problem is common enough to justify purpose-built tooling.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Rút ra</strong>Nếu ứng dụng của bạn chạy trên <span lang="en">snapshot isolation</span> (kể cả khi nhãn ghi "repeatable read" hay "serializable"), hãy đi tìm các chu trình đọc-quyết định-ghi trên nhiều hàng. Đó là nơi bất thường ẩn.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Hãy đi tìm những chỗ code "xem rồi mới quyết định" — đó là nơi dễ có lỗi nhất.</div>
+            <div class="en-only" lang="en"><strong>The takeaway</strong>If your application runs on snapshot isolation (even under a label saying "repeatable read" or "serializable"), go hunting for read-decide-write cycles that span several rows. That is where the anomalies hide.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Dấu hiệu nhận biết trong mã</h4>
+              <p>Khuôn mẫu đáng ngờ rất đều: một <span lang="en">SELECT</span> có <span lang="en">WHERE</span> lọc theo điều kiện nghiệp vụ, một câu <span lang="en">if</span> dựa trên kết quả đó, rồi một <span lang="en">INSERT</span> hoặc <span lang="en">UPDATE</span> vào <em>hàng khác</em>. Hễ thấy khuôn này là phải hỏi: nếu hai người chạy nó cùng lúc thì sao?</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao không tự lộ</h4>
+              <p>Khác với <span lang="en">deadlock</span> hay lỗi ràng buộc, <span lang="en">write skew</span> không sinh ra thông báo lỗi nào. Cả hai giao dịch đều commit thành công. Hậu quả chỉ hiện ra sau đó, ở dạng dữ liệu vi phạm một quy tắc nghiệp vụ — và lúc ấy rất khó truy ngược về nguyên nhân.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba thứ rất dễ trộn lẫn</span><span class="en-only" lang="en">Three things people constantly conflate</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only"><span lang="en">Dirty write</span></span><span class="en-only" lang="en">Dirty write</span></h4>
+          <p class="standard-copy">Hai giao dịch ghi vào <strong>cùng một</strong> đối tượng, và một bên đè lên giá trị mà bên kia <em>chưa commit</em>. Chặn được bằng khoá hàng giữ tới cuối giao dịch — <span lang="en">read committed</span> đã đủ<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="en-only" lang="en">Two transactions write to <strong>the same</strong> object, and one overwrites a value the other has <em>not yet committed</em>. Blocked by row locks held to the end of the transaction — read committed already suffices<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only"><span lang="en">Lost update</span></span><span class="en-only" lang="en">Lost update</span></h4>
+          <p class="standard-copy">Cũng là <strong>cùng một</strong> đối tượng, nhưng cả hai đều commit hợp lệ; cái mất là <em>phần sửa</em> của một bên trong chu trình đọc-sửa-ghi. Cần thao tác nguyên tử, khoá, <span lang="en">CAS</span>, hoặc phát hiện tự động<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="en-only" lang="en">Also <strong>the same</strong> object, but both commit legitimately; what is lost is one side's <em>modification</em> in a read-modify-write cycle. Needs atomic operations, locks, CAS, or automatic detection<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only"><span lang="en">Write skew</span></span><span class="en-only" lang="en">Write skew</span></h4>
+          <p class="standard-copy"><strong>Hai</strong> đối tượng khác nhau. Không ai đè ai, không có lỗi nào được ném ra — chỉ có một bất biến trải trên nhiều hàng bị vỡ. Chỉ <span lang="en">serializable</span> hoặc khoá toàn bộ tiền đề mới chặn được<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="en-only" lang="en"><strong>Two different</strong> objects. Nobody overwrites anybody, no error is raised — just an invariant spanning several rows quietly broken. Only serializable, or locking the entire premise, prevents it<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        </div>
+      </div>
+    </div>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Nối sang phần sau</strong>
+      <strong class="easy-only">Tiếp theo là gì</strong>
+      <strong class="en-only" lang="en">Where this leads</strong>
+      <div class="standard-copy">Đến đây danh sách các kẽ hở đã đủ dài, và mọi lối thoát cục bộ — khoá tay, vật chất hoá xung đột — đều đòi lập trình viên phải nghĩ đúng trong từng ca. Câu hỏi tự nhiên tiếp theo là: có cách nào bịt tất cả một lần không? Có, và nó tên là <span lang="en">serializability</span> — với ba con đường hiện thực rất khác nhau.</div>
+      <div class="easy-only">Vá từng lỗ một thì mệt và dễ sót. Phần cuối sẽ hỏi: có cách nào bịt hết một lần không? Có ba cách, và mỗi cách phải trả một cái giá khác nhau.</div>
+      <div class="en-only" lang="en">By now the list of holes is long, and every local fix — manual locking, materialising conflicts — demands the programmer think correctly in every single case. The natural next question: is there a way to close them all at once? There is, and it is called serializability — with three very different routes to implementing it.</div>
+    </aside>
+  </section>
+
+  <section class="section" id="serializability" aria-labelledby="serializability-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · Khả tuần tự hoá</span><span class="en-only" lang="en">Axis 4 · Serializability</span></div>
+        <h2 id="serializability-title"><span class="vi-only">Ba con đường, ba cái giá</span><span class="en-only" lang="en">Three routes, three prices</span></h2>
+      </div>
+      <p class="standard-copy"><span lang="en">Serializable isolation</span> là bảo đảm mạnh nhất: kết quả của một tập giao dịch chạy đồng thời phải giống hệt như thể chúng đã chạy <strong>nối đuôi nhau theo một thứ tự nào đó</strong>. Có nó thì mọi bất thường ở ba phần trên — <span lang="en">dirty read</span>, <span lang="en">read skew</span>, <span lang="en">lost update</span>, <span lang="en">write skew</span>, <span lang="en">phantom</span> — biến mất cùng một lúc, và lập trình viên không còn phải nghĩ về race condition trong từng ca một<span class="cite"><a href="#ref-1">1</a></span>. Câu hỏi duy nhất còn lại là: hiện thực nó kiểu gì, và trả giá ở đâu. Kleppmann trình bày đúng ba con đường.</p>
+      <p class="easy-only">Cách an toàn nhất là bắt mọi việc <strong>xếp hàng thật sự</strong>: xong việc này mới tới việc kia. Làm được thế thì tất cả các lỗi ở trên biến mất hết. Chỉ có điều xếp hàng thì chậm — nên người ta nghĩ ra ba cách khác nhau để vừa xếp hàng vừa đỡ chậm. Nhớ nhé: an toàn nhất là xếp hàng, và mỗi cách xếp hàng có một cái giá riêng.</p>
+      <p class="en-only" lang="en">Serializable isolation is the strongest guarantee: the outcome of a set of concurrent transactions must be identical to them having run <strong>one after another in some order</strong>. With it, every anomaly from the three sections above — dirty reads, read skew, lost updates, write skew, phantoms — disappears at once, and the programmer no longer reasons about race conditions case by case<span class="cite"><a href="#ref-1">1</a></span>. The only remaining question is how to implement it, and where the price is paid. Kleppmann lays out exactly three routes.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Serializability · serial execution, two-phase locking, SSI</div>
+        <p class="definition standard-copy">Ba con đường khác nhau ở <strong>chỗ đặt cược</strong>. <span lang="en">Serial execution</span> cược rằng giao dịch đủ ngắn và dữ liệu đủ nhỏ để chạy một luồng. <span lang="en">Two-phase locking</span> cược bi quan: giả định sẽ có đụng độ, nên chặn trước bằng khoá. <span lang="en">Serializable snapshot isolation</span> cược lạc quan: cứ cho chạy, tới lúc <span lang="en">commit</span> mới kiểm xem tiền đề còn đúng không, sai thì huỷ<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <p class="definition easy-only">Ba cách xếp hàng: <strong>một</strong> — chỉ cho một người làm mỗi lúc, xong mới tới lượt sau. <strong>Hai</strong> — ai đang dùng món gì thì giữ chặt món đó, người khác phải chờ. <strong>Ba</strong> — cứ để mọi người làm thoải mái, tới lúc nộp bài mới kiểm, ai bị chồng chéo thì làm lại. Nhớ nhé: chờ trước hay làm lại sau — chọn một.</p>
+        <p class="definition en-only" lang="en">The three routes differ in <strong>where they place the bet</strong>. Serial execution bets that transactions are short enough and the data small enough to run on one thread. Two-phase locking bets pessimistically: assume collisions, so block them in advance with locks. Serializable snapshot isolation bets optimistically: let everything run, and only at commit time check whether the premises still hold — aborting if not<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <p class="deep-only">Một lưu ý thuật ngữ mà Kleppmann nhấn mạnh: <strong>2PL không phải 2PC</strong>. <span lang="en">Two-phase locking</span> là một thuật toán kiểm soát đồng thời trong một nút; <span lang="en">two-phase commit</span> là một giao thức commit nguyên tử trải trên nhiều nút, chủ đề của Chương 9. Hai chữ viết tắt gần giống nhau và cực kỳ hay bị trộn<span class="cite"><a href="#ref-1">1</a></span>. Một lưu ý thứ hai: "khả tuần tự hoá" nói về <em>kết quả</em>, không phải về <em>thứ tự thời gian thật</em>. Một tập giao dịch được coi là tuần tự hoá được nếu tồn tại <strong>một</strong> thứ tự nối đuôi cho ra đúng kết quả ấy — không cần biết thứ tự đó có khớp với thứ tự chúng thật sự bắt đầu hay không<span class="cite"><a href="#ref-9">9</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba con đường tới khả tuần tự hoá">
+        <div class="equation-row">
+          <b>Thực thi tuần tự</b>
+          <span>Một luồng, một giao dịch. Cần dữ liệu vừa bộ nhớ và giao dịch đóng gói sẵn.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">2PL (bi quan)</b>
+          <span>Giữ khoá tới khi commit. Đúng, nhưng thông lượng thấp và độ trễ đuôi rất xấu.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">SSI (lạc quan)</b>
+          <span>Cho chạy, tới lúc commit mới kiểm tiền đề; sai thì huỷ và thử lại.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba cách xếp hàng nói đơn giản">
+        <div class="equation-row">
+          <b>Thực thi tuần tự</b>
+          <span>Mỗi lúc chỉ một người làm.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">2PL</b>
+          <span>Ai đang dùng thì giữ chặt, người sau phải chờ.</span>
+        </div>
+        <div class="equation-row">
+          <b lang="en">SSI</b>
+          <span>Cứ làm đi, sai thì làm lại.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three routes to serializability">
+        <div class="equation-row">
+          <b>Serial execution</b>
+          <span>One thread, one transaction. Needs the data to fit in memory and transactions pre-packaged.</span>
+        </div>
+        <div class="equation-row">
+          <b>2PL (pessimistic)</b>
+          <span>Hold locks until commit. Correct, but low throughput and very bad tail latency.</span>
+        </div>
+        <div class="equation-row">
+          <b>SSI (optimistic)</b>
+          <span>Let it run, check the premises at commit; abort and retry if they changed.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Actual serial execution · one thread, no locks</div>
+          <h3><span class="vi-only">Thực thi tuần tự thật sự</span><span class="en-only" lang="en">Actual serial execution</span></h3>
+          <p class="standard-copy">Con đường đơn giản nhất là bỏ hẳn tính đồng thời: <strong>chạy mỗi lần một giao dịch, trên một luồng duy nhất</strong>. Ý tưởng cũ nhưng chỉ khả thi gần đây nhờ hai thay đổi mà Kleppmann nêu: RAM đã đủ rẻ để nhiều tập dữ liệu <span lang="en">OLTP</span> nằm gọn trong bộ nhớ, và người ta nhận ra giao dịch <span lang="en">OLTP</span> thường ngắn, chỉ đụng ít bản ghi<span class="cite"><a href="#ref-1">1</a></span>. Kiến trúc này được Stonebraker và cộng sự lập luận trong bài "The End of an Architectural Era"<span class="cite"><a href="#ref-18">18</a></span> và hiện thực trong H-Store<span class="cite"><a href="#ref-19">19</a></span>, dòng dõi trực tiếp của VoltDB<span class="cite"><a href="#ref-20">20</a></span>.</p>
+          <p class="easy-only">Cách chắc chắn nhất để không ai giẫm chân ai: <strong>mỗi lúc chỉ cho một người làm</strong>. Nghe có vẻ dở, nhưng nếu mỗi việc chỉ mất một khoảnh khắc rất ngắn và toàn bộ dữ liệu nằm sẵn trong bộ nhớ thì xếp hàng vẫn rất nhanh. Nhớ nhé: khi mỗi việc cực ngắn thì xếp hàng không còn là vấn đề.</p>
+          <p class="en-only" lang="en">The simplest route is to remove concurrency entirely: <strong>run one transaction at a time, on a single thread</strong>. An old idea made viable recently by two changes Kleppmann names: RAM is cheap enough that many OLTP datasets fit in memory, and OLTP transactions turned out to be short, touching few records<span class="cite"><a href="#ref-1">1</a></span>. This architecture was argued by Stonebraker et al. in "The End of an Architectural Era"<span class="cite"><a href="#ref-18">18</a></span> and implemented in H-Store<span class="cite"><a href="#ref-19">19</a></span>, the direct ancestor of VoltDB<span class="cite"><a href="#ref-20">20</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Điều kiện bắt buộc</strong>Giao dịch phải được đóng gói thành <span lang="en">stored procedure</span> và gửi trọn gói cho CSDL<span class="cite"><a href="#ref-20">20</a></span>. Nếu giao dịch phải chờ client hỏi đi hỏi lại qua mạng, một luồng duy nhất sẽ đứng chờ và cả hệ đứng theo.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Phải gửi nguyên cả việc cho máy làm một lượt, đừng vừa làm vừa hỏi.</div>
+            <div class="en-only" lang="en"><strong>The hard prerequisite</strong>Transactions must be packaged as stored procedures and submitted whole<span class="cite"><a href="#ref-20">20</a></span>. If a transaction waits for round-trips from the client, the single thread stalls and the whole system stalls with it.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Phân mảnh để mở rộng</h4>
+              <p>Một luồng nghĩa là bị giới hạn bởi một lõi CPU. Cách mở rộng là <strong>phân mảnh</strong> dữ liệu và cho mỗi phân mảnh một luồng riêng, chạy độc lập<span class="cite"><a href="#ref-20">20</a></span>. Nhưng giao dịch nào phải chạm nhiều phân mảnh thì cần điều phối xuyên phân mảnh, và Kleppmann lưu ý nó chậm hơn giao dịch một phân mảnh rất nhiều — nên thông lượng thật phụ thuộc vào việc bạn phân mảnh khéo tới đâu.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cái giá ẩn</h4>
+              <p>Viết nghiệp vụ bằng <span lang="en">stored procedure</span> có tiếng xấu về khả năng bảo trì: ngôn ngữ thủ tục cũ kỹ, khó quản lý phiên bản, khó kiểm thử. Kleppmann ghi nhận các hệ hiện đại dùng ngôn ngữ phổ thông cho phần này, nhưng cái giá về quy trình phát triển vẫn có thật.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Two-phase locking · the pessimistic classic</div>
+          <h3><span class="vi-only">Khoá hai pha: bi quan và cổ điển</span><span class="en-only" lang="en">Two-phase locking: the pessimist's classic</span></h3>
+          <p class="standard-copy">Trong gần ba mươi năm, <span lang="en">2PL</span> là <em>cách</em> hiện thực <span lang="en">serializability</span>. Nguyên tắc chặt hơn hẳn các nấc yếu: nhiều giao dịch được cùng đọc một đối tượng, nhưng hễ có ai muốn ghi thì phải <strong>độc quyền</strong> — và quan trọng nhất, <strong>người đọc chặn người ghi, người ghi chặn người đọc</strong>, khoá giữ cho tới khi giao dịch kết thúc<span class="cite"><a href="#ref-1">1</a></span>. Chính điều đó phá vỡ nguyên tắc "đọc không chặn ghi" vốn làm <span lang="en">snapshot isolation</span> nhanh, và đó là nguồn gốc mọi vấn đề hiệu năng của nó.</p>
+          <p class="easy-only">Cách thứ hai: <strong>ai đang dùng món gì thì giữ chặt món đó</strong> cho tới khi làm xong, người khác phải đứng chờ. Rất an toàn — nhưng nếu có một người làm lâu thì cả hàng dài phía sau đứng im. Nhớ nhé: giữ chặt thì an toàn, nhưng ai cũng phải chờ.</p>
+          <p class="en-only" lang="en">For nearly thirty years, 2PL <em>was</em> how serializability got implemented. The rule is far stricter than the weak rungs: several transactions may read the same object concurrently, but anyone wanting to write needs <strong>exclusive</strong> access — and crucially, <strong>readers block writers and writers block readers</strong>, with locks held until the transaction ends<span class="cite"><a href="#ref-1">1</a></span>. That breaks the "reads never block writes" principle that makes snapshot isolation fast, and it is the root of all its performance troubles.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cái giá cụ thể</strong>Thông lượng thấp hơn hẳn các nấc yếu, và độ trễ ở phần đuôi rất xấu: chỉ cần một giao dịch chậm giữ khoá là cả hàng phía sau bị kéo theo. Thêm vào đó là <span lang="en">deadlock</span> — CSDL phải phát hiện và huỷ một bên, khiến ứng dụng phải thử lại.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Một người làm chậm là cả hàng chậm theo — và đôi khi hai người khoá lẫn nhau, phải bắt một người làm lại.</div>
+            <div class="en-only" lang="en"><strong>The concrete price</strong>Throughput is much lower than at weak levels, and tail latency is very bad: one slow transaction holding a lock drags the whole queue behind it. Plus deadlocks — the database must detect them and abort one side, forcing the application to retry.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Ai dùng 2PL</h4>
+              <p><span lang="en">Hermitage</span> ghi nhận MySQL/InnoDB và SQL Server ở mức <span lang="en">"serializable"</span> đạt đúng <span lang="en">serializable</span><span class="cite"><a href="#ref-5">5</a></span> — và với InnoDB, cơ chế đứng sau là khoá, chứ không phải cách lạc quan. Tài liệu MySQL mô tả cách nó khoá dải chỉ mục được quét bằng <span lang="en">gap lock</span> và <span lang="en">next-key lock</span><span class="cite"><a href="#ref-10">10</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>2PL ≠ 2PC</h4>
+              <p>Đây là cặp viết tắt gây nhầm nhiều nhất trong cả cuốn sách. <span lang="en">Two-phase locking</span> giải quyết cô lập <em>trong</em> một nút. <span lang="en">Two-phase commit</span> giải quyết <span lang="en">atomicity</span> <em>xuyên</em> nhiều nút. Không liên quan gì tới nhau ngoài chữ "hai pha"<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Predicate locks &amp; index-range locks</div>
+          <h3><span class="vi-only">Khoá vị từ và khoá dải chỉ mục</span><span class="en-only" lang="en">Predicate locks and index-range locks</span></h3>
+          <p class="standard-copy">Khoá hàng không chặn được <span lang="en">phantom</span>, vì hàng gây xung đột chưa tồn tại. Lời giải cổ điển là <strong>khoá vị từ</strong>: thay vì khoá một đối tượng cụ thể, khoá <em>mọi</em> đối tượng thoả một điều kiện tìm kiếm — kể cả những đối tượng <strong>chưa có mặt trong cơ sở dữ liệu</strong>. Khái niệm này có từ bài của Eswaran, Gray, Lorie và Traiger năm 1976<span class="cite"><a href="#ref-13">13</a></span>. Vấn đề là nó đắt: phải đối chiếu mọi khoá vị từ đang giữ với mọi thao tác. Nên hầu hết hiện thực <span lang="en">2PL</span> hạ xuống <strong>khoá dải chỉ mục</strong> — thô hơn nhưng rẻ hơn nhiều<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Muốn giữ chỗ cho cái ghế chưa kê, ta không giữ <em>cái ghế</em> mà giữ <strong>cả khoảng không nơi ghế sẽ được kê</strong>. Cách này chắc chắn nhưng mất công tính toán, nên thực tế người ta giữ một vùng rộng hơn cần thiết cho nhanh. Nhớ nhé: giữ rộng hơn thì đơn giản hơn, chỉ là đôi khi chặn nhầm người vô can.</p>
+          <p class="en-only" lang="en">Row locks cannot block phantoms, because the conflicting row does not exist yet. The classic answer is a <strong>predicate lock</strong>: instead of locking a specific object, lock <em>all</em> objects matching a search condition — including objects <strong>not yet present in the database</strong>. The idea goes back to Eswaran, Gray, Lorie and Traiger in 1976<span class="cite"><a href="#ref-13">13</a></span>. The problem is cost: every held predicate lock must be checked against every operation. So most 2PL implementations fall back to <strong>index-range locks</strong> — coarser, but far cheaper<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đánh đổi</strong>Khoá dải chỉ mục khoá rộng hơn mức cần — nó có thể chặn cả những giao dịch vốn không hề đụng độ. Đổi lại, chi phí duy trì thấp hơn hẳn và vẫn đủ để chặn phantom.</div>
+            <div class="easy-only"><strong>Đánh đổi</strong>Khoá rộng thì rẻ và dễ, nhưng chặn oan vài người.</div>
+            <div class="en-only" lang="en"><strong>The trade-off</strong>An index-range lock locks more than strictly needed — it can block transactions that would never have collided. In exchange the bookkeeping is far cheaper, and it still stops phantoms.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Hiện thực có thật</h4>
+              <p>Tài liệu MySQL mô tả đúng cơ chế này: với các điều kiện tìm kiếm không phải khoá duy nhất, InnoDB khoá dải chỉ mục được quét bằng <span lang="en">gap lock</span> hoặc <span lang="en">next-key lock</span> để chặn các phiên khác chèn vào khoảng trống trong dải<span class="cite"><a href="#ref-10">10</a></span>. Đây là "index-range lock" của sách, gọi bằng tên riêng của MySQL.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khi không có chỉ mục phù hợp</h4>
+              <p>Nếu truy vấn không dùng được chỉ mục nào, hệ buộc phải lùi về khoá thô hơn nữa — tới mức khoá cả bảng. An toàn vẫn đúng, nhưng tính đồng thời sụp xuống gần bằng không. Đây là lý do chỉ mục ảnh hưởng tới cả <em>hiệu năng</em> lẫn <em>mức chặn</em> ở các hệ dùng 2PL.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Serializable snapshot isolation · optimistic, and young</div>
+          <h3><span class="vi-only">SSI: lạc quan thay vì bi quan</span><span class="en-only" lang="en">SSI: optimistic instead of pessimistic</span></h3>
+          <p class="standard-copy">Con đường thứ ba còn mới. Fekete và cộng sự chỉ ra năm 2005 rằng có thể làm cho <span lang="en">snapshot isolation</span> trở nên tuần tự hoá được bằng cách xử lý một lớp phụ thuộc đặc thù<span class="cite"><a href="#ref-14">14</a></span>; Cahill, Röhm và Fekete biến nó thành thuật toán thực dụng năm 2008<span class="cite"><a href="#ref-15">15</a></span>; và Ports cùng Grittner đưa nó vào PostgreSQL, nơi nó trở thành mức <span lang="en">serializable</span> từ phiên bản 9.1<span class="cite"><a href="#ref-16">16</a></span><span class="cite"><a href="#ref-9">9</a></span>. Ý tưởng: giữ nguyên ảnh chụp nhất quán và <strong>không chặn ai cả</strong>, nhưng <strong>theo dõi các phụ thuộc đọc-ghi</strong>; tới lúc commit, nếu phát hiện tiền đề mà giao dịch đã dựa vào đã bị thay đổi, thì huỷ nó<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Cách thứ ba: <strong>cứ để mọi người làm thoải mái</strong>, không ai phải chờ ai. Nhưng máy âm thầm ghi lại "bạn này đã dựa vào thông tin kia". Tới lúc nộp bài, nếu thông tin đó đã bị người khác đổi mất, máy bắt bạn làm lại. Nhớ nhé: không chờ ai cả, nhưng đôi khi phải làm lại từ đầu.</p>
+          <p class="en-only" lang="en">The third route is young. Fekete et al. showed in 2005 that snapshot isolation could be made serializable by handling one particular class of dependency<span class="cite"><a href="#ref-14">14</a></span>; Cahill, Röhm and Fekete turned it into a practical algorithm in 2008<span class="cite"><a href="#ref-15">15</a></span>; and Ports and Grittner brought it into PostgreSQL, where it became the serializable level from version 9.1<span class="cite"><a href="#ref-16">16</a></span><span class="cite"><a href="#ref-9">9</a></span>. The idea: keep the consistent snapshot and <strong>block nobody</strong>, but <strong>track read-write dependencies</strong>; at commit time, if a premise the transaction relied on has since changed, abort it<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao nó hấp dẫn</strong>PostgreSQL nói rõ việc theo dõi này <em>không</em> gây chặn thêm so với <span lang="en">repeatable read</span>: các khoá vị từ của nó hiện ra dưới dạng <span lang="en">SIReadLock</span> và không thể gây <span lang="en">deadlock</span><span class="cite"><a href="#ref-9">9</a></span>. Cái giá không nằm ở chờ, mà nằm ở tỉ lệ bị huỷ.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Không ai phải chờ — đổi lại thỉnh thoảng có người phải làm lại.</div>
+            <div class="en-only" lang="en"><strong>Why it appeals</strong>PostgreSQL states this monitoring introduces <em>no</em> blocking beyond repeatable read: its predicate locks appear as SIReadLock and cannot cause deadlocks<span class="cite"><a href="#ref-9">9</a></span>. The price is not waiting, it is the abort rate.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Ứng dụng phải biết thử lại</h4>
+              <p>PostgreSQL huỷ giao dịch <span lang="en">serializable</span> bị đụng độ bằng thông báo <span lang="en">"could not serialize access due to read/write dependencies among transactions"</span>, và mọi <span lang="en">serialization failure</span> đều trả về mã <span lang="en">SQLSTATE 40001</span><span class="cite"><a href="#ref-9">9</a></span>. Tài liệu nói thẳng: môi trường dùng kỹ thuật này <strong>phải</strong> có cách xử lý chung cho lỗi ấy, vì rất khó đoán trước giao dịch nào sẽ bị huỷ.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khi nào SSI thắng, khi nào thua</h4>
+              <p>Kleppmann nêu đánh đổi cốt lõi: <span lang="en">SSI</span> tốt khi tranh chấp thấp và giao dịch ngắn, vì phần lớn giao dịch đi qua trót lọt. Khi tranh chấp cao, tỉ lệ huỷ tăng và công sức bị vứt đi nhiều — lúc đó cách bi quan có thể lại hiệu quả hơn. Giao dịch càng dài thì càng dễ bị huỷ, nên kỷ luật "giữ giao dịch thật ngắn" là điều kiện sống còn.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận cuối chương</span><span class="en-only" lang="en">Three misreadings to leave behind</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">"Nhãn ghi <span lang="en">serializable</span> là tuần tự thật"</span><span class="en-only" lang="en">"If the label says serializable, it is serializable"</span></h4>
+          <p class="standard-copy">Sai. Các kịch bản kiểm thử của <span lang="en">Hermitage</span> xếp mức <span lang="en">"serializable"</span> của Oracle là <span lang="en">snapshot isolation</span><span class="cite"><a href="#ref-5">5</a></span>, và tài liệu PostgreSQL ghi lại rằng trước 9.1, yêu cầu <span lang="en">serializable</span> ở PostgreSQL cũng chỉ cho ra hành vi <span lang="en">repeatable read</span><span class="cite"><a href="#ref-9">9</a></span>. Phải tra tài liệu của chính hệ mình dùng, đúng phiên bản mình chạy.</p>
+          <p class="en-only" lang="en">Wrong. Hermitage's test scenarios classify Oracle's "serializable" as snapshot isolation<span class="cite"><a href="#ref-5">5</a></span>, and PostgreSQL's manual records that before 9.1, requesting serializable there also gave only repeatable-read behaviour<span class="cite"><a href="#ref-9">9</a></span>. Read your own system's docs, for the version you actually run.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">"<span lang="en">Snapshot isolation</span> là đủ an toàn"</span><span class="en-only" lang="en">"Snapshot isolation is safe enough"</span></h4>
+          <p class="standard-copy">Sai. Ảnh chụp nhất quán chặn <span lang="en">read skew</span> nhưng để lọt <span lang="en">write skew</span>, và mất cập nhật thì tuỳ hệ mới được chặn<span class="cite"><a href="#ref-5">5</a></span>. Nếu ứng dụng có bất biến trải trên nhiều hàng, ảnh chụp không bảo vệ được bạn — cần <span lang="en">serializable</span> hoặc khoá tường minh toàn bộ tiền đề<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="en-only" lang="en">Wrong. A consistent snapshot blocks read skew but lets write skew through, and whether lost updates are prevented depends on the system<span class="cite"><a href="#ref-5">5</a></span>. If your application has invariants spanning several rows, the snapshot will not protect you — you need serializable, or explicit locks over the entire premise<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">"<span lang="en">Serializable</span> chậm nên đừng dùng"</span><span class="en-only" lang="en">"Serializable is slow, so avoid it"</span></h4>
+          <p class="standard-copy">Quá vội. Câu đó đúng với <span lang="en">2PL</span>, nơi mọi người phải chờ nhau. Với <span lang="en">SSI</span> thì cái giá đổi chỗ: không chặn thêm ai, nhưng có tỉ lệ huỷ<span class="cite"><a href="#ref-9">9</a></span>. PostgreSQL còn lập luận rằng với một số môi trường, <span lang="en">serializable</span> là lựa chọn <em>tốt nhất</em> về hiệu năng so với việc tự đi khoá tay<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="en-only" lang="en">Too hasty. That is true of 2PL, where everyone waits on everyone. With SSI the price moves: no extra blocking, but an abort rate<span class="cite"><a href="#ref-9">9</a></span>. PostgreSQL even argues that for some environments, serializable is the <em>best</em> performance choice compared with hand-rolled explicit locking<span class="cite"><a href="#ref-9">9</a></span>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi giao dịch trong hệ của bạn</span><span class="en-only" lang="en">Audit the transactions in your own system</span></h2>
+        <p class="standard-copy">Chương này không có công thức chung, chỉ có một kỷ luật: bỏ nhãn xuống và đi tra hành vi thật. Mấy câu dưới đây là bộ soi tối thiểu cho bất kỳ hệ nào bạn đang vận hành — chúng không hỏi hệ của bạn "mạnh" tới đâu, mà hỏi bạn có <em>biết</em> mình đang đứng ở nấc nào hay không.</p>
+        <p class="easy-only">Thử soi một hệ thật bằng mấy câu dưới. Không phải để chấm điểm, mà để xem bạn có thật sự biết hệ của mình đang chặn được lỗi nào không.</p>
+        <p class="en-only" lang="en">This chapter offers no universal recipe, only a discipline: put the label down and go look up the actual behaviour. The questions below are a minimum audit for any system you operate — they don't ask how "strong" your system is, but whether you <em>know</em> which rung you are standing on.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Mức cô lập mặc định của hệ bạn dùng, đúng phiên bản bạn chạy, là gì?</strong><span class="deep-only">Đừng trả lời bằng trí nhớ. Hãy mở tài liệu của chính sản phẩm đó, đúng dòng phiên bản đang chạy trong môi trường thật. PostgreSQL, Oracle và SQL Server mặc định <span lang="en">read committed</span>; MySQL/InnoDB mặc định cái nó gọi là <span lang="en">repeatable read</span>.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Cái tên mức cô lập ấy tương ứng với bảo đảm thực nào?</strong><span class="deep-only">Cùng một chuỗi ký tự có thể là hai lời hứa khác nhau: <span lang="en">"repeatable read"</span> của PostgreSQL là <span lang="en">snapshot isolation</span>, còn <span lang="en">"repeatable read"</span> của MySQL/InnoDB yếu hơn thế. Bộ kiểm thử Hermitage là chỗ tra nhanh.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Ứng dụng của bạn có chu trình đọc-sửa-ghi nào không, và bạn chống mất cập nhật bằng cách nào?</strong><span class="deep-only">Bốn lựa chọn: thao tác nguyên tử một câu lệnh, <span lang="en">SELECT … FOR UPDATE</span>, <span lang="en">compare-and-set</span>, hoặc trông vào phát hiện tự động của CSDL. Nếu bạn chọn cách cuối, hãy kiểm chứng rằng hệ của bạn <em>thật sự</em> phát hiện.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có bất biến nào của bạn trải trên nhiều hàng không?</strong><span class="deep-only">"Luôn còn ít nhất một người trực", "tổng không được âm", "không quá N chỗ" — mọi mệnh đề tính trên một <em>tập</em> hàng đều là ứng viên của <span lang="en">write skew</span>. Ảnh chụp nhất quán không bảo vệ được chúng.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn tìm được bao nhiêu khuôn "SELECT → if → INSERT/UPDATE hàng khác" trong mã?</strong><span class="deep-only">Đây là dấu vân tay của <span lang="en">write skew</span>. Với mỗi chỗ tìm được, hãy hỏi: nếu hai phiên chạy đúng đoạn này cùng lúc trên hai hàng khác nhau thì bất biến còn giữ được không?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Ứng dụng của bạn có xử lý được lỗi serialization failure không?</strong><span class="deep-only">Ở PostgreSQL mọi lỗi loại này trả mã <span lang="en">SQLSTATE 40001</span>; Oracle trả <span lang="en">ORA-08177</span>. Nếu bạn định dùng mức cô lập cao hay dựa vào phát hiện tự động, cơ chế thử lại phải có sẵn và phải an toàn khi lặp.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Giao dịch dài nhất trong hệ bạn kéo dài bao lâu, và nó giữ gì trong lúc đó?</strong><span class="deep-only">Với 2PL, một giao dịch dài chặn cả hàng phía sau. Với SSI, nó làm tăng xác suất bị huỷ. Với MVCC, nó giữ cho các phiên bản cũ không được dọn. Ba cơ chế khác nhau đều phạt đúng một hành vi: giao dịch kéo dài.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn đang trả giá ở đâu — chờ trước hay làm lại sau?</strong><span class="deep-only">Đây là câu hỏi tổng kết của chương. Bi quan (khoá) trả bằng độ trễ và deadlock; lạc quan (SSI) trả bằng tỉ lệ huỷ và công bị vứt; tuần tự thật trả bằng ràng buộc kiến trúc (dữ liệu vừa bộ nhớ, stored procedure, phân mảnh khéo). Không có lựa chọn nào miễn phí.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Bạn có biết hệ của mình đang ở "nấc an toàn" nào không?</strong><span>Mở tài liệu của đúng hãng đó ra đọc, đừng đoán theo cái tên.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Trong code của bạn, có chỗ nào "xem xong rồi mới quyết định" không?</strong><span>Đó là chỗ dễ hỏng nhất khi hai người cùng làm một lúc.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có luật nào phải đếm cả nhóm mới biết đúng hay sai không?</strong><span>Kiểu "phải còn ít nhất một người trực" — luật này khó canh nhất.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Khi máy bắt làm lại, ứng dụng của bạn có làm lại được không?</strong><span>Có hệ sẽ huỷ việc của bạn và bảo thử lại — phải chuẩn bị sẵn cho điều đó.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>What is your system's default isolation level, for the version you actually run?</strong><span>Don't answer from memory. Open that product's own docs for the release line in production. PostgreSQL, Oracle and SQL Server default to read committed; MySQL/InnoDB defaults to what it calls repeatable read.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Which real guarantee does that level name correspond to?</strong><span>The same string can be two different promises: PostgreSQL's "repeatable read" is snapshot isolation, MySQL/InnoDB's "repeatable read" is weaker. The Hermitage suite is the quick lookup.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Does your application have read-modify-write cycles, and how do you prevent lost updates?</strong><span>Four options: a single atomic statement, SELECT … FOR UPDATE, compare-and-set, or relying on the database's automatic detection. If you pick the last, verify your system <em>actually</em> detects them.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Do any of your invariants span several rows?</strong><span>"At least one person on call", "the total must not go negative", "no more than N seats" — any claim computed over a <em>set</em> of rows is a write-skew candidate. A consistent snapshot will not protect them.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How many "SELECT → if → INSERT/UPDATE a different row" shapes can you find in your code?</strong><span>That is write skew's fingerprint. For each one, ask: if two sessions run this simultaneously on different rows, does the invariant survive?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Can your application handle a serialization failure?</strong><span>In PostgreSQL every such error returns SQLSTATE 40001; Oracle returns ORA-08177. If you plan to use a high isolation level or rely on automatic detection, the retry path must already exist and must be safe to repeat.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How long is your longest transaction, and what does it hold meanwhile?</strong><span>Under 2PL a long transaction blocks the queue behind it. Under SSI it raises the abort probability. Under MVCC it keeps old versions from being reclaimed. Three different mechanisms all punish the same behaviour: long transactions.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Where are you paying — waiting up front, or redoing work afterwards?</strong><span>This is the chapter's closing question. Pessimism (locks) pays in latency and deadlocks; optimism (SSI) pays in aborts and wasted work; true serial execution pays in architectural constraints. No option is free.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Giao dịch không phải một lời hứa duy nhất mà là <span class="closing-accent">một phổ các lời hứa</span>, và cái tên dán trên mỗi nấc không đáng tin bằng tài liệu của chính hệ đó. <span lang="en">ACID</span> chỉ nói rõ được ba chữ; <span lang="en">Consistency</span> vẫn là <span class="closing-accent">việc của bạn</span>. Ảnh chụp nhất quán cứu bạn khỏi <span lang="en">read skew</span> nhưng <span class="closing-accent">không cứu khỏi write skew</span>. Và khi bạn quyết định bịt hết mọi kẽ hở, bạn không xoá được chi phí — bạn chỉ chọn <span class="closing-accent">trả nó ở đâu</span>: chờ trước với 2PL, làm lại sau với SSI, hay chấp nhận ràng buộc kiến trúc với thực thi tuần tự.</span><span class="easy-only">Giao dịch không phải một lời hứa duy nhất, mà là <span class="closing-accent">nhiều nấc an toàn khác nhau</span> — và cái tên in trên nấc thường không nói thật. Máy lo giúp bạn vài việc, còn <span class="closing-accent">"thế nào là đúng" vẫn do bạn đặt ra</span>. Nhớ nhé: muốn thật an toàn thì phải xếp hàng, và xếp hàng thì luôn phải trả giá — <span class="closing-accent">chờ trước, hoặc làm lại sau</span>.</span><span class="en-only" lang="en">A transaction is not one promise but <span class="closing-accent">a spectrum of promises</span>, and the name on each rung is less trustworthy than that system's own documentation. ACID only pins down three letters; Consistency remains <span class="closing-accent">your job</span>. A consistent snapshot saves you from read skew but <span class="closing-accent">not from write skew</span>. And when you decide to close every hole, you do not erase the cost — you only choose <span class="closing-accent">where to pay it</span>: waiting up front with 2PL, redoing work afterwards with SSI, or accepting architectural constraints with serial execution.</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-6-partitioning.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 6 · Phân mảnh</span><span class="en-only" lang="en">Chapter 6 · Partitioning</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="chapter-8-the-trouble-with-distributed-systems.html">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 8 · Rắc rối của hệ phân tán</span><span class="en-only" lang="en">Chapter 8 · The Trouble with Distributed Systems</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 7 <span lang="en">“Transactions”</span> <span class="cite"><a href="#ref-3">3</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (đếm kẹo hai hộp, kê ghế đánh số, xếp hàng…) là minh họa do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. Mọi phát biểu dạng "hệ X ở mức Y làm Z" đều dẫn tài liệu của chính hệ đó hoặc bộ kiểm thử <span lang="en">Hermitage</span>, và tên mức cô lập là <strong>tên riêng của từng sản phẩm</strong>, không phải một chuẩn chung: chuẩn <span lang="en">ANSI SQL</span> định nghĩa mức cô lập qua các hiện tượng, và cách định nghĩa ấy được chứng minh là không đủ để đặc tả các hiện thực thực tế <span class="cite"><a href="#ref-8">8</a></span>. Hành vi sản phẩm được dẫn theo tài liệu <em>hiện thời</em> (PostgreSQL bản hiện hành, MySQL 8.4, Oracle 19c) và có thể khác khung mô tả trong bản in 2017 của sách.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 7 “Transactions” <span class="cite"><a href="#ref-3">3</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (counting sweets in two boxes, numbering chairs, queueing…) are illustrations added by this companion, not examples from the book. Every claim of the form "system X at level Y does Z" cites that system's own documentation or the Hermitage test suite, and isolation-level names are <strong>each product's own names</strong>, not a shared standard: the ANSI SQL standard defines isolation through phenomena, and those definitions were shown to be insufficient to characterise real implementations <span class="cite"><a href="#ref-8">8</a></span>. Product behaviour is cited from <em>current</em> documentation (current PostgreSQL, MySQL 8.4, Oracle 19c) and may differ from the framing in the book's 2017 print edition.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 7, “Transactions”.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách</a></li>
+        <li id="ref-3"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O'Reilly — trang sách chính thức (mục lục, định danh chương)</a> <em>(oreilly.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-4"><a href="https://github.com/ept/ddia-references/blob/master/chapter-07-refs.md" target="_blank" rel="noopener noreferrer">Martin Kleppmann — danh mục tham chiếu Chương 7 của chính cuốn sách (ept/ddia-references)</a></li>
+        <li id="ref-5"><a href="https://github.com/ept/hermitage" target="_blank" rel="noopener noreferrer">Hermitage — bộ kiểm thử mức cô lập giao dịch của Martin Kleppmann (bảng “so-called isolation level” vs “actual isolation level” cho PostgreSQL, MySQL/InnoDB, Oracle, SQL Server)</a></li>
+        <li id="ref-6"><a href="https://martin.kleppmann.com/2014/11/25/hermitage-testing-the-i-in-acid.html" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “Hermitage: Testing the ‘I’ in ACID”, martin.kleppmann.com, 25/11/2014</a></li>
+        <li id="ref-7"><a href="https://dl.acm.org/doi/10.1145/289.291" target="_blank" rel="noopener noreferrer">Theo Härder &amp; Andreas Reuter, “Principles of Transaction-Oriented Database Recovery”, ACM Computing Surveys 15(4), 1983 — nguồn gốc từ viết tắt ACID</a> <em>(dl.acm.org chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-8"><a href="https://arxiv.org/abs/cs/0701157" target="_blank" rel="noopener noreferrer">Hal Berenson, Philip A. Bernstein, Jim Gray, Jim Melton, Elizabeth O'Neil, Patrick O'Neil, “A Critique of ANSI SQL Isolation Levels”, SIGMOD 1995 / MSR-TR-95-51 (arXiv:cs/0701157)</a></li>
+        <li id="ref-9"><a href="https://www.postgresql.org/docs/current/transaction-iso.html" target="_blank" rel="noopener noreferrer">PostgreSQL Documentation — “Transaction Isolation” (Read Committed, Repeatable Read = Snapshot Isolation, Serializable = SSI, SIReadLock, SQLSTATE 40001)</a></li>
+        <li id="ref-10"><a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-transaction-isolation-levels.html" target="_blank" rel="noopener noreferrer">MySQL 8.4 Reference Manual — “Transaction Isolation Levels” (InnoDB: mặc định REPEATABLE READ, consistent read, gap lock &amp; next-key lock)</a> <em>(dev.mysql.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-11"><a href="https://docs.oracle.com/en/database/oracle/oracle-database/19/cncpt/data-concurrency-and-consistency.html" target="_blank" rel="noopener noreferrer">Oracle Database 19c Concepts — “Data Concurrency and Consistency” (mặc định READ COMMITTED; SERIALIZABLE và lỗi ORA-08177)</a></li>
+        <li id="ref-12"><a href="https://www.postgresql.org/docs/current/explicit-locking.html" target="_blank" rel="noopener noreferrer">PostgreSQL Documentation — “Explicit Locking” (SELECT … FOR UPDATE, khoá hàng tường minh)</a></li>
+        <li id="ref-13"><a href="https://research.microsoft.com/en-us/um/people/gray/papers/On%20the%20Notions%20of%20Consistency%20and%20Predicate%20Locks%20in%20a%20Database%20System%20CACM.pdf" target="_blank" rel="noopener noreferrer">Kapali P. Eswaran, Jim N. Gray, Raymond A. Lorie, Irving L. Traiger, “The Notions of Consistency and Predicate Locks in a Database System”, CACM 19(11), 1976 — nguồn gốc khái niệm predicate lock</a></li>
+        <li id="ref-14"><a href="https://www.cse.iitb.ac.in/infolab/Data/Courses/CS632/2009/Papers/p492-fekete.pdf" target="_blank" rel="noopener noreferrer">Alan Fekete, Dimitrios Liarokapis, Elizabeth O'Neil, Patrick O'Neil, Dennis Shasha, “Making Snapshot Isolation Serializable”, ACM TODS 30(2), 2005</a></li>
+        <li id="ref-15"><a href="https://courses.cs.washington.edu/courses/cse444/08au/544M/READING-LIST/fekete-sigmod2008.pdf" target="_blank" rel="noopener noreferrer">Michael J. Cahill, Uwe Röhm, Alan Fekete, “Serializable Isolation for Snapshot Databases”, SIGMOD 2008 — thuật toán SSI</a></li>
+        <li id="ref-16"><a href="https://drkp.net/papers/ssi-vldb12.pdf" target="_blank" rel="noopener noreferrer">Dan R. K. Ports &amp; Kevin Grittner, “Serializable Snapshot Isolation in PostgreSQL”, VLDB 2012 — SSI trong PostgreSQL 9.1</a></li>
+        <li id="ref-17"><a href="https://www.vldb.org/conf/2007/papers/industrial/p1263-jorwekar.pdf" target="_blank" rel="noopener noreferrer">Sudhir Jorwekar, Alan Fekete, Krithi Ramamritham, S. Sudarshan, “Automating the Detection of Snapshot Isolation Anomalies”, VLDB 2007</a> <em>(vldb.org chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-18"><a href="http://cs-www.cs.yale.edu/homes/dna/papers/vldb07hstore.pdf" target="_blank" rel="noopener noreferrer">Michael Stonebraker, Samuel Madden, Daniel J. Abadi, Stavros Harizopoulos, Nabil Hachem, Pat Helland, “The End of an Architectural Era (It's Time for a Complete Rewrite)”, VLDB 2007</a></li>
+        <li id="ref-19"><a href="https://www.vldb.org/pvldb/vol1/1454211.pdf" target="_blank" rel="noopener noreferrer">Robert Kallman, Hideaki Kimura, Jonathan Natkins và cộng sự, “H-Store: A High-Performance, Distributed Main Memory Transaction Processing System”, PVLDB 1(2), 2008</a></li>
+        <li id="ref-20"><a href="https://downloads.voltactivedata.com/documentation/UsingVoltDB.pdf" target="_blank" rel="noopener noreferrer">Using VoltDB — tài liệu chính thức (thực thi tuần tự một luồng trên mỗi phân mảnh, giao dịch dưới dạng stored procedure)</a></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-6-partitioning.html">Chương 6 — Phân mảnh</a> · <a href="chapter-8-the-trouble-with-distributed-systems.html">Chương 8 — Rắc rối của hệ phân tán</a>.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-6-partitioning.html">Chapter 6 — Partitioning</a> · <a href="chapter-8-the-trouble-with-distributed-systems.html">Chapter 8 — The Trouble with Distributed Systems</a>.</p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>
