@@ -1,0 +1,2089 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 12 &quot;The Future of Data Systems&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: tích hợp dữ liệu và dữ liệu phái sinh, phê phán kiến trúc lambda, tháo rời cơ sở dữ liệu, lập luận đầu-cuối về tính đúng đắn, và trách nhiệm đạo đức khi dựng hệ dữ liệu.">
+<title>The Future of Data Systems — Tương lai của hệ dữ liệu</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 12";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 12</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 12</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 12</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 12 · Tương lai của hệ dữ liệu</span><span class="easy-only">DDIA · Chương 12 · Tương lai của hệ dữ liệu</span><span class="en-only" lang="en">DDIA · Chapter 12 · The Future of Data Systems</span></div>
+      <h1 id="page-title"><span class="standard-copy">Ghép các mảnh, rồi hỏi hệ này <span class="hero-title-accent">nên</span> làm gì</span><span class="easy-only">Ghép nhiều công cụ, và dùng cho tử tế</span><span class="en-only" lang="en">Compose the pieces, then ask what the system <span class="hero-title-accent">ought</span> to do</span></h1>
+      <p class="standard-copy">Mười một chương trước mô tả hệ dữ liệu <em>đang là</em> gì. Chương cuối là chỗ Kleppmann nói hệ dữ liệu <em>nên</em> đi về đâu — và đây là chương duy nhất ông viết ở thì tương lai, với giọng của người đề xuất chứ không chỉ người khảo sát<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. Ông bắt đầu từ một thực tế đã lộ rõ qua Phần III: <strong>không có công cụ nào làm được mọi việc</strong>, nên bài toán thật của một tổ chức không phải chọn đúng cơ sở dữ liệu, mà là <strong>ghép nhiều công cụ chuyên biệt thành một tổng thể đứng vững</strong>. Từ đó ông đi tiếp ba bước: tháo rời cơ sở dữ liệu thành các bộ phận lắp ráp quanh dòng dữ liệu, lập luận lại về <em>tính đúng đắn</em> ở mức đầu-cuối, và cuối cùng — rời hẳn địa hạt kỹ thuật — hỏi những hệ ấy đang được dùng vào việc gì.</p>
+      <p class="easy-only">Cả cuốn sách đến giờ kể về cách người ta lưu và xử lý dữ liệu. Chương cuối hỏi một câu khác: <strong>rồi sao nữa?</strong> Không có một công cụ nào giỏi mọi thứ, nên phải ghép nhiều công cụ lại. Ghép thế nào cho gọn, cho đúng, và dùng nó vào việc gì cho phải — đó là ba điều chương này nói. Nhớ nhé: chương cuối vừa nói về máy, vừa nói về người dùng máy.</p>
+      <p class="en-only" lang="en">The previous eleven chapters describe what data systems <em>are</em>. The final chapter is where Kleppmann says where they <em>ought</em> to go — the one chapter written in the future tense, in the voice of someone proposing rather than merely surveying<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. He starts from a fact Part III has made plain: <strong>no single tool can do everything</strong>, so an organisation's real problem is not picking the right database but <strong>composing several specialised tools into a whole that holds up</strong>. From there he takes three steps: unbundling the database into parts reassembled around dataflow, re-arguing <em>correctness</em> at the end-to-end level, and finally — leaving the technical ground entirely — asking what these systems are being used for.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương kết</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the closing chapter</strong>
+          <p class="standard-copy">Vì không có công cụ vạn năng, cách bền vững để dựng hệ dữ liệu là <strong>chọn một nguồn sự thật rồi phái sinh mọi thứ khác từ dòng thay đổi của nó theo một trật tự xác định</strong> — thay cho việc buộc các hệ khác nhau lại bằng giao dịch phân tán<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-9">9</a></span>. Nhưng dòng dữ liệu chỉ giải quyết phần cơ học; <em>tính đúng đắn</em> phải được lập luận ở hai đầu ứng dụng chứ không phó mặc cho tầng dưới<span class="cite"><a href="#ref-5">5</a></span>, và <em>trách nhiệm</em> với người bị hệ ấy phân loại thì không có tầng nào gánh hộ<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Không có công cụ nào làm được hết mọi việc. Vậy thì chọn một chỗ làm "bản gốc", rồi mọi bản sao khác đều sinh ra từ đó theo đúng thứ tự. Làm vậy thì gọn và ít hỏng hơn là bắt các hệ bắt tay nhau từng lần một. Nhớ nhé: một bản gốc, nhiều bản sinh ra từ nó — và ai dựng hệ thì chịu trách nhiệm về việc hệ làm.</p>
+          <p class="en-only" lang="en">Because no tool does everything, the durable way to build a data system is to <strong>pick one source of truth and derive everything else from its change log in a fixed order</strong> — instead of lashing different systems together with distributed transactions<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-9">9</a></span>. But dataflow only solves the mechanics; <em>correctness</em> must be argued at the application's two ends rather than delegated downward<span class="cite"><a href="#ref-5">5</a></span>, and <em>responsibility</em> toward the people such a system classifies is carried by no lower layer at all<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Bốn trục của Chương 12: tích hợp dữ liệu, tháo rời cơ sở dữ liệu, hướng tới tính đúng đắn, và làm điều đúng đắn / The four axes of Chapter 12: data integration, unbundling the database, aiming for correctness, and doing the right thing">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">HỆ DỮ LIỆU<br>NÊN ĐI<br>VỀ ĐÂU?</span><span class="en-only" lang="en">WHERE SHOULD<br>DATA SYSTEMS<br>GO NEXT?</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Dataflow</span><span class="en-only" lang="en">Dataflow</span></b>
+        <small class="standard-copy">Một nguồn sự thật, mọi thứ khác là phái sinh</small>
+        <small class="easy-only">Một bản gốc, các bản khác sinh ra từ nó.</small>
+        <small class="en-only" lang="en">One source of truth, everything else derived</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Correctness</span><span class="en-only" lang="en">Correctness</span></b>
+        <small class="standard-copy">Lập luận ở hai đầu, không phó mặc tầng dưới</small>
+        <small class="easy-only">Kiểm ở hai đầu, đừng tin mỗi tầng giữa.</small>
+        <small class="en-only" lang="en">Argued end-to-end, not delegated downward</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Responsibility</span><span class="en-only" lang="en">Responsibility</span></b>
+        <small class="standard-copy">Hệ ấy đang được dùng vào việc gì</small>
+        <small class="easy-only">Hệ này đang được dùng để làm gì?</small>
+        <small class="en-only" lang="en">What the system is actually used for</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#data-integration"><span><span class="vi-only">Tích hợp</span><span class="en-only" lang="en">Integration</span></span><b class="standard-copy">Không công cụ vạn năng, nên phải ghép</b><b class="easy-only">Không cái nào làm được hết</b><b class="en-only" lang="en">No one tool, so compose them</b></a>
+    <a href="#unbundling"><span><span class="vi-only">Tháo rời</span><span class="en-only" lang="en">Unbundling</span></span><b class="standard-copy">Cơ sở dữ liệu như bộ phận lắp ráp được</b><b class="easy-only">Tháo tủ ra thành từng ngăn</b><b class="en-only" lang="en">The database as assemblable parts</b></a>
+    <a href="#correctness"><span><span class="vi-only">Đúng đắn</span><span class="en-only" lang="en">Correctness</span></span><b class="standard-copy">Lập luận đầu-cuối, vì giao dịch chưa đủ</b><b class="easy-only">Kiểm ở hai đầu cho chắc</b><b class="en-only" lang="en">End-to-end, because transactions aren't enough</b></a>
+    <a href="#doing-the-right-thing"><span><span class="vi-only">Trách nhiệm</span><span class="en-only" lang="en">Responsibility</span></span><b class="standard-copy">Hệ dữ liệu được dùng vào việc gì</b><b class="easy-only">Dùng dữ liệu cho tử tế</b><b class="en-only" lang="en">What data systems are used for</b></a>
+  </nav>
+
+  <section class="section" id="data-integration" aria-labelledby="data-integration-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">Data integration</span></span><span class="en-only" lang="en">Axis 1 · Data integration</span></div>
+        <h2 id="data-integration-title"><span class="vi-only">Không có công cụ vạn năng — nên bài toán thật là ghép</span><span class="en-only" lang="en">No tool does everything — so the real problem is composition</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann mở chương bằng một quan sát nhàm chán mà quyết định tất cả: mọi công cụ dữ liệu đều được tối ưu cho một kiểu truy cập, nên <strong>không công cụ nào phục vụ được mọi truy cập</strong><span class="cite"><a href="#ref-1">1</a></span>. Một tổ chức thực tế vì thế luôn có cùng một dữ liệu nằm ở nhiều nơi: cơ sở dữ liệu giao dịch, chỉ mục tìm kiếm, cache, kho phân tích, hệ khuyến nghị. Câu hỏi kỹ thuật không còn là "chọn cái nào", mà là <strong>giữ cho những bản khác nhau ấy không mâu thuẫn với nhau</strong>. Ông đưa ra một câu trả lời duy nhất cho cả phần này: chọn <em>một</em> hệ làm nguồn sự thật, rồi <strong>phái sinh</strong> mọi hệ còn lại từ dòng thay đổi của nó, theo một trật tự xác định<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Không có cái hộp nào đựng được mọi thứ. Cái tủ lạnh giỏi giữ lạnh, cái kệ giỏi bày ra cho dễ nhìn — nhưng cùng một món đồ có thể phải để ở cả hai. Vấn đề là: nếu ở chỗ này đã đổi mà chỗ kia chưa, ta sẽ tin chỗ nào? Cách của tác giả: chọn <strong>một chỗ làm bản gốc</strong>, rồi mọi chỗ khác chép lại theo đúng thứ tự từ bản gốc đó.</p>
+      <p class="en-only" lang="en">Kleppmann opens the chapter with a dull observation that decides everything: every data tool is optimised for one access pattern, so <strong>no tool serves every access pattern</strong><span class="cite"><a href="#ref-1">1</a></span>. A real organisation therefore always has the same data in several places: a transactional database, a search index, caches, an analytics warehouse, a recommendation system. The engineering question is no longer "which one", but <strong>how to keep those copies from contradicting one another</strong>. He gives one answer for this whole part: pick <em>one</em> system as the source of truth, then <strong>derive</strong> all the others from its change log in a fixed order<span class="cite"><a href="#ref-1">1</a></span>.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Data integration = choosing a source of truth, then deriving the rest</div>
+        <p class="definition standard-copy">Tích hợp dữ liệu, theo nghĩa vừa nêu, không phải là đồng bộ hai chiều giữa các hệ ngang hàng, mà là dựng một <strong>quan hệ có hướng</strong>: một hệ giữ sự thật, các hệ khác là <em>dữ liệu phái sinh</em> — có thể vứt đi và dựng lại từ nguồn bất cứ lúc nào. Chính tính "dựng lại được" ấy mới là thứ làm hệ dễ sửa sai.</p>
+        <p class="definition easy-only">Ghép dữ liệu không phải là hai bên cùng sửa rồi bắt tay nhau. Mà là: một bên giữ bản gốc, bên kia chép theo. Chép sai thì xóa đi chép lại từ gốc. Nhớ nhé: có bản gốc thì bao giờ cũng làm lại được.</p>
+        <p class="definition en-only" lang="en">Data integration, in the sense just given, is not two-way synchronisation between peers but a <strong>directed relationship</strong>: one system holds the truth, the others are <em>derived data</em> — discardable and rebuildable from the source at any time. That rebuildability is precisely what makes the system recoverable from mistakes.</p>
+        <p class="deep-only">Điểm tinh tế: sự khác nhau giữa "nguồn sự thật" và "phái sinh" không nằm ở công nghệ mà ở <em>vai trò ta gán cho nó</em><span class="cite"><a href="#ref-1">1</a></span>. Cùng một cơ sở dữ liệu quan hệ có thể là nguồn ở hệ này và là bản phái sinh ở hệ khác. Việc gán vai trò rõ ràng có một hệ quả thực tế lớn: khi hai hệ bất đồng, ta biết ngay phải sửa bên nào, và có thể dựng lại bên kia bằng cách phát lại nhật ký thay vì đi vá từng bản ghi. Kleppmann xem đây là khác biệt then chốt giữa một kiến trúc tích hợp có kỷ luật và một mớ đường ghi chéo chằng chịt.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về tích hợp dữ liệu">
+        <div class="equation-row">
+          <b>Không công cụ vạn năng</b>
+          <span>Mỗi công cụ tối ưu cho một kiểu truy cập; nhiều bản sao là điều tất yếu, không phải lỗi thiết kế.</span>
+        </div>
+        <div class="equation-row">
+          <b>Phái sinh, không đồng bộ hai chiều</b>
+          <span>Một nguồn sự thật; mọi hệ khác sinh ra từ nhật ký thay đổi của nó theo trật tự xác định.</span>
+        </div>
+        <div class="equation-row">
+          <b>Dựng lại được</b>
+          <span>Bản phái sinh sai thì xóa và phát lại từ đầu — thứ mà giao dịch phân tán không cho bạn.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về tích hợp dữ liệu">
+        <div class="equation-row">
+          <b>Không cái nào làm hết</b>
+          <span>Mỗi công cụ giỏi một việc, nên dữ liệu nằm ở nhiều chỗ là bình thường.</span>
+        </div>
+        <div class="equation-row">
+          <b>Có một bản gốc</b>
+          <span>Chọn một chỗ làm chuẩn; các chỗ khác chép theo đúng thứ tự.</span>
+        </div>
+        <div class="equation-row">
+          <b>Chép sai thì làm lại</b>
+          <span>Bản chép hỏng thì xóa đi chép lại — bản gốc vẫn còn nguyên.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about data integration">
+        <div class="equation-row">
+          <b>No universal tool</b>
+          <span>Each tool is optimised for one access pattern; multiple copies are inevitable, not a design failure.</span>
+        </div>
+        <div class="equation-row">
+          <b>Derive, don't two-way sync</b>
+          <span>One source of truth; every other system is derived from its change log in a fixed order.</span>
+        </div>
+        <div class="equation-row">
+          <b>Rebuildable</b>
+          <span>A wrong derived view is deleted and replayed from scratch — something distributed transactions never give you.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Combining specialised tools by deriving data</div>
+          <h3><span class="vi-only">Ghép công cụ bằng cách phái sinh</span><span class="en-only" lang="en">Composing tools by deriving data</span></h3>
+          <p class="standard-copy">Khi một dữ liệu phải xuất hiện ở nhiều hệ, phản xạ thường gặp là <em>ghi kép</em>: ứng dụng tự ghi vào cơ sở dữ liệu rồi ghi tiếp vào chỉ mục tìm kiếm. Kleppmann chỉ ra hai chỗ hỏng của cách này<span class="cite"><a href="#ref-1">1</a></span>: hai lệnh ghi đồng thời có thể tới hai hệ theo hai thứ tự khác nhau, và nếu một lệnh thành công còn lệnh kia thất bại thì hai hệ lệch nhau vĩnh viễn. Cách thay thế: cho ứng dụng chỉ ghi vào <em>một</em> hệ, rồi để mọi hệ còn lại tiêu thụ nhật ký thay đổi của hệ ấy. Nhật ký áp một trật tự toàn phần duy nhất, nên mọi bản phái sinh cuối cùng hội tụ về cùng một trạng thái.</p>
+          <p class="easy-only">Muốn món đồ có mặt ở hai chỗ, đừng tự tay đặt vào từng chỗ một — dễ quên một chỗ, hoặc đặt nhầm thứ tự. Hãy đặt vào <strong>một chỗ</strong> thôi, rồi ghi vào sổ: "đã đặt cái này". Chỗ còn lại cứ theo sổ mà làm đúng thứ tự. Nhớ nhé: có cuốn sổ chung thì hai bên không cãi nhau được.</p>
+          <p class="en-only" lang="en">When one piece of data must appear in several systems, the common reflex is a <em>dual write</em>: the application writes to the database, then writes again to the search index. Kleppmann points out two ways that breaks<span class="cite"><a href="#ref-1">1</a></span>: two concurrent writes can reach the two systems in different orders, and if one write succeeds while the other fails the two systems diverge permanently. The alternative: let the application write to <em>one</em> system only, then have every other system consume that system's change log. The log imposes a single total order, so all derived copies eventually converge on the same state.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Thấy ở đâu</strong>Chỉ mục tìm kiếm dựng từ change data capture của cơ sở dữ liệu chính; cache và bảng tổng hợp cập nhật theo cùng một nhật ký thay vì được ứng dụng ghi thẳng vào.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ô tìm kiếm của một trang web: nó không tự lưu hàng, nó chép lại từ kho hàng chính.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>A search index built from the primary database's change data capture; caches and summary tables updated from the same log rather than written directly by the application.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cơ chế</h4>
+              <p>Nhật ký thay đổi cho ba thứ cùng lúc<span class="cite"><a href="#ref-1">1</a></span>: một <em>trật tự toàn phần</em> để mọi bên tiêu thụ giống hệt nhau, một <em>vị trí đọc</em> để bên tiêu thụ chậm bắt kịp mà không mất dữ liệu, và một <em>lịch sử</em> để dựng lại bản phái sinh từ con số không. Bản phái sinh trở thành một hàm xác định của nhật ký, nên kết quả không phụ thuộc vào việc ai chạy trước ai.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao ghi kép hỏng âm thầm</h4>
+              <p>Hai lệnh ghi kép không phải là một giao dịch nguyên tử, nên lỗi của chúng là <em>bán phần</em>: hệ vẫn chạy, chỉ có hai bản dữ liệu lệch nhau — và không có thời điểm nào hệ báo lỗi. Đây là kiểu hỏng tệ nhất, vì nó chỉ lộ ra nhiều tháng sau qua một báo cáo sai.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Derived data versus distributed transactions</div>
+          <h3><span class="vi-only">Dữ liệu phái sinh so với giao dịch phân tán</span><span class="en-only" lang="en">Derived data versus distributed transactions</span></h3>
+          <p class="standard-copy">Có hai lời giải cổ điển cho bài toán giữ nhiều hệ nhất quán. Giao dịch phân tán dùng <em>khóa</em> để áp trật tự và <em>cam kết nguyên tử</em> để lệnh ghi xuất hiện đúng một lần; hệ phái sinh dựa trên nhật ký dùng <em>trật tự của nhật ký</em> và <em>tính lũy đẳng</em><span class="cite"><a href="#ref-1">1</a></span>. Kleppmann nêu rõ đánh đổi: giao dịch phân tán cho bảo đảm mạnh hơn — khả tuyến tính hóa, đọc thấy ngay cái mình vừa ghi — nhưng lịch sử hiện thực của nó (2PC, XA) cho thấy dung thứ lỗi kém và hiệu năng kém. Hệ phái sinh chỉ đạt nhất quán cuối cùng, nhưng bất đồng bộ nên chịu lỗi tốt hơn và mở rộng xa hơn. Với ông, đó là lý do <strong>kiến trúc dựa trên nhật ký là hướng thực dụng hơn cho tích hợp dữ liệu quy mô lớn</strong>, dù giao dịch phân tán vẫn có chỗ đứng riêng.</p>
+          <p class="easy-only">Có hai cách bắt nhiều chỗ đồng ý với nhau. Cách một: bắt tất cả cùng gật đầu một lượt rồi mới làm — chắc chắn, nhưng chỉ cần một người vắng mặt là cả nhóm đứng chờ. Cách hai: cứ ghi vào sổ chung, ai rảnh thì đọc sổ mà làm theo — có thể chậm vài nhịp, nhưng một người bận thì nhóm vẫn chạy. Nhớ nhé: chắc-mà-dễ-kẹt, hay chậm-một-nhịp-mà-không-kẹt — phải chọn.</p>
+          <p class="en-only" lang="en">There are two classical answers to keeping several systems consistent. Distributed transactions use <em>locks</em> to impose order and <em>atomic commit</em> so a write appears exactly once; log-based derived systems use <em>the log's order</em> and <em>idempotence</em><span class="cite"><a href="#ref-1">1</a></span>. Kleppmann states the trade-off plainly: distributed transactions give the stronger guarantee — linearizability, reading your own write immediately — but their implementation history (2PC, XA) shows poor fault tolerance and poor performance. Derived systems achieve only eventual consistency, but being asynchronous they tolerate faults better and scale further. For him that is why <strong>log-based architectures are the more pragmatic direction for large-scale data integration</strong>, even though distributed transactions keep a place of their own.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cách đọc đúng</strong>Đây không phải lời tuyên bố "giao dịch phân tán đã chết", mà là một phán đoán về chi phí: bảo đảm mạnh hơn phải trả bằng khả năng chịu lỗi và quy mô.</div>
+            <div class="easy-only"><strong>Cách đọc đúng</strong>Không phải cách kia sai — chỉ là đắt hơn, và bạn phải biết mình đang trả bằng gì.</div>
+            <div class="en-only" lang="en"><strong>How to read it</strong>This is not a declaration that distributed transactions are dead, but a judgement about cost: the stronger guarantee is paid for in fault tolerance and scale.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Bối cảnh: lời phản đối của Helland</h4>
+              <p>Lập luận này nối vào một tuyến có trước trong ngành: Pat Helland từng lập luận rằng ở quy mô lớn, ứng dụng nên từ bỏ giao dịch phân tán và làm việc với các "thực thể" độc lập trao đổi thông điệp, chấp nhận rằng trạng thái ở xa chỉ là ký ức chứ không phải sự thật tức thời<span class="cite"><a href="#ref-9">9</a></span>. Kleppmann dẫn tuyến này và đẩy nó xa hơn: nếu thông điệp được lưu thành một nhật ký bền vững, ta còn dựng lại được toàn bộ trạng thái phái sinh.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khi nào giao dịch phân tán vẫn hợp lý</h4>
+              <p>Khi các bên tham gia nằm trong cùng một hệ, số lượng nhỏ, và ứng dụng thật sự cần đọc thấy ngay kết quả vừa ghi. Kleppmann không loại bỏ chúng; ông chỉ nói rằng dùng chúng làm <em>keo dán chung</em> cho toàn bộ hạ tầng dữ liệu của một tổ chức là lựa chọn kém bền<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The lambda architecture — and why he objects</div>
+          <h3><span class="vi-only">Kiến trúc lambda — và vì sao ông phê phán</span><span class="en-only" lang="en">The lambda architecture — and why he objects</span></h3>
+          <p class="standard-copy">Kiến trúc lambda, do Nathan Marz và James Warren trình bày<span class="cite"><a href="#ref-7">7</a></span>, chạy song song hai tầng trên cùng một dòng sự kiện bất biến: một <em>tầng mẻ</em> xử lý lại toàn bộ lịch sử để cho ra khung nhìn chính xác nhưng trễ, và một <em>tầng luồng</em> cho ra khung nhìn xấp xỉ nhưng tức thời; lúc đọc thì hợp nhất hai kết quả. Kleppmann ghi nhận ý lõi là đúng — dữ liệu gốc bất biến, mọi khung nhìn đều phái sinh và dựng lại được — nhưng <strong>phê phán cách hiện thực</strong><span class="cite"><a href="#ref-1">1</a></span>: bạn phải viết <em>cùng một logic hai lần</em> trong hai khung làm việc khác nhau và giữ chúng đồng nghĩa với nhau; bạn phải viết thêm mã hợp nhất hai đầu ra ở đường đọc; và việc xử lý lại toàn bộ lịch sử theo mẻ thì đắt tới mức nhiều đội chỉ dám làm trên cửa sổ tăng dần, làm mất đúng cái lợi mà kiến trúc hứa hẹn. Jay Kreps đặt cùng những phản đối ấy trong một bài riêng mà Kleppmann dẫn lại<span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <p class="easy-only">Có một cách làm nổi tiếng: chạy hai dây chuyền cùng lúc — một dây chậm mà chính xác, một dây nhanh mà hơi ẩu — rồi lúc cần thì trộn hai kết quả. Tác giả nói ý tưởng gốc thì hay, nhưng làm thật thì mệt: <strong>bạn phải viết cùng một công thức hai lần</strong> bằng hai thứ tiếng khác nhau, rồi lại phải viết thêm phần trộn. Nhớ nhé: đây là chỗ tác giả <em>chê</em>, không phải chỗ ông khen.</p>
+          <p class="en-only" lang="en">The lambda architecture, presented by Nathan Marz and James Warren<span class="cite"><a href="#ref-7">7</a></span>, runs two layers in parallel over the same immutable event stream: a <em>batch layer</em> that reprocesses the whole history to produce an accurate but delayed view, and a <em>stream layer</em> that produces an approximate but immediate one; reads merge the two. Kleppmann credits the core idea — immutable source data, all views derived and rebuildable — but <strong>objects to the implementation</strong><span class="cite"><a href="#ref-1">1</a></span>: you must write <em>the same logic twice</em> in two different frameworks and keep them semantically identical; you must write extra merging code on the read path; and reprocessing the entire history in batch is expensive enough that many teams only do it over incrementing windows, losing exactly the benefit the architecture promised. Jay Kreps sets out the same objections in a piece Kleppmann cites<span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đừng đọc ngược</strong>Chương này <em>không</em> giới thiệu lambda như thực hành tốt nên theo. Nó giữ lại tiền đề (nhật ký bất biến, khung nhìn phái sinh) và bác bỏ cấu trúc hai tầng.</div>
+            <div class="easy-only"><strong>Đừng đọc ngược</strong>Tác giả giữ lại ý "có bản gốc bất biến", nhưng bỏ cách "chạy hai dây chuyền".</div>
+            <div class="en-only" lang="en"><strong>Don't read it backwards</strong>The chapter does <em>not</em> present lambda as good practice to adopt. It keeps the premise (immutable log, derived views) and rejects the two-layer structure.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Chi phí thật của "viết hai lần"</h4>
+              <p>Hai khung làm việc khác nhau có ngữ nghĩa khác nhau về cửa sổ thời gian, về sự kiện tới muộn, về xử lý lại sau lỗi. Giữ hai hiện thực cho ra cùng kết quả không phải công việc làm một lần rồi thôi, mà là một ràng buộc phải bảo trì mãi mãi — đúng loại phức tạp ngẫu sinh mà Chương 1 khuyên nên gỡ bỏ<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Hướng thay thế của Kleppmann</h4>
+              <p>Hướng thay thế được khai triển ở thẻ 04 bên dưới: <em>hợp nhất</em> mẻ và luồng trong một hệ duy nhất, bằng một bộ xử lý luồng đủ mạnh để phát lại lịch sử như một dòng sự kiện, có bảo đảm chịu lỗi và xử lý được sự kiện tới muộn, thì làm được cả hai việc mà không cần nhân đôi logic.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Unifying batch and stream processing</div>
+          <h3><span class="vi-only">Hợp nhất xử lý mẻ và xử lý luồng</span><span class="en-only" lang="en">Unifying batch and stream</span></h3>
+          <p class="standard-copy">Nếu vấn đề của lambda là phải hiện thực hai lần, lời giải là làm cho <strong>một hệ duy nhất chạy được cả hai chế độ</strong><span class="cite"><a href="#ref-1">1</a></span>. Kleppmann liệt kê những mảnh đã có: khả năng phát lại dữ liệu lịch sử qua chính bộ máy xử lý luồng; bảo đảm chịu lỗi đủ mạnh để kết quả của một lần chạy lại giống hệt lần chạy trước; và các công cụ xử lý cửa sổ theo <em>thời gian sự kiện</em> chứ không theo thời gian xử lý, để việc chạy lại lịch sử không cho ra kết quả khác với lúc chạy trực tiếp. Khi cả ba có mặt, xử lý mẻ chỉ còn là một trường hợp riêng của xử lý luồng — dòng dữ liệu tình cờ đã kết thúc.</p>
+          <p class="easy-only">Nếu phiền ở chỗ phải làm hai lần, thì hãy làm một cái máy chạy được cả hai kiểu: vừa xử lý được đồ đang tới, vừa tua lại được đồ cũ bằng đúng cách ấy. Nhớ nhé: một công thức, chạy cho cả cái mới lẫn cái cũ.</p>
+          <p class="en-only" lang="en">If lambda's problem is implementing everything twice, the fix is to make <strong>one system run both modes</strong><span class="cite"><a href="#ref-1">1</a></span>. Kleppmann lists the pieces that already exist: replaying historical data through the same stream engine; fault-tolerance guarantees strong enough that a re-run produces the same result as the original run; and windowing by <em>event time</em> rather than processing time, so replaying history doesn't yield a different answer than live processing did. With all three present, batch processing is just a special case of stream processing — over a stream that happens to have ended.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thực tế</strong>Việc "chạy lại" chuyển từ một dự án lớn thành một thao tác thường ngày: sửa logic, tua lại nhật ký, dựng khung nhìn mới song song, rồi chuyển sang dùng nó.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Sửa công thức xong thì cứ tua lại từ đầu, không cần dựng lại cả hệ.</div>
+            <div class="en-only" lang="en"><strong>The practical upshot</strong>"Reprocessing" turns from a major project into an everyday operation: change the logic, replay the log, build the new view alongside, then switch over.</div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ ghép công cụ đến tháo rời cơ sở dữ liệu</strong>
+      <strong class="en-only" lang="en">From composing tools to unbundling the database</strong>
+      <span class="standard-copy">Nếu mọi hệ ngoài nguồn sự thật đều là dữ liệu phái sinh, thì ranh giới giữa "bên trong một cơ sở dữ liệu" và "giữa nhiều hệ" bắt đầu mờ đi: chỉ mục thứ cấp, khung nhìn vật chất hóa, nhật ký sao chép — tất cả cũng chỉ là dữ liệu phái sinh, chỉ khác là được đóng gói sẵn. Chính nhận xét đó là bàn đạp cho ý lớn thứ hai của chương.</span>
+      <span class="easy-only">Nếu mọi chỗ khác đều chỉ là bản chép từ bản gốc, thì bên trong một cái tủ hay giữa nhiều cái tủ cũng vậy thôi. Phần tiếp theo mở cái tủ ra xem bên trong có gì.</span>
+      <span class="en-only" lang="en">If every system other than the source of truth is derived data, the line between "inside one database" and "across several systems" starts to blur: secondary indexes, materialised views, replication logs — all of them are derived data too, merely pre-packaged. That observation is the springboard for the chapter's second big idea.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="unbundling" aria-labelledby="unbundling-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · <span lang="en">Unbundling the database</span></span><span class="en-only" lang="en">Axis 2 · Unbundling the database</span></div>
+        <h2 id="unbundling-title"><span class="vi-only">Tháo rời cơ sở dữ liệu thành những bộ phận lắp ráp được</span><span class="en-only" lang="en">Unbundling the database into assemblable parts</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann đặt cạnh nhau hai truyền thống thiết kế<span class="cite"><a href="#ref-1">1</a></span>: triết lý Unix — nhiều công cụ nhỏ, làm một việc, nối với nhau qua một giao diện thống nhất — và triết lý cơ sở dữ liệu quan hệ — một hệ tích hợp, truy vấn khai báo, trừu tượng hóa mọi thứ bên dưới. Rồi ông nêu một quan sát đảo chiều: dòng dữ liệu chảy qua một tổ chức hiện đại <strong>đang bắt đầu trông giống ruột của một cơ sở dữ liệu khổng lồ</strong>, chỉ có điều các bộ phận nằm rời ra. Nhật ký sao chép, chỉ mục thứ cấp, khung nhìn vật chất hóa, cache — hóa ra đều là cùng một việc: <em>duy trì một khung nhìn phái sinh</em>. Nếu vậy thì thay vì cố nhét mọi thứ vào một sản phẩm, ta có thể <strong>tháo rời</strong> cơ sở dữ liệu và lắp lại các bộ phận quanh dòng dữ liệu của riêng mình.</p>
+      <p class="easy-only">Có hai cách làm bếp. Cách một: mua một cái máy đa năng làm tất cả. Cách hai: có nhiều dụng cụ nhỏ, mỗi cái một việc, nối với nhau. Tác giả nhận ra: bên trong cái máy đa năng thật ra cũng chỉ là mấy dụng cụ nhỏ ghép lại thôi. Vậy thì tháo nó ra, rồi tự lắp theo ý mình cũng được.</p>
+      <p class="en-only" lang="en">Kleppmann sets two design traditions side by side<span class="cite"><a href="#ref-1">1</a></span>: the Unix philosophy — many small tools, each doing one thing, joined through a uniform interface — and the relational database philosophy — one integrated system, declarative queries, everything underneath abstracted away. Then he makes an inverting observation: the dataflow running through a modern organisation <strong>is starting to look like the insides of one enormous database</strong>, only with the parts lying loose. Replication logs, secondary indexes, materialised views, caches — they all turn out to be the same job: <em>maintaining a derived view</em>. If so, rather than cramming everything into one product, we can <strong>unbundle</strong> the database and reassemble its parts around our own dataflow.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Unbundling = treating log, index and view as separate, composable parts</div>
+        <p class="definition standard-copy">Tháo rời không phải là bỏ cơ sở dữ liệu, mà là <strong>nhìn ra các bộ phận bên trong nó và gọi tên chúng</strong>: một nhật ký ghi có thứ tự, những bộ máy dựng chỉ mục, và những khung nhìn được duy trì tăng dần. Một khi đã tách, ta có thể chọn hiện thực khác nhau cho từng bộ phận và nối chúng bằng dòng sự kiện — giống hệt cách Kleppmann trình bày trong bài nói "lật ruột cơ sở dữ liệu ra ngoài"<span class="cite"><a href="#ref-6">6</a></span>.</p>
+        <p class="definition easy-only">Tháo rời không phải là vứt cái tủ đi. Là mở nó ra, nhìn thấy từng ngăn làm việc gì, rồi tự chọn ngăn mình cần. Nhớ nhé: biết bên trong có gì thì mới lắp lại theo ý mình được.</p>
+        <p class="definition en-only" lang="en">Unbundling is not abandoning the database but <strong>seeing its internal parts and naming them</strong>: an ordered write log, index-building machinery, and incrementally maintained views. Once separated, each part can have a different implementation, joined by event streams — exactly the picture Kleppmann sets out in his "turning the database inside-out" talk<span class="cite"><a href="#ref-6">6</a></span>.</p>
+        <p class="deep-only">Kleppmann thẳng thắn rằng bức tranh này còn dở dang<span class="cite"><a href="#ref-1">1</a></span>: hệ tháo rời hiện chưa có thứ tương đương với <em>shell</em> của Unix hay với ngôn ngữ truy vấn khai báo của cơ sở dữ liệu quan hệ — nghĩa là chưa có cách ngắn gọn, ở mức cao, để mô tả "hãy duy trì khung nhìn này từ nhật ký kia". Vì thế phần lớn công việc tích hợp hôm nay vẫn là mã keo viết tay. Ông xem việc lấp chỗ trống đó là một trong những hướng đáng làm nhất của thập kỷ tới, chứ không phải một chi tiết phụ.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về việc tháo rời cơ sở dữ liệu">
+        <div class="equation-row">
+          <b>Chỉ mục là dữ liệu phái sinh</b>
+          <span>Dựng chỉ mục = quét lại toàn bộ dữ liệu rồi giữ cho nó theo kịp — đúng việc mà mọi bản phái sinh đều làm.</span>
+        </div>
+        <div class="equation-row">
+          <b>Liên bang hóa đọc, tháo rời ghi</b>
+          <span>Một bên thống nhất đường đọc qua nhiều kho; bên kia thống nhất đường ghi. Phần khó nằm ở đường ghi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Biên có thể dời</b>
+          <span>Tính trước lúc ghi hay tính lúc đọc chỉ là hai vị trí của cùng một đường biên.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về việc tháo rời cơ sở dữ liệu">
+        <div class="equation-row">
+          <b>Mục lục cũng là bản chép</b>
+          <span>Cái mục lục ở đầu sách cũng chỉ là chép lại từ nội dung sách.</span>
+        </div>
+        <div class="equation-row">
+          <b>Khó nhất là lúc ghi</b>
+          <span>Đọc từ nhiều chỗ thì dễ; ghi vào nhiều chỗ cho khớp mới khó.</span>
+        </div>
+        <div class="equation-row">
+          <b>Làm trước hay làm sau</b>
+          <span>Dọn sẵn từ tối hôm trước, hay sáng dậy mới dọn — chọn một.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about unbundling the database">
+        <div class="equation-row">
+          <b>An index is derived data</b>
+          <span>Building an index = rescanning everything, then keeping it up to date — the job every derived view does.</span>
+        </div>
+        <div class="equation-row">
+          <b>Federate reads, unbundle writes</b>
+          <span>One approach unifies the read path across stores; the other unifies the write path. The hard part is writes.</span>
+        </div>
+        <div class="equation-row">
+          <b>The boundary moves</b>
+          <span>Precomputing at write time and computing at read time are two positions of the same boundary.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Creating an index is derived-data maintenance</div>
+          <h3><span class="vi-only">Dựng chỉ mục chính là duy trì dữ liệu phái sinh</span><span class="en-only" lang="en">Creating an index is derived-data maintenance</span></h3>
+          <p class="standard-copy">Khi bạn ra lệnh tạo một chỉ mục mới, cơ sở dữ liệu quét toàn bộ bảng, dựng cấu trúc chỉ mục, rồi bắt kịp mọi thay đổi đã xảy ra trong lúc quét và tiếp tục cập nhật theo thời gian thực<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann chỉ ra rằng đây <em>chính xác</em> là quy trình dựng một bản sao mới trong sao chép, và cũng chính xác là quy trình dựng một chỉ mục tìm kiếm ngoài hệ từ nhật ký thay đổi. Ba việc tưởng khác nhau hóa ra là một khuôn: <strong>xử lý lại lịch sử, rồi theo kịp dòng mới</strong>. Nhận ra khuôn chung này là bước đầu tiên của việc tháo rời.</p>
+          <p class="easy-only">Muốn làm mục lục cho một cuốn sách đã viết xong, bạn phải đọc lại từ đầu, ghi ra từng mục, rồi từ đó về sau viết thêm trang nào thì ghi bổ sung trang đó. Dựng bản sao dữ liệu cũng y hệt vậy. Nhớ nhé: làm lại từ đầu, rồi bám theo cái mới — chỉ có một cách thôi.</p>
+          <p class="en-only" lang="en">When you ask a database to create a new index, it scans the whole table, builds the index structure, catches up on the changes that happened during the scan, and then keeps it current<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann points out that this is <em>exactly</em> the procedure for building a new replica, and exactly the procedure for building an external search index from a change log. Three seemingly different jobs turn out to share one shape: <strong>reprocess the history, then keep up with the new</strong>. Recognising that shared shape is the first step of unbundling.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Thấy ở đâu</strong>Thêm bản sao mới, dựng lại chỉ mục tìm kiếm, tính lại một bảng tổng hợp sau khi sửa logic — cùng một quy trình, khác tên gọi.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Làm lại mục lục, chép thêm một bản, tính lại bảng điểm — vẫn là một việc.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Adding a replica, rebuilding a search index, recomputing a summary table after a logic change — one procedure under three names.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Hệ quả: dời tính năng ra ngoài</h4>
+              <p>Nếu dựng chỉ mục chỉ là một hàm xác định trên nhật ký, thì nó không nhất thiết phải nằm trong cùng tiến trình với kho lưu trữ. Đây là nội dung của ý "lật ruột cơ sở dữ liệu ra ngoài": đưa nhật ký ghi lên thành tạo phẩm hạng nhất, còn mọi khung nhìn — kể cả trạng thái mà ứng dụng đọc — chỉ là người tiêu thụ nhật ký ấy<span class="cite"><a href="#ref-6">6</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cái giá phải trả</h4>
+              <p>Đổi lại sự linh hoạt, bạn mất những thứ mà một hệ tích hợp cho sẵn: giao dịch bao trùm nhiều chỉ mục, trình tối ưu truy vấn hiểu mọi cấu trúc, và một chỗ duy nhất để gỡ lỗi. Kleppmann nói thẳng rằng tháo rời chỉ đáng khi nhu cầu của bạn vượt khỏi những gì một sản phẩm đơn lẻ phục vụ được<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Federation versus unbundling</div>
+          <h3><span class="vi-only">Liên bang hóa đường đọc, tháo rời đường ghi</span><span class="en-only" lang="en">Federating reads, unbundling writes</span></h3>
+          <p class="standard-copy">Kleppmann phân biệt hai cách ghép các kho dữ liệu không đồng nhất<span class="cite"><a href="#ref-1">1</a></span>. <em>Liên bang hóa</em> dựng một giao diện truy vấn thống nhất ở trên nhiều kho khác nhau, để một câu truy vấn đọc được từ tất cả — tiện, nhưng mỗi kho vẫn tự quản lý dữ liệu của mình và bài toán nhất quán khi ghi vẫn nguyên đó. <em>Tháo rời</em> tấn công đầu bên kia: thống nhất <strong>đường ghi</strong>, để một lần ghi lan ra mọi hệ liên quan theo trật tự xác định. Ông cho rằng phần khó, và cũng là phần quan trọng hơn, nằm ở đường ghi — vì đó là nơi các bản dữ liệu lệch nhau.</p>
+          <p class="easy-only">Có hai cách làm cho nhiều cái tủ hoạt động như một. Cách một: làm một cái cửa sổ chung để nhìn vào tất cả các tủ cùng lúc. Cách hai: làm sao cho hễ cất đồ vào một tủ là các tủ kia biết ngay. Cách một dễ hơn, nhưng cách hai mới giải quyết được chuyện các tủ nói khác nhau. Nhớ nhé: nhìn thì dễ, cất mới khó.</p>
+          <p class="en-only" lang="en">Kleppmann distinguishes two ways of joining heterogeneous stores<span class="cite"><a href="#ref-1">1</a></span>. <em>Federation</em> builds a unified query interface over several different stores so a single query can read from all of them — convenient, but each store still manages its own data and the write-side consistency problem remains untouched. <em>Unbundling</em> attacks the other end: unifying the <strong>write path</strong>, so one write propagates to every relevant system in a fixed order. He argues the hard part, and the more important one, is the write path — because that is where the copies diverge.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cách dùng</strong>Hai cách không loại trừ nhau: nhiều tổ chức liên bang hóa đường đọc để tiện báo cáo, đồng thời tháo rời đường ghi để giữ các bản phái sinh khỏi lệch.</div>
+            <div class="easy-only"><strong>Cách dùng</strong>Làm cả hai cũng được: cửa sổ chung để nhìn, và sổ chung để cất.</div>
+            <div class="en-only" lang="en"><strong>How it's used</strong>The two aren't exclusive: many organisations federate reads for convenient reporting while unbundling writes to keep the derived copies from drifting apart.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Chỗ còn thiếu: một ngôn ngữ cấp cao</h4>
+              <p>Với hệ liên bang, ta đã có ngôn ngữ khai báo: viết một câu truy vấn, trình tối ưu lo phần còn lại. Với hệ tháo rời, chưa có thứ tương đương cho đường ghi — chưa có cách khai báo "duy trì khung nhìn này từ nhật ký kia" mà không phải viết mã keo bằng tay<span class="cite"><a href="#ref-1">1</a></span>. Đó là khoảng trống Kleppmann chỉ ra, không phải vấn đề đã giải xong.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao đường ghi là chỗ thật sự hỏng</h4>
+              <p>Đường đọc sai thì sai tạm thời và tự khỏi khi truy vấn lại; đường ghi sai thì để lại một trạng thái hỏng vĩnh viễn trong kho. Sự bất đối xứng này — sẽ được đặt tên là <em>kịp thời</em> so với <em>toàn vẹn</em> ở trục 3 — là lý do đường ghi đáng được ưu tiên.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Write path and read path — a boundary you choose</div>
+          <h3><span class="vi-only">Đường ghi và đường đọc: một đường biên bạn tự chọn</span><span class="en-only" lang="en">Write path and read path: a boundary you choose</span></h3>
+          <p class="standard-copy">Kleppmann đề nghị hình dung mỗi trạng thái phái sinh như chỗ gặp nhau của hai đường<span class="cite"><a href="#ref-1">1</a></span>. <em>Đường ghi</em> chạy từ lúc dữ liệu đi vào hệ tới lúc nó được đặt xong vào một dạng có sẵn để phục vụ — tính trước, làm háo hức. <em>Đường đọc</em> chạy từ lúc có yêu cầu tới lúc trả kết quả — tính muộn, làm khi được hỏi. Toàn bộ những kỹ thuật rời rạc mà mười một chương trước bàn tới — cache, khung nhìn vật chất hóa, chỉ mục tìm kiếm, bảng tổng hợp — chỉ khác nhau ở chỗ họ <strong>đặt đường biên ấy ở đâu</strong>. Dời biên về phía ghi thì đọc nhanh hơn và ghi tốn hơn; dời về phía đọc thì ngược lại.</p>
+          <p class="easy-only">Hãy nghĩ tới việc chuẩn bị bữa sáng. Bạn có thể gọt sẵn hoa quả từ tối hôm trước — sáng dậy là có ăn ngay, nhưng tối phải làm. Hoặc sáng dậy mới gọt — tối được nghỉ, nhưng sáng phải chờ. Công việc thì vẫn từng ấy, chỉ là làm lúc nào. Nhớ nhé: không tránh được việc, chỉ chọn được lúc làm.</p>
+          <p class="en-only" lang="en">Kleppmann suggests picturing every piece of derived state as the meeting point of two paths<span class="cite"><a href="#ref-1">1</a></span>. The <em>write path</em> runs from data entering the system to it being laid out in a form ready to serve — precomputed, eager. The <em>read path</em> runs from a request arriving to a result being returned — computed late, on demand. All the scattered techniques the previous eleven chapters covered — caches, materialised views, search indexes, summary tables — differ only in <strong>where they place that boundary</strong>. Move it toward writes and reads get faster while writes cost more; move it toward reads and the reverse.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao hữu ích</strong>Nó biến một loạt quyết định rời rạc thành một câu hỏi duy nhất, có thể trả lời bằng số: với tỉ lệ đọc/ghi thật của bạn, đặt biên ở đâu thì tổng công việc là nhỏ nhất?</div>
+            <div class="easy-only"><strong>Vì sao hữu ích</strong>Chỉ còn một câu hỏi: bạn đọc nhiều hơn hay ghi nhiều hơn?</div>
+            <div class="en-only" lang="en"><strong>Why it helps</strong>It collapses a pile of separate decisions into one question you can answer with numbers: given your real read/write ratio, where does the boundary minimise total work?</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Nối lại với Chương 1</h4>
+              <p>Đây chính là ví dụ dòng thời gian của Chương 1 được phát biểu ở dạng tổng quát: fan-out lúc ghi là đặt biên sát phía ghi, fan-out lúc đọc là đặt biên sát phía đọc, và cách lai của Twitter là đặt biên ở hai chỗ khác nhau cho hai nhóm người dùng khác nhau<span class="cite"><a href="#ref-1">1</a></span>. Cuốn sách quay lại đúng chỗ nó bắt đầu, lần này với từ vựng để nói về nó.</p>
+            </div>
+            <div class="info-block">
+              <h4>Biên không cần đồng nhất</h4>
+              <p>Không có luật nào bắt cả hệ dùng chung một vị trí biên. Dữ liệu nóng có thể được tính sẵn hoàn toàn, dữ liệu nguội tính lúc đọc, và phần giữa thì tính sẵn một phần rồi hoàn tất lúc đọc. Việc chọn biên theo từng nhóm dữ liệu là một công cụ thiết kế, không phải sự thiếu nhất quán.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Pushing state changes to clients &amp; observing derived state</div>
+          <h3><span class="vi-only">Đẩy thay đổi tới client và quan sát trạng thái phái sinh</span><span class="en-only" lang="en">Pushing changes to clients, observing derived state</span></h3>
+          <p class="standard-copy">Mô hình web cổ điển giả định trạng thái nằm trên máy chủ còn client thì hỏi đi hỏi lại — một giả định mà Kleppmann cho là đã lỗi thời<span class="cite"><a href="#ref-1">1</a></span>. Nếu đường ghi đã là một dòng thay đổi có thứ tự, không có lý do gì nó phải dừng ở máy chủ: nó có thể chạy tiếp tới tận thiết bị người dùng qua kết nối đẩy, biến trình duyệt hay ứng dụng di động thành <strong>một bản sao phái sinh nằm ngoài trung tâm dữ liệu</strong>. Kiểu ứng dụng "ngoại tuyến trước" đi theo đúng hướng ấy: giữ một bản sao cục bộ, đọc ghi trên đó, rồi đồng bộ khi có mạng. Ông cũng nhận xét rằng bảng tính đã có sẵn khả năng dòng dữ liệu này từ lâu — sửa một ô là mọi ô phụ thuộc tự cập nhật — đi trước phần lớn ngôn ngữ lập trình phổ thông hàng chục năm<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <p class="easy-only">Bình thường, muốn biết có gì mới thì máy của bạn phải hỏi đi hỏi lại: "có gì mới chưa? có gì mới chưa?". Nhưng có cách khác: bên kia hễ có gì mới thì <strong>gửi thẳng sang</strong>, không cần hỏi. Giống như thay vì chạy ra hòm thư xem có thư không, thì bảo người đưa thư bấm chuông. Nhớ nhé: đừng bắt máy hỏi mãi, hãy để tin tự tới.</p>
+          <p class="en-only" lang="en">The classical web model assumes state lives on the server while the client asks again and again — an assumption Kleppmann considers outdated<span class="cite"><a href="#ref-1">1</a></span>. If the write path is already an ordered stream of changes, there is no reason for it to stop at the server: it can run all the way to the user's device over a push connection, turning a browser or mobile app into <strong>a derived replica living outside the data centre</strong>. Offline-first applications follow exactly that line: keep a local replica, read and write against it, sync when the network returns. He also notes that spreadsheets have had this dataflow ability for decades — change one cell and every dependent cell updates itself — well ahead of most mainstream programming languages<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Thấy ở đâu</strong>Bảng điều khiển tự cập nhật không cần tải lại, ứng dụng nhắn tin đọc được khi mất mạng, tài liệu cộng tác đồng bộ lại sau khi bạn ngoại tuyến một lúc.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Tin nhắn tự hiện ra; ứng dụng ghi chú vẫn mở được lúc mất mạng.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Dashboards that update without a reload, messaging apps readable offline, collaborative documents that resync after you've been disconnected.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Đọc cũng là sự kiện</h4>
+              <p>Kleppmann đẩy ý này thêm một bước: nếu ghi lại cả <em>lượt đọc</em> thành sự kiện trong dòng dữ liệu, ta theo dõi được quan hệ nhân quả — biết một kết quả hiển thị cho người dùng đã được dẫn xuất từ những dữ liệu nào<span class="cite"><a href="#ref-1">1</a></span>. Cái giá là khối lượng sự kiện lớn hơn hẳn, nên đây là lựa chọn theo nhu cầu chứ không phải mặc định.</p>
+            </div>
+            <div class="info-block">
+              <h4>Mô hình máy học cũng là trạng thái phái sinh</h4>
+              <p>Một mô hình được huấn luyện cũng là khung nhìn phái sinh từ dữ liệu đầu vào, và cũng phải dựng lại khi dữ liệu đổi. Bài "Machine Learning: The High-Interest Credit Card of Technical Debt" — nằm trong danh mục tham chiếu Chương 12 của chính Kleppmann — mô tả những mắc nối ẩn mà loại trạng thái phái sinh này tạo ra trong hệ<span class="cite"><a href="#ref-18">18</a></span><span class="cite"><a href="#ref-4">4</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ cơ học sang tính đúng đắn</strong>
+      <strong class="en-only" lang="en">From mechanics to correctness</strong>
+      <span class="standard-copy">Hai phần đầu trả lời câu hỏi "làm thế nào": ghép ra sao, tháo rời ra sao, đặt biên ở đâu. Nhưng dòng dữ liệu chảy đúng không có nghĩa là kết quả đúng. Trục tiếp theo chuyển sang một câu hỏi khác hẳn — <em>làm sao biết hệ đang làm đúng việc của nó?</em> — và câu trả lời bắt đầu bằng việc hạ bệ một niềm tin quen thuộc: rằng giao dịch là đủ.</span>
+      <span class="easy-only">Đến đây ta biết cách ghép và cách sắp xếp. Nhưng máy chạy trơn không có nghĩa là kết quả đúng. Phần tiếp hỏi: làm sao biết nó <em>đúng</em>?</span>
+      <span class="en-only" lang="en">The first two parts answer "how": how to compose, how to unbundle, where to put the boundary. But data flowing correctly is not the same as results being correct. The next axis turns to a different question — <em>how do we know the system is doing the right thing?</em> — and the answer begins by unseating a familiar belief: that transactions are enough.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="correctness" aria-labelledby="correctness-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Aiming for correctness</span></span><span class="en-only" lang="en">Axis 3 · Aiming for correctness</span></div>
+        <h2 id="correctness-title"><span class="vi-only">Hướng tới tính đúng đắn: giao dịch là chưa đủ</span><span class="en-only" lang="en">Aiming for correctness: transactions are not enough</span></h2>
+      </div>
+      <p class="standard-copy">Với dữ liệu bền vững, cái giá của sai sót khác hẳn với phần mềm không trạng thái: một lỗi không biến mất khi tiến trình khởi động lại mà <strong>đọng lại vĩnh viễn trong kho</strong><span class="cite"><a href="#ref-1">1</a></span>. Suốt nhiều thập kỷ, câu trả lời của ngành là giao dịch: cứ bọc thao tác trong một giao dịch khả tuần tự hóa thì mọi chuyện sẽ ổn. Kleppmann gọi đây là một trừu tượng rất giá trị nhưng <em>không đầy đủ</em>, vì nó chỉ bảo đảm tính đúng đắn <strong>bên trong biên của cơ sở dữ liệu</strong>. Chuỗi sự kiện thật lại bắt đầu từ ngón tay người dùng và kết thúc ở hệ quả ngoài đời — và trên chuỗi ấy, cơ sở dữ liệu chỉ là một chặng giữa.</p>
+      <p class="easy-only">Nếu một chương trình bình thường tính sai, bạn tắt đi bật lại là xong. Nhưng nếu nó ghi sai vào sổ, cái sai <strong>nằm lại đó</strong>. Người ta hay nghĩ: cứ dùng "giao dịch" của cơ sở dữ liệu là an toàn. Tác giả nói: chưa đủ đâu — vì giao dịch chỉ canh được đoạn giữa, còn sai sót thì có thể xảy ra ở hai đầu.</p>
+      <p class="en-only" lang="en">With durable data the cost of a mistake differs from stateless software: an error does not vanish when the process restarts but <strong>settles permanently into the store</strong><span class="cite"><a href="#ref-1">1</a></span>. For decades the industry's answer has been transactions: wrap the operation in a serializable transaction and all will be well. Kleppmann calls this a valuable but <em>incomplete</em> abstraction, because it guarantees correctness only <strong>within the database's boundary</strong>. The real chain of events begins at a user's finger and ends in a real-world consequence — and on that chain the database is only a middle segment.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Correctness is an end-to-end property, not a layer's feature</div>
+        <p class="definition standard-copy">Tính đúng đắn không phải một tính năng bạn bật ở một tầng, mà là một <strong>thuộc tính của toàn chuỗi</strong> từ đầu vào của người dùng tới hệ quả cuối cùng<span class="cite"><a href="#ref-5">5</a></span>. Mỗi tầng bên dưới có thể làm chuỗi ấy hiệu quả hơn, nhưng không tầng nào thay được việc ứng dụng ở hai đầu tự kiểm chứng cái nó quan tâm<span class="cite"><a href="#ref-5">5</a></span>.</p>
+        <p class="definition easy-only">Đúng đắn không phải cái nút bạn bật lên ở một chỗ. Nó là chuyện của <strong>cả đường đi</strong>, từ lúc người ta bấm nút tới lúc có kết quả thật. Nhớ nhé: muốn chắc thì phải kiểm ở hai đầu, không ai kiểm hộ được.</p>
+        <p class="definition en-only" lang="en">Correctness is not a feature you switch on in one layer but a <strong>property of the whole chain</strong>, from the user's input to the final consequence<span class="cite"><a href="#ref-5">5</a></span>. Lower layers can make that chain more efficient, but none of them replaces the application at the two ends checking the thing it actually cares about<span class="cite"><a href="#ref-5">5</a></span>.</p>
+        <p class="deep-only">Lập luận đầu-cuối có nguồn gốc trước cả hệ dữ liệu phân tán: Saltzer, Reed và Clark phát biểu nó năm 1984 như một nguyên tắc thiết kế mạng<span class="cite"><a href="#ref-5">5</a></span>. Nội dung gốc là: một chức năng chỉ có thể được hiện thực đầy đủ và đúng đắn <em>với hiểu biết và sự trợ giúp của ứng dụng đứng ở hai đầu</em>; hiện thực nó ở tầng thấp hơn có thể là một tối ưu hóa hữu ích, nhưng không phải một lời giải trọn vẹn. Kleppmann mượn nguyên tắc ấy và áp vào chống trùng lặp: TCP đã loại bỏ gói tin lặp, giao dịch đã bảo đảm nguyên tử, vậy mà một đơn hàng vẫn bị đặt hai lần — vì chẳng tầng nào trong số đó đứng ở hai đầu của chuỗi<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về tính đúng đắn">
+        <div class="equation-row">
+          <b>Đầu-cuối, không phải từng tầng</b>
+          <span>Chống trùng ở tầng dưới không ngăn được trùng ở tầng ứng dụng; phải có định danh thao tác đi suốt chuỗi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Lũy đẳng thay cho nguyên tử</b>
+          <span>"Đúng một lần" là nói về <em>hiệu ứng</em>: thử lại bao nhiêu lần cũng chỉ đổi trạng thái một lần.</span>
+        </div>
+        <div class="equation-row">
+          <b>Kịp thời ≠ toàn vẹn</b>
+          <span>Trễ thì khó chịu và tự khỏi; hỏng toàn vẹn thì đọng lại và phải sửa tay. Đừng gộp cả hai vào chữ "nhất quán".</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về tính đúng đắn">
+        <div class="equation-row">
+          <b>Kiểm ở hai đầu</b>
+          <span>Người gửi và người nhận phải tự kiểm; tầng giữa không kiểm hộ được.</span>
+        </div>
+        <div class="equation-row">
+          <b>Dán số cho mỗi việc</b>
+          <span>Mỗi yêu cầu một mã riêng; thấy mã cũ thì bỏ qua, khỏi làm hai lần.</span>
+        </div>
+        <div class="equation-row">
+          <b>Chậm khác với sai</b>
+          <span>Chờ một lúc thì phiền thôi; ghi nhầm vào sổ mới là hỏng thật.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about correctness">
+        <div class="equation-row">
+          <b>End-to-end, not per-layer</b>
+          <span>Deduplication below doesn't prevent duplication above; an operation identifier must travel the whole chain.</span>
+        </div>
+        <div class="equation-row">
+          <b>Idempotence instead of atomicity</b>
+          <span>"Exactly once" is about the <em>effect</em>: retry as often as you like, the state changes once.</span>
+        </div>
+        <div class="equation-row">
+          <b>Timeliness ≠ integrity</b>
+          <span>Staleness is annoying and self-healing; broken integrity persists and needs repair. Don't merge both into "consistency".</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The end-to-end argument</div>
+          <h3><span class="vi-only">Lập luận đầu-cuối</span><span class="en-only" lang="en">The end-to-end argument</span></h3>
+          <p class="standard-copy">Ví dụ mà Kleppmann dùng rất đời thường: người dùng bấm nút đặt hàng, mạng chậm, họ bấm lại — và có hai đơn hàng<span class="cite"><a href="#ref-1">1</a></span>. Không tầng nào ở dưới ngăn được chuyện đó. TCP loại bỏ gói tin lặp <em>trong một kết nối</em>, nhưng hai lần bấm là hai kết nối khác nhau. Giao dịch bảo đảm mỗi lần ghi là nguyên tử, nhưng hai lần ghi hợp lệ thì vẫn là hai lần ghi hợp lệ. Đây đúng là tình huống mà Saltzer, Reed và Clark mô tả<span class="cite"><a href="#ref-5">5</a></span>: chỉ ứng dụng — bên biết "đơn hàng này và đơn hàng kia là cùng một ý định" — mới xử lý được, và nó phải tự làm việc đó.</p>
+          <p class="easy-only">Bạn bấm nút "gửi", mạng chậm, bạn bấm lại. Thế là gửi hai lần. Máy móc ở giữa không biết hai lần bấm ấy thật ra là <em>một ý định</em> — chỉ có phần biết việc mới hiểu. Nhớ nhé: máy chỉ biết có hai yêu cầu; muốn nó gộp làm một thì phải nói cho nó biết.</p>
+          <p class="en-only" lang="en">Kleppmann's example is thoroughly everyday: a user clicks "order", the network is slow, they click again — and there are two orders<span class="cite"><a href="#ref-1">1</a></span>. No lower layer prevents this. TCP removes duplicate packets <em>within one connection</em>, but two clicks are two connections. A transaction guarantees each write is atomic, but two valid writes are still two valid writes. This is precisely the situation Saltzer, Reed and Clark describe<span class="cite"><a href="#ref-5">5</a></span>: only the application — the party that knows "this order and that order are the same intent" — can handle it, and it must do so itself.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao quan trọng</strong>Nó giải thích vì sao nhiều lỗi sản xuất tồn tại dai dẳng dù mọi tầng đều "đúng": mỗi tầng đúng theo đặc tả của nó, còn chuỗi thì không ai chịu trách nhiệm.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Mỗi khúc đều làm đúng phần của mình mà cả đường vẫn sai — vì không ai lo cả đường.</div>
+            <div class="en-only" lang="en"><strong>Why it matters</strong>It explains why some production bugs persist while every layer is "correct": each layer meets its own spec, and nobody owns the chain.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Phát biểu gốc</h4>
+              <p>Bài báo năm 1984 lập luận rằng các chức năng như kiểm tra toàn vẹn dữ liệu hay bảo đảm giao nhận chỉ có thể hiện thực đầy đủ và đúng ở các đầu mút của hệ truyền thông; hiện thực chúng ở tầng thấp có thể cải thiện hiệu năng, nhưng không miễn cho đầu mút việc tự kiểm<span class="cite"><a href="#ref-5">5</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Hệ quả cho kiến trúc</h4>
+              <p>Nó không nói "đừng bảo đảm gì ở tầng dưới", mà nói "đừng coi bảo đảm tầng dưới là bảo đảm cho ứng dụng". Với hệ dữ liệu, điều đó có nghĩa là các bất biến nghiệp vụ phải được nêu rõ và kiểm ở nơi biết ý nghĩa của chúng<span class="cite"><a href="#ref-5">5</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Operation identifiers &amp; idempotence</div>
+          <h3><span class="vi-only">Định danh thao tác và tính lũy đẳng</span><span class="en-only" lang="en">Operation identifiers and idempotence</span></h3>
+          <p class="standard-copy">Lời giải của Kleppmann cho bài toán trùng lặp là một kỹ thuật đơn giản đến bất ngờ<span class="cite"><a href="#ref-1">1</a></span>: cho client sinh một <strong>định danh duy nhất cho mỗi thao tác</strong> ngay khi người dùng bắt đầu, rồi mang định danh ấy đi suốt chuỗi và lưu nó cùng với hiệu ứng. Khi một yêu cầu mang định danh đã thấy quay lại, hệ nhận ra đó là lần thử lại và bỏ qua. Thao tác trở thành <em>lũy đẳng</em>: chạy một lần hay mười lần cũng cho cùng một trạng thái. Đây chính là nghĩa đúng của cụm "đúng một lần" mà ngành hay nói: không phải mỗi thao tác chỉ chạy một lần theo nghĩa đen, mà là <strong>hiệu ứng chỉ xảy ra một lần</strong> dù có bao nhiêu lần thử lại.</p>
+          <p class="easy-only">Cách chống làm hai lần rất đơn giản: dán cho mỗi việc một cái mã riêng ngay từ đầu. Ai nhận được mã đã thấy rồi thì biết "à, cái này làm rồi" và bỏ qua. Giống như số vé xếp hàng — đưa lại cùng một vé thì không được phục vụ hai lần. Nhớ nhé: có mã riêng thì gửi lại bao nhiêu lần cũng chỉ tính một.</p>
+          <p class="en-only" lang="en">Kleppmann's fix for duplication is a surprisingly simple technique<span class="cite"><a href="#ref-1">1</a></span>: have the client generate a <strong>unique identifier for each operation</strong> the moment the user starts it, carry that identifier the whole way, and store it alongside the effect. When a request arrives bearing an identifier already seen, the system recognises a retry and ignores it. The operation becomes <em>idempotent</em>: running it once or ten times leaves the same state. This is the accurate meaning of the industry's "exactly once": not that each operation literally executes once, but that <strong>the effect happens once</strong> however many retries occur.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Điều kiện để đúng</strong>Định danh phải sinh ở <em>đầu chuỗi</em> (phía client) và phải được kiểm ở <em>đúng nơi hiệu ứng xảy ra</em>. Sinh ở máy chủ hoặc kiểm ở tầng giữa thì bài toán quay lại nguyên vẹn.</div>
+            <div class="easy-only"><strong>Điều kiện</strong>Mã phải được dán từ lúc bắt đầu, và phải kiểm ngay chỗ việc thật sự xảy ra.</div>
+            <div class="en-only" lang="en"><strong>What makes it work</strong>The identifier must be generated at the <em>start of the chain</em> (client side) and checked <em>where the effect actually happens</em>. Generate it on the server or check it in the middle, and the problem returns intact.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao hợp với kiến trúc nhật ký</h4>
+              <p>Trong hệ dựa trên nhật ký, một yêu cầu được ghi thành <em>một</em> thông điệp duy nhất — bản thân nó đã nguyên tử — và mọi trạng thái phái sinh là hàm xác định của thông điệp ấy. Kèm thêm định danh thao tác, việc phát lại nhật ký sau lỗi không sinh ra hiệu ứng thừa. Nhờ vậy Kleppmann đạt được tính toàn vẹn <strong>mà không cần cam kết nguyên tử phân tán</strong><span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Giới hạn</h4>
+              <p>Lũy đẳng chỉ chống được trùng lặp do <em>thử lại</em>. Nó không giúp gì khi người dùng thật sự muốn đặt hai đơn giống nhau, nên ứng dụng vẫn phải phân biệt "lặp do kỹ thuật" và "lặp do chủ ý" — lại là một quyết định chỉ tầng ứng dụng làm được<span class="cite"><a href="#ref-5">5</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Enforcing constraints on a log</div>
+          <h3><span class="vi-only">Cưỡng chế ràng buộc trên một nhật ký</span><span class="en-only" lang="en">Enforcing constraints on a log</span></h3>
+          <p class="standard-copy">Ràng buộc duy nhất — hai người không được lấy cùng một tên đăng nhập — về bản chất đòi hỏi đồng thuận: phải có ai đó quyết định ai là người thắng<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann chỉ ra rằng một nhật ký có phân vùng đã cho sẵn thứ đó: định tuyến mọi yêu cầu chạm tới cùng một tên vào cùng một phân vùng, rồi xử lý tuần tự, thì quyết định trở thành một phép so sánh đơn luồng — không cần khóa phân tán. Với ràng buộc trải qua nhiều phân vùng, ví dụ chuyển tiền giữa hai tài khoản, ông đề nghị tách thành một chuỗi thông điệp lũy đẳng mang cùng một định danh yêu cầu, thay vì gói tất cả vào một giao dịch nguyên tử phân tán.</p>
+          <p class="easy-only">Muốn chắc chắn không hai người lấy trùng một cái tên, cách đơn giản nhất là: mọi yêu cầu về cái tên ấy đều đi qua <strong>một cửa duy nhất</strong>, xếp hàng, ai tới trước được trước. Không cần họp bàn gì cả. Nhớ nhé: xếp chung một hàng thì tự khắc có thứ tự.</p>
+          <p class="en-only" lang="en">A uniqueness constraint — two people may not take the same username — fundamentally requires consensus: someone must decide who wins<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann points out that a partitioned log already supplies it: route every request touching the same name into the same partition and process it sequentially, and the decision becomes a single-threaded comparison — no distributed lock needed. For constraints spanning partitions, such as transferring money between two accounts, he proposes decomposing the operation into a sequence of idempotent messages carrying one shared request identifier, rather than wrapping everything in a distributed atomic commit.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đánh đổi</strong>Bạn được tính toàn vẹn và khả năng chịu lỗi tốt, nhưng mất tính tức thời: người dùng biết mình thắng hay thua sau một nhịp, chứ không ngay trong lần gọi.</div>
+            <div class="easy-only"><strong>Đánh đổi</strong>Chắc chắn hơn, nhưng phải chờ một nhịp mới biết kết quả.</div>
+            <div class="en-only" lang="en"><strong>The trade-off</strong>You gain integrity and good fault tolerance, but lose immediacy: the user learns whether they won a beat later, not within the call.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Thực tế: ứng dụng vẫn tự cưỡng chế</h4>
+              <p>Một khảo sát của Bailis và cộng sự trên các ứng dụng web thực tế cho thấy phần lớn ràng buộc toàn vẹn ngày nay được cưỡng chế bằng mã ứng dụng chứ không bằng ràng buộc của cơ sở dữ liệu — và cách làm đó thường không an toàn dưới đồng thời<span class="cite"><a href="#ref-11">11</a></span>. Đặt cạnh lập luận của Kleppmann, đây là bằng chứng rằng bài toán không phải giả định lý thuyết.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao không cần khóa phân tán</h4>
+              <p>Trật tự toàn phần của nhật ký <em>đã là</em> kết quả của đồng thuận, được trả một lần cho mọi thao tác, thay vì trả lại từ đầu cho từng thao tác như khi dùng khóa phân tán. Đây chính là mối nối giữa Chương 12 và phần đồng thuận của Chương 9.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Timeliness and integrity</div>
+          <h3><span class="vi-only">Cặp kịp-thời và toàn-vẹn</span><span class="en-only" lang="en">Timeliness and integrity</span></h3>
+          <p class="standard-copy">Đây có lẽ là đóng góp khái niệm sắc nhất của chương. Kleppmann tách chữ "nhất quán" — vốn bị dùng cho quá nhiều thứ — thành hai yêu cầu độc lập<span class="cite"><a href="#ref-1">1</a></span>. <em>Kịp thời</em>: người dùng nhìn thấy trạng thái cập nhật; vi phạm nó chính là nhất quán cuối cùng, một tình trạng <strong>tạm thời và tự khỏi</strong> khi hệ bắt kịp. <em>Toàn vẹn</em>: dữ liệu không mâu thuẫn, không mất mát, không hỏng; vi phạm nó là <strong>bất nhất vĩnh viễn</strong> — chờ lâu cũng không tự hết, phải có người vào sửa. Hệ quả thực dụng: trễ thì khó chịu, hỏng toàn vẹn thì tai họa, nên hai thứ đó đáng được trả những cái giá rất khác nhau.</p>
+          <p class="easy-only">Chữ "đúng" thật ra gộp hai thứ khác nhau. Một: <strong>chậm</strong> — bạn thấy thông tin cũ vài giây, rồi nó tự cập nhật. Hai: <strong>sai</strong> — sổ ghi nhầm, và có chờ bao lâu nó cũng không tự đúng lại. Nhớ nhé: chậm thì đợi là hết, sai thì phải có người sửa.</p>
+          <p class="en-only" lang="en">This is perhaps the chapter's sharpest conceptual contribution. Kleppmann splits the overloaded word "consistency" into two independent requirements<span class="cite"><a href="#ref-1">1</a></span>. <em>Timeliness</em>: users see up-to-date state; violating it is exactly eventual consistency, a condition that is <strong>temporary and self-healing</strong> once the system catches up. <em>Integrity</em>: data is free of contradiction, loss and corruption; violating it is <strong>perpetual inconsistency</strong> — waiting does not fix it, somebody must repair it. The pragmatic consequence: staleness is annoying, broken integrity is catastrophic, so the two deserve very different prices.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cách dùng</strong>Khi ai đó nói hệ "phải nhất quán", hãy hỏi lại: cần kịp thời, hay cần toàn vẹn? Phần lớn hệ có thể hy sinh cái trước rất nhiều mà không được hy sinh cái sau một chút nào.</div>
+            <div class="easy-only"><strong>Cách dùng</strong>Hỏi lại: bạn cần <em>mới</em>, hay cần <em>không sai</em>? Hai cái khác nhau đấy.</div>
+            <div class="en-only" lang="en"><strong>How to use it</strong>When someone says the system "must be consistent", ask which: timeliness or integrity? Most systems can sacrifice a great deal of the first and none of the second.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Hệ tránh điều phối</h4>
+              <p>Vì toàn vẹn giữ được bằng lũy đẳng và nhật ký chứ không cần cam kết nguyên tử, ta có thể dựng hệ <em>tránh điều phối</em>: không đồng bộ chéo phân vùng, không khóa phân tán, mà vẫn không hỏng dữ liệu<span class="cite"><a href="#ref-10">10</a></span>. Cùng hướng ấy, định lý CALM chỉ ra lớp bài toán tính được mà không cần điều phối chút nào<span class="cite"><a href="#ref-12">12</a></span>. Kleppmann xem đây là con đường khả thi tới hệ vừa nhanh vừa không hỏng.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ràng buộc diễn giải lỏng và lời xin lỗi</h4>
+              <p>Với nhiều ràng buộc nghiệp vụ, việc chấp nhận vi phạm tạm thời rồi bù đắp sau lại rẻ hơn là cưỡng chế tuyệt đối: bán vượt vài chỗ rồi hoàn tiền và xin lỗi<span class="cite"><a href="#ref-1">1</a></span>. Pat Helland gọi thẳng loại hệ này là hệ vận hành bằng "ký ức, phỏng đoán và lời xin lỗi", và lập luận rằng nhiều quy trình kinh doanh vốn đã hoạt động như thế từ trước khi có máy tính<span class="cite"><a href="#ref-9">9</a></span>. Điểm mấu chốt: đây là quyết định nghiệp vụ có chi phí, không phải sự cẩu thả kỹ thuật.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Trust, but verify</div>
+          <h3><span class="vi-only">Tin nhưng phải kiểm</span><span class="en-only" lang="en">Trust, but verify</span></h3>
+          <p class="standard-copy">Mọi bảo đảm ta vừa bàn đều đứng trên một giả định: phần cứng và phần mềm bên dưới hành xử đúng như hứa. Kleppmann nhắc rằng giả định ấy chỉ đúng <em>phần lớn thời gian</em><span class="cite"><a href="#ref-1">1</a></span>: đĩa hỏng âm thầm, bộ nhớ lật bit, phần mềm có lỗi, và một cơ sở dữ liệu vẫn có thể trả về dữ liệu hỏng mà không báo gì. Từ đó ông rút ra một kỷ luật: đừng tin mù quáng, hãy <strong>kiểm tra định kỳ tính toàn vẹn của dữ liệu</strong>. Và ông cho rằng kiến trúc dựa trên sự kiện có lợi thế rõ rệt ở đây — vì trạng thái phái sinh là hàm xác định của một nhật ký bất biến, ta có thể chạy lại quá trình dẫn xuất và đối chiếu, điều gần như bất khả với một kho trạng thái bị ghi đè liên tục.</p>
+          <p class="easy-only">Mọi thứ trên đây đều giả định máy móc chạy đúng. Nhưng máy cũng có lúc hỏng lặng lẽ — không báo lỗi gì, chỉ âm thầm đưa ra số sai. Nên thỉnh thoảng phải <strong>kiểm lại</strong>: lấy sổ gốc tính lại từ đầu, xem có khớp không. Nhớ nhé: tin thì tin, nhưng vẫn phải kiểm.</p>
+          <p class="en-only" lang="en">Every guarantee above rests on one assumption: that the hardware and software beneath behave as promised. Kleppmann reminds us this holds only <em>most of the time</em><span class="cite"><a href="#ref-1">1</a></span>: disks fail silently, memory flips bits, software has bugs, and a database can return corrupted data without complaint. From this he draws a discipline: don't trust blindly — <strong>check data integrity periodically</strong>. And he argues event-based architectures have a real advantage here: because derived state is a deterministic function of an immutable log, the derivation can be re-run and compared, something nearly impossible with a store whose state is continuously overwritten.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thực tế</strong>Kiểm toán không phải chuyện của riêng ngành tài chính. Một hệ có nhật ký bất biến và quá trình dẫn xuất xác định là một hệ <em>tự kiểm toán được</em> — và điều đó cũng là một yêu cầu thiết kế.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Giữ lại sổ gốc thì lúc nào cũng tính lại để đối chiếu được.</div>
+            <div class="en-only" lang="en"><strong>The practical upshot</strong>Auditing is not just a finance concern. A system with an immutable log and a deterministic derivation is a <em>self-auditable</em> system — and that too is a design requirement.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Kiểm toán bằng mật mã</h4>
+              <p>Kleppmann quan tâm tới hướng dùng công cụ mật mã — cây băm, sổ cái chỉ-thêm — để một bên thứ ba kiểm chứng được tính toàn vẹn mà không cần tin bên vận hành<span class="cite"><a href="#ref-1">1</a></span>. Ông tách rõ ý tưởng kiểm chứng toàn vẹn ra khỏi các hệ tiền mã hóa cụ thể: phần đáng quan tâm là cơ chế chứng minh, không phải mô hình kinh tế gắn kèm.</p>
+            </div>
+            <div class="info-block">
+              <h4>Đường nối tới Chương 8</h4>
+              <p>Đây là lập luận của Chương 8 về hệ phân tán không đáng tin, đẩy sang địa hạt dữ liệu: nếu mạng nói dối và đồng hồ trôi, thì kho lưu trữ cũng có thể im lặng hỏng. Kết luận thực hành giống nhau: nêu rõ giả định, rồi dựng cơ chế phát hiện khi giả định sai<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ "đúng" sang "đúng đắn"</strong>
+      <strong class="en-only" lang="en">From correct to right</strong>
+      <span class="standard-copy">Đến đây, "đúng" vẫn còn là một tính chất kỹ thuật: hệ làm đúng cái nó được đặc tả để làm. Trục cuối cùng đổi hẳn loại câu hỏi — không phải hệ có làm đúng đặc tả không, mà <em>đặc tả ấy có nên tồn tại không</em>.</span>
+      <span class="easy-only">Nãy giờ "đúng" nghĩa là máy làm đúng như ta bảo. Phần cuối hỏi khác: <em>cái ta bảo nó làm có nên làm không?</em></span>
+      <span class="en-only" lang="en">So far "correct" has been a technical property: the system does what it was specified to do. The final axis changes the kind of question — not whether the system meets its specification, but <em>whether that specification should exist</em>.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="doing-the-right-thing" aria-labelledby="doing-the-right-thing-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · <span lang="en">Doing the right thing</span></span><span class="en-only" lang="en">Axis 4 · Doing the right thing</span></div>
+        <h2 id="doing-the-right-thing-title"><span class="vi-only">Làm điều đúng đắn: kỹ thuật không đứng ngoài hệ quả</span><span class="en-only" lang="en">Doing the right thing: engineering does not stand outside its consequences</span></h2>
+      </div>
+      <p class="standard-copy">Phần cuối của Chương 12 là phần duy nhất trong cả cuốn sách không bàn về kỹ thuật. Kleppmann viết rằng người xây hệ dữ liệu mang một trách nhiệm vượt quá phạm vi kỹ thuật, và rằng việc đẩy câu hỏi đạo đức cho bộ phận pháp lý hay cho nhà làm luật là một cách né tránh<span class="cite"><a href="#ref-1">1</a></span>. <strong>Mọi phát biểu quy chuẩn trong phần này — điều gì nên hay không nên làm — đều là lập luận của Kleppmann trong sách, không phải kết luận của trang đọc-cùng này.</strong> Bốn thẻ dưới đây trình bày bốn nhánh lập luận của ông: phân tích dự đoán, thiên lệch và vòng phản hồi, quyền riêng tư và sự đồng thuận, và dữ liệu như tài sản lẫn như quyền lực.</p>
+      <p class="easy-only">Phần cuối cùng không nói về máy móc nữa, mà nói về <strong>người</strong>. Tác giả bảo: ai làm ra hệ thì cũng phải nghĩ tới việc hệ ấy ảnh hưởng đến ai. Đây là ý kiến của tác giả trong sách, trang này chỉ thuật lại cho đúng, không thêm ý riêng. Nhớ nhé: làm ra một công cụ thì cũng nên nghĩ xem nó chạm tới ai.</p>
+      <p class="en-only" lang="en">The final part of Chapter 12 is the only part of the whole book that is not about engineering. Kleppmann writes that people who build data systems carry a responsibility beyond the technical scope, and that handing ethical questions to the legal department or to legislators is a way of dodging them<span class="cite"><a href="#ref-1">1</a></span>. <strong>Every normative statement in this part — what should or should not be done — is Kleppmann's argument in the book, not a conclusion of this companion page.</strong> The four cards below set out four branches of his argument: predictive analytics, bias and feedback loops, privacy and consent, and data as both asset and power.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">The argument, as the author states it</div>
+        <p class="definition standard-copy">Lập luận nền của phần này, theo cách Kleppmann phát biểu: một hệ dữ liệu không chỉ <em>mô tả</em> thế giới mà còn <strong>ra quyết định về những con người cụ thể</strong> — ai được vay, ai được thuê, ai bị đánh dấu — và người chịu hậu quả của một quyết định sai thường là người ít có khả năng khiếu nại nhất<span class="cite"><a href="#ref-1">1</a></span>. Vì thế, theo ông, câu hỏi "hệ này có chạy đúng không" phải đi kèm câu hỏi "hệ này đang làm gì với ai".</p>
+        <p class="definition easy-only">Ý chính của tác giả: máy tính bây giờ không chỉ ghi chép, nó còn <strong>quyết định</strong> — ai được vay tiền, ai được nhận việc. Và người bị quyết định sai thường là người khó lên tiếng nhất. Nhớ nhé: hỏi máy chạy tốt không là chưa đủ, còn phải hỏi nó đang quyết định cho ai.</p>
+        <p class="definition en-only" lang="en">The underlying argument, as Kleppmann states it: a data system does not merely <em>describe</em> the world but <strong>makes decisions about particular people</strong> — who gets a loan, who gets hired, who gets flagged — and the person bearing the cost of a wrong decision is usually the one least able to appeal it<span class="cite"><a href="#ref-1">1</a></span>. So, in his view, the question "does this system run correctly" must be paired with "what is this system doing, and to whom".</p>
+        <p class="deep-only">Một lưu ý về phạm vi. Chương này được viết cho lần xuất bản năm 2017, và Kleppmann lập luận trong bối cảnh kỹ thuật, pháp lý và xã hội của thời điểm đó<span class="cite"><a href="#ref-3">3</a></span>. Trang này trình bày lập luận của ông <em>ở nguyên bối cảnh ấy</em>, không cập nhật nó bằng các sự kiện về sau và không thêm nhận định đương đại. Chỗ duy nhất nêu bối cảnh thay đổi là khối "Sau 2017" ở thẻ cuối, và chỗ đó được ghi rõ là bổ sung ngoài sách.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Bốn nhánh lập luận đạo đức của chương">
+        <div class="equation-row">
+          <b>Dự đoán ≠ mô tả</b>
+          <span>Hệ không chỉ ghi lại thế giới; nó phân loại người và quyết định thay họ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Dữ liệu mang theo quá khứ</b>
+          <span>Mô hình học từ dữ liệu lịch sử thì tái tạo cả những thiên lệch có trong lịch sử ấy.</span>
+        </div>
+        <div class="equation-row">
+          <b>Đồng ý không phải lúc nào cũng tự do</b>
+          <span>Khi không có lựa chọn thay thế thực chất thì việc bấm "đồng ý" không nói lên nhiều điều.</span>
+        </div>
+        <div class="equation-row">
+          <b>Dữ liệu vừa là tài sản vừa là rủi ro</b>
+          <span>Kho dữ liệu là thứ có giá trị thật và cũng là thứ phải xử lý cẩn trọng.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Bốn điều cần nhớ ở phần cuối chương">
+        <div class="equation-row">
+          <b>Máy cũng quyết định</b>
+          <span>Không chỉ ghi chép, nó còn chọn giúp ai được gì.</span>
+        </div>
+        <div class="equation-row">
+          <b>Học gì thì giống nấy</b>
+          <span>Học từ chuyện cũ thì lặp lại cả cái chưa hay của chuyện cũ.</span>
+        </div>
+        <div class="equation-row">
+          <b>"Đồng ý" cho có</b>
+          <span>Bấm đồng ý vì không còn cách nào khác thì chưa hẳn là đồng ý.</span>
+        </div>
+        <div class="equation-row">
+          <b>Giữ nhiều thì lo nhiều</b>
+          <span>Giữ càng nhiều dữ liệu thì càng phải trông nom cẩn thận.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="The four branches of the chapter's ethical argument">
+        <div class="equation-row">
+          <b>Prediction ≠ description</b>
+          <span>The system does not merely record the world; it classifies people and decides for them.</span>
+        </div>
+        <div class="equation-row">
+          <b>Data carries the past</b>
+          <span>A model trained on historical data reproduces the biases that history contained.</span>
+        </div>
+        <div class="equation-row">
+          <b>Consent isn't always free</b>
+          <span>When there is no real alternative, clicking "agree" says rather little.</span>
+        </div>
+        <div class="equation-row">
+          <b>Data is both asset and risk</b>
+          <span>A data store is genuinely valuable and also something that must be handled with care.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Predictive analytics</div>
+          <h3><span class="vi-only">Phân tích dự đoán</span><span class="en-only" lang="en">Predictive analytics</span></h3>
+          <p class="standard-copy">Kleppmann phân biệt hai loại dùng dữ liệu<span class="cite"><a href="#ref-1">1</a></span>. Khi thuật toán chọn hiển thị quảng cáo nào, đoán sai chỉ tốn một chút ngân sách. Nhưng khi nó tham gia quyết định ai được vay, ai được thuê, ai được bảo hiểm, ai bị cơ quan nhà nước đánh dấu, thì một lần đoán sai rơi xuống <em>một con người cụ thể</em>. Điều ông nhấn mạnh không chỉ là mô hình có thể sai, mà là người bị ảnh hưởng thường <strong>không được biết lý do và không có đường khiếu nại</strong>: quyết định đến từ một quy trình mà chính người vận hành cũng khó giải thích từng trường hợp. Theo ông, khi ấy trách nhiệm không biến mất — nó chỉ bị làm cho khó truy về ai.</p>
+          <p class="easy-only">Máy đoán sai một quảng cáo thì chẳng sao. Nhưng nếu máy tham gia quyết định ai được vay tiền, ai được nhận việc, thì đoán sai là <strong>có người chịu thiệt thật</strong>. Và người đó thường không được cho biết vì sao, cũng không biết hỏi ai. Nhớ nhé: máy quyết định thay người thì vẫn phải có người đứng ra trả lời.</p>
+          <p class="en-only" lang="en">Kleppmann distinguishes two uses of data<span class="cite"><a href="#ref-1">1</a></span>. When an algorithm picks which advert to show, a wrong guess costs a little budget. But when it helps decide who gets a loan, who gets hired, who gets insured, who gets flagged by a state agency, a wrong guess lands on <em>a particular person</em>. What he stresses is not only that the model can be wrong, but that the affected person usually <strong>is not told why and has no route of appeal</strong>: the decision comes from a process even its operators struggle to explain case by case. In his view responsibility does not disappear at that point — it is merely made hard to trace to anyone.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Câu hỏi ông đặt ra</strong>Nếu hệ của bạn từ chối một người, người đó có được biết lý do không, và có cách nào để phản đối không?</div>
+            <div class="easy-only"><strong>Câu hỏi</strong>Nếu bị từ chối, người ta có được biết vì sao không?</div>
+            <div class="en-only" lang="en"><strong>The question he poses</strong>If your system rejects someone, are they told why, and is there any way to contest it?</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Nền đọc mà chương dẫn tới</h4>
+              <p>Kleppmann không dựng lập luận này từ hư không: danh mục tham chiếu Chương 12 của ông dẫn tới <em>Weapons of Math Destruction</em> của Cathy O'Neil, cuốn sách khảo sát các mô hình chấm điểm quy mô lớn tác động lên cơ hội của cá nhân<span class="cite"><a href="#ref-15">15</a></span><span class="cite"><a href="#ref-4">4</a></span>, và tới bài nói "The Moral Economy of Tech" của Maciej Cegłowski<span class="cite"><a href="#ref-14">14</a></span>. Đây là nguồn ông giới thiệu để đọc thêm, không phải chỗ dựa duy nhất cho phần trình bày ở đây.</p>
+            </div>
+            <div class="info-block">
+              <h4>Giải thích được hay không</h4>
+              <p>Câu hỏi "có quyền được giải thích không" đã là chủ đề học thuật khi cuốn sách ra đời: Goodman và Flaxman phân tích các điều khoản của quy định bảo vệ dữ liệu châu Âu về quyết định tự động và bàn liệu chúng có tạo ra một quyền được giải thích hay không<span class="cite"><a href="#ref-16">16</a></span>. Bài này cũng nằm trong danh mục tham chiếu của chương<span class="cite"><a href="#ref-4">4</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Bias, discrimination and feedback loops</div>
+          <h3><span class="vi-only">Thiên lệch, phân biệt đối xử và vòng phản hồi</span><span class="en-only" lang="en">Bias, discrimination and feedback loops</span></h3>
+          <p class="standard-copy">Lập luận của Kleppmann ở đây đi theo hai bước<span class="cite"><a href="#ref-1">1</a></span>. Bước một: một mô hình học từ dữ liệu lịch sử thì học luôn cả những khuôn mẫu có trong lịch sử ấy — nếu quá khứ chứa đối xử bất công với một nhóm, mô hình sẽ tái tạo khuôn mẫu đó mà không hề biết mình đang làm gì. Bước hai, và là bước ông cho là dễ bị bỏ sót: quyết định của hệ <strong>làm thay đổi hành vi</strong>, hành vi ấy sinh ra dữ liệu mới, và dữ liệu mới lại huấn luyện vòng sau — một <em>vòng phản hồi tự củng cố</em> có thể khiến một dự đoán trở thành lời tiên tri tự ứng nghiệm. Điều làm ông lo, theo cách ông viết, là con số mang lại <strong>vẻ ngoài khách quan</strong> cho một kết quả vốn chỉ phản chiếu dữ liệu đầu vào.</p>
+          <p class="easy-only">Nếu bạn dạy một cái máy bằng chuyện đã xảy ra, nó sẽ học theo <strong>y như cũ</strong> — kể cả những chỗ cũ chưa hay. Rồi nó quyết định, quyết định đó làm mọi chuyện đổi đi, và lần sau nó lại học từ chính cái đã đổi ấy. Cứ thế vòng đi vòng lại. Nhớ nhé: học từ chuyện cũ thì dễ lặp lại chuyện cũ, và con số trông có vẻ khách quan không có nghĩa là nó khách quan.</p>
+          <p class="en-only" lang="en">Kleppmann's argument here runs in two steps<span class="cite"><a href="#ref-1">1</a></span>. Step one: a model trained on historical data also learns the patterns that history contained — if the past held unfair treatment of a group, the model reproduces that pattern without any awareness of doing so. Step two, the one he thinks is most often missed: the system's decisions <strong>change behaviour</strong>, that behaviour produces new data, and the new data trains the next round — a <em>self-reinforcing feedback loop</em> that can turn a prediction into a self-fulfilling prophecy. What worries him, as he puts it, is that numbers lend an <strong>appearance of objectivity</strong> to an output that merely reflects its input.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao khó phát hiện</strong>Vòng phản hồi không lộ ra trong một lần đo. Nó chỉ hiện rõ khi ta so sánh dữ liệu huấn luyện giữa các thế hệ mô hình — việc mà ít hệ nào làm sẵn.</div>
+            <div class="easy-only"><strong>Vì sao khó thấy</strong>Nhìn một lần thì không thấy gì; phải so nhiều lần mới nhận ra vòng lặp.</div>
+            <div class="en-only" lang="en"><strong>Why it's hard to spot</strong>A feedback loop doesn't show up in a single measurement. It becomes visible only by comparing training data across model generations — something few systems track by default.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cách ông đặt giới hạn cho lập luận</h4>
+              <p>Kleppmann không nói rằng thuật toán tệ hơn con người, cũng không nói mọi mô hình đều thiên lệch. Lập luận của ông hẹp hơn và vì thế chắc hơn: <em>chất lượng đầu ra không vượt được chất lượng đầu vào</em>, nên khi đầu vào mang theo bất công của quá khứ thì đầu ra cũng vậy — và việc một quyết định được máy đưa ra không làm nó trung lập hơn<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Hệ quả kỹ thuật</h4>
+              <p>Nếu thừa nhận mô hình là trạng thái phái sinh, thì việc truy nguồn — dữ liệu nào sinh ra quyết định nào — trở thành một yêu cầu kỹ thuật chứ không chỉ là mong muốn đạo đức. Đây là chỗ ý kiểm toán ở trục 3 nối vào trục 4: một hệ không lần lại được nguồn gốc quyết định thì cũng không kiểm tra được thiên lệch của chính nó.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Privacy, tracking and consent</div>
+          <h3><span class="vi-only">Quyền riêng tư, theo dõi và sự đồng thuận</span><span class="en-only" lang="en">Privacy, tracking and consent</span></h3>
+          <p class="standard-copy">Kleppmann bắt đầu bằng một phân biệt khái niệm: <em>riêng tư</em> không có nghĩa là giấu giếm, mà là <strong>quyền tự quyết định tiết lộ điều gì, cho ai</strong><span class="cite"><a href="#ref-1">1</a></span>. Theo lập luận của ông, khi một dịch vụ thu thập dữ liệu như sản phẩm phụ của việc sử dụng, quyền tự quyết ấy chuyển từ người dùng sang dịch vụ — và cái gọi là "đồng ý" qua điều khoản sử dụng khó được xem là đồng ý tự do, khi người dùng không thật sự hiểu mình đang đánh đổi gì và cũng không có lựa chọn thay thế tương đương. Ông đề nghị một phép thử ngôn ngữ đơn giản: thử thay chữ "dữ liệu" bằng chữ "theo dõi" trong các câu quảng cáo về sản phẩm dữ liệu, rồi đọc lại xem câu ấy nghe thế nào.</p>
+          <p class="easy-only">"Riêng tư" không phải là có điều gì để giấu. Nó là <strong>quyền được tự chọn</strong>: kể gì, cho ai nghe. Tác giả nói: nếu bạn bấm "đồng ý" chỉ vì không bấm thì không dùng được, thì đó chưa hẳn là bạn đã chọn. Nhớ nhé: chọn thật là khi còn có cách khác để chọn.</p>
+          <p class="en-only" lang="en">Kleppmann starts from a conceptual distinction: <em>privacy</em> does not mean secrecy but <strong>the right to decide what to reveal, and to whom</strong><span class="cite"><a href="#ref-1">1</a></span>. On his argument, when a service collects data as a by-product of being used, that right shifts from the user to the service — and "consent" given through terms of service is hard to regard as freely given when the user neither truly understands the trade nor has an equivalent alternative. He proposes a simple linguistic test: substitute the word "surveillance" for "data" in marketing copy about data products, and read the sentence again.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Phép thử của ông</strong>"Kho dữ liệu của chúng tôi" đọc thành "kho theo dõi của chúng tôi". Nếu câu mới nghe chối tai, theo ông, đó là dấu hiệu đáng dừng lại suy nghĩ.</div>
+            <div class="easy-only"><strong>Phép thử</strong>Thay chữ "dữ liệu" bằng chữ "theo dõi" rồi đọc lại — thấy khác không?</div>
+            <div class="en-only" lang="en"><strong>His test</strong>"Our data warehouse" read as "our surveillance warehouse". If the new sentence grates, he suggests, that is a signal worth pausing over.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao ông không dừng ở "hãy đọc kỹ điều khoản"</h4>
+              <p>Lập luận của Kleppmann nhắm vào cấu trúc chứ không vào sự bất cẩn của cá nhân: nếu mọi dịch vụ cùng loại đều đặt cùng một điều kiện, thì việc đọc kỹ cũng không tạo ra thêm lựa chọn nào<span class="cite"><a href="#ref-1">1</a></span>. Vì thế ông đặt trách nhiệm ở phía bên thiết kế hệ, chứ không ở phía người dùng.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ranh giới ông tự đặt</h4>
+              <p>Ông không kêu gọi ngừng thu thập dữ liệu, và cũng không cho rằng mọi việc thu thập đều sai. Điều ông đề nghị là <em>tiết chế</em>: thu những gì thật sự cần cho chức năng, nói rõ mục đích, và xóa khi hết cần<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Data as assets, data as power</div>
+          <h3><span class="vi-only">Dữ liệu như tài sản và như quyền lực</span><span class="en-only" lang="en">Data as assets, data as power</span></h3>
+          <p class="standard-copy">Kleppmann chỉ ra một động lực kinh tế rất cụ thể<span class="cite"><a href="#ref-1">1</a></span>: khi dữ liệu được ghi nhận như một tài sản có giá trị, cấu trúc khuyến khích sẽ nghiêng hẳn về phía <strong>thu thật nhiều và giữ thật lâu</strong>, bất kể có dùng đến hay không. Ông đối chiếu động lực ấy với một cách nhìn khác mà ông dẫn từ Bruce Schneier: dữ liệu cá nhân là một <em>tài sản độc hại</em> — càng giữ nhiều thì hậu quả của một lần rò rỉ càng lớn<span class="cite"><a href="#ref-13">13</a></span>. Kleppmann tinh chỉnh hình ảnh ấy thành <strong>vật liệu nguy hiểm</strong>: thứ có giá trị thật, nhưng phải xử lý theo quy trình, có kiểm soát, và phải tiêu hủy khi không còn cần. Ông lập luận rằng cả tự điều chỉnh của ngành lẫn luật pháp đều cần thiết, và không cái nào thay được cái nào.</p>
+          <p class="easy-only">Giữ nhiều dữ liệu nghe như giữ nhiều của. Nhưng có người ví nó giống <strong>hóa chất trong kho</strong>: có ích thật đấy, nhưng giữ càng nhiều thì càng phải cẩn thận, và lỡ đổ ra thì dọn rất mệt. Nên chỉ giữ thứ mình thật sự cần, và bỏ đi khi hết cần. Nhớ nhé: giữ ít mà giữ kỹ.</p>
+          <p class="en-only" lang="en">Kleppmann identifies a very concrete economic incentive<span class="cite"><a href="#ref-1">1</a></span>: when data is booked as a valuable asset, the incentive structure tilts sharply toward <strong>collecting as much as possible and keeping it as long as possible</strong>, whether or not it is ever used. He contrasts that incentive with another framing he draws from Bruce Schneier: personal data as a <em>toxic asset</em> — the more you hold, the worse a single breach becomes<span class="cite"><a href="#ref-13">13</a></span>. Kleppmann refines the image into <strong>hazardous material</strong>: something genuinely valuable, but to be handled by procedure, under controls, and destroyed when no longer needed. He argues that industry self-regulation and legislation are both necessary, and that neither substitutes for the other.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thiết kế</strong>Nếu dữ liệu là vật liệu nguy hiểm thì "xóa được" và "hết hạn thì tự xóa" là yêu cầu kỹ thuật ngang hàng với "lưu được" — chứ không phải tính năng thêm vào sau.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Làm hệ thì cũng phải làm luôn phần <em>xóa</em>, chứ không chỉ phần lưu.</div>
+            <div class="en-only" lang="en"><strong>The design consequence</strong>If data is hazardous material, then "deletable" and "expires automatically" are engineering requirements on a par with "storable" — not features bolted on later.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Căng thẳng với chính kiến trúc của chương</h4>
+              <p>Đáng chú ý là yêu cầu xóa được va chạm trực tiếp với ý tưởng nhật ký bất biến mà cả chương này dựng lên. Một hệ giữ lại toàn bộ lịch sử để dựng lại khung nhìn phái sinh cũng là một hệ khó xóa dấu vết của một người. Kleppmann không giấu căng thẳng ấy; ông nêu nó ra như một bài toán thiết kế còn mở, chứ không đưa ra lời giải gọn<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Sau 2017 — bổ sung ngoài sách</h4>
+              <p>Khối này <strong>không thuộc nội dung sách</strong> và chỉ nhằm định vị thời điểm. Quy định chung về bảo vệ dữ liệu của Liên minh châu Âu (Quy định 2016/679) được thông qua năm 2016 và bắt đầu được áp dụng từ ngày 25 tháng 5 năm 2018 — nghĩa là sau khi cuốn sách xuất bản<span class="cite"><a href="#ref-17">17</a></span>. Khi Kleppmann viết về việc cần cả luật pháp lẫn tự điều chỉnh, ông viết trước mốc áp dụng đó; trang này không diễn giải các diễn biến về sau thay cho ông.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận lớn nhất của chương này</span><span class="en-only" lang="en">The three biggest misreadings of this chapter</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Chương này khuyên dùng kiến trúc lambda”</span><span class="en-only" lang="en">"This chapter recommends the lambda architecture"</span></h4>
+          <p class="standard-copy">Ngược lại. Kleppmann giữ tiền đề của lambda — nhật ký bất biến, khung nhìn phái sinh dựng lại được — rồi <em>phê phán</em> cấu trúc hai tầng của nó: phải hiện thực cùng một logic hai lần trong hai khung làm việc, phải viết thêm mã hợp nhất ở đường đọc, và xử lý lại toàn bộ lịch sử theo mẻ thì quá đắt<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-8">8</a></span>. Hướng ông đề nghị là hợp nhất mẻ và luồng trong một hệ.</p>
+          <p class="en-only" lang="en">The opposite. Kleppmann keeps lambda's premise — an immutable log, rebuildable derived views — and then <em>criticises</em> its two-layer structure: the same logic implemented twice in two frameworks, extra merging code on the read path, and full-history batch reprocessing that is simply too expensive<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-8">8</a></span>. His proposed direction is unifying batch and stream in one system.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Đúng một lần nghĩa là chạy đúng một lần”</span><span class="en-only" lang="en">"Exactly-once means running exactly once"</span></h4>
+          <p class="standard-copy">Sai. Việc thử lại vẫn xảy ra, và trong hệ phân tán thì không thể không xảy ra. Cái đạt được là <em>hiệu ứng</em> chỉ xảy ra một lần, nhờ thao tác lũy đẳng cộng với một định danh yêu cầu sinh từ đầu chuỗi và được kiểm ở đúng nơi hiệu ứng diễn ra<span class="cite"><a href="#ref-1">1</a></span>. Hiểu theo nghĩa đen sẽ dẫn tới việc trông cậy vào một bảo đảm không hề tồn tại.</p>
+          <p class="en-only" lang="en">Wrong. Retries still happen, and in a distributed system they must. What is achieved is that the <em>effect</em> happens once, through idempotent operations plus a request identifier generated at the start of the chain and checked where the effect occurs<span class="cite"><a href="#ref-1">1</a></span>. Taking it literally means relying on a guarantee that does not exist.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Có giao dịch ACID là đủ đúng đắn”</span><span class="en-only" lang="en">"ACID transactions are enough for correctness"</span></h4>
+          <p class="standard-copy">Sai. Giao dịch bảo đảm tính đúng đắn bên trong biên của cơ sở dữ liệu; chuỗi sự kiện thật thì bắt đầu ở người dùng và kết thúc ở hệ quả ngoài đời. Theo lập luận đầu-cuối, một chức năng chỉ được hiện thực đầy đủ với hiểu biết của ứng dụng ở hai đầu<span class="cite"><a href="#ref-5">5</a></span> — nên một đơn hàng bị bấm hai lần vẫn lọt qua mọi giao dịch hoàn toàn hợp lệ.</p>
+          <p class="en-only" lang="en">Wrong. Transactions guarantee correctness inside the database's boundary; the real chain of events starts at the user and ends in a real-world consequence. By the end-to-end argument, a function is fully implemented only with the knowledge of the application at the two ends<span class="cite"><a href="#ref-5">5</a></span> — so a double-clicked order sails through a set of perfectly valid transactions.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi hệ của bạn bằng bốn trục của chương kết</span><span class="en-only" lang="en">Test your own system against the closing chapter's four axes</span></h2>
+        <p class="standard-copy">Bốn trục ở trên yêu cầu bạn nhìn hệ của mình từ bên ngoài: không phải nó chạy ra sao, mà nó <em>được ghép thế nào</em>, <em>lấy gì làm bằng chứng cho tính đúng đắn</em>, và <em>đang quyết định điều gì cho ai</em>. Tám câu dưới đây đi theo đúng bốn trục ấy.</p>
+        <p class="easy-only">Mấy câu dưới đây giúp bạn nhìn lại hệ của mình: nó được ghép từ những gì, làm sao biết nó đúng, và nó đang quyết định chuyện gì cho ai. Nhớ nhé: hỏi được câu đúng thì đã đi được nửa đường.</p>
+        <p class="en-only" lang="en">The four axes above ask you to look at your system from the outside: not how it runs, but <em>how it is composed</em>, <em>what evidence you have for its correctness</em>, and <em>what it is deciding, about whom</em>. The eight questions below follow those four axes.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Hệ nào trong kiến trúc của bạn là nguồn sự thật, và hệ nào là phái sinh?</strong><span class="deep-only">Nếu không trả lời được ngay, rất có thể bạn đang đồng bộ hai chiều mà không biết. Phép thử: khi hai hệ bất đồng, bạn sửa bên nào — và bạn có dựng lại được bên kia từ nguồn không?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Chỗ nào trong hệ đang ghi kép?</strong><span class="deep-only">Đi tìm những đoạn mã ghi vào cơ sở dữ liệu rồi ghi tiếp vào chỉ mục tìm kiếm, cache hay hàng đợi. Mỗi đoạn như vậy là một chỗ có thể lệch vĩnh viễn khi một trong hai lệnh thất bại — và lệch mà không báo lỗi.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có đang hiện thực cùng một logic hai lần không?</strong><span class="deep-only">Một bản cho đường luồng, một bản cho đường mẻ hoặc cho báo cáo cuối ngày. Nếu có, hãy tính xem giữ hai bản đồng nghĩa với nhau tốn bao nhiêu — đó chính là phản đối với kiến trúc lambda ở trục 1.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Với mỗi trạng thái phái sinh, đường biên ghi–đọc đang nằm ở đâu?</strong><span class="deep-only">Tính sẵn hoàn toàn lúc ghi, tính hoàn toàn lúc đọc, hay ở giữa? Rồi hỏi tiếp: với tỉ lệ đọc/ghi thật của bạn, vị trí hiện tại có phải chỗ tổng công việc nhỏ nhất không, hay chỉ là chỗ nó tình cờ dừng lại?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Thao tác nào của bạn thật sự lũy đẳng, và định danh yêu cầu sinh ở đâu?</strong><span class="deep-only">Kiểm hai điều: định danh có được sinh ở phía client ngay khi người dùng bắt đầu không, và nó có được kiểm ở đúng nơi hiệu ứng xảy ra không. Sinh ở máy chủ hoặc kiểm ở tầng giữa thì bài toán trùng lặp vẫn còn nguyên.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Khi ai đó trong nhóm nói "phải nhất quán", họ đang cần kịp thời hay cần toàn vẹn?</strong><span class="deep-only">Đây là câu hỏi đáng giá nhất của chương. Trễ vài giây thì khó chịu nhưng tự khỏi; ghi hỏng một bất biến thì đọng lại và phải sửa tay. Rất nhiều chi phí đồng bộ được trả cho vế thứ nhất trong khi nỗi lo thật nằm ở vế thứ hai.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn kiểm tra tính toàn vẹn của dữ liệu bằng cách nào, và bao lâu một lần?</strong><span class="deep-only">"Cơ sở dữ liệu chưa báo lỗi" không phải một phép kiểm. Bạn có dựng lại được một khung nhìn phái sinh từ nhật ký và đối chiếu với bản đang phục vụ không? Nếu không, bạn đang tin chứ chưa kiểm.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Hệ của bạn đang ra quyết định gì về con người, và người bị quyết định có đường khiếu nại nào?</strong><span class="deep-only">Theo lập luận ở trục 4, đây là câu hỏi không tầng kỹ thuật nào trả lời hộ. Nếu hệ từ chối, xếp hạng hay đánh dấu một người, hãy hỏi: dữ liệu nào dẫn tới quyết định ấy, bạn có lần lại được không, và người đó biết hỏi ai?</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Chỗ nào trong hệ của bạn là "bản gốc"?</strong><span>Nếu hai chỗ nói khác nhau, bạn tin chỗ nào và chép lại từ đâu?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có đang tự tay ghi vào hai chỗ cùng lúc không?</strong><span>Ghi một chỗ hỏng mà chỗ kia vẫn xong là lệch nhau mãi đấy.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Cùng một công thức bạn có đang viết hai lần không?</strong><span>Hai bản thì phải sửa hai lần, và dễ quên một bản.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn dọn sẵn từ trước, hay đợi có người hỏi mới dọn?</strong><span>Không tránh được việc, chỉ chọn được lúc làm thôi.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Gửi lại hai lần thì hệ có làm hai lần không?</strong><span>Có mã riêng cho từng việc thì gửi lại mấy lần cũng chỉ tính một.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn đang sợ "chậm" hay sợ "sai"?</strong><span>Chậm thì đợi là hết; sai thì phải có người vào sửa.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bao lâu bạn kiểm lại xem số liệu có còn khớp không?</strong><span>Máy không kêu không có nghĩa là máy đúng.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Hệ của bạn đang quyết định điều gì về người khác?</strong><span>Nếu nó từ chối ai đó, người ấy có được biết vì sao không?</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>Which system in your architecture is the source of truth, and which are derived?</strong><span>If you can't answer at once, you may be two-way syncing without knowing. The test: when two systems disagree, which do you fix — and can you rebuild the other from the source?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Where in your system are you dual writing?</strong><span>Hunt for code that writes to the database and then to a search index, cache or queue. Each one can diverge permanently when one of the two writes fails — and diverge without raising an error.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Are you implementing the same logic twice?</strong><span>One version for the streaming path, another for batch or the end-of-day report. If so, price the cost of keeping the two semantically identical — that is the objection to the lambda architecture raised on axis 1.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>For each piece of derived state, where does the write/read boundary sit?</strong><span>Fully precomputed on write, fully computed on read, or in between? Then ask: given your real read/write ratio, is that the point of minimum total work, or just where it happened to land?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Which of your operations are genuinely idempotent, and where is the request identifier generated?</strong><span>Check two things: is it generated client-side the moment the user starts, and is it checked where the effect actually happens? Generated on the server or checked mid-chain, and duplication survives intact.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>When a colleague says "it must be consistent", do they mean timeliness or integrity?</strong><span>The chapter's most valuable question. Seconds of staleness are annoying but self-healing; a broken invariant persists and needs manual repair. Much coordination cost is paid for the first while the real fear is the second.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How, and how often, do you verify data integrity?</strong><span>"The database hasn't complained" is not a check. Can you rebuild a derived view from the log and compare it against the one being served? If not, you are trusting rather than verifying.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>What is your system deciding about people, and what recourse do they have?</strong><span>On the argument of axis 4, no technical layer answers this for you. If the system rejects, ranks or flags someone, ask: which data led to that decision, can you trace it, and whom can that person ask?</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng · khép lại cả cuốn sách</span><span class="en-only" lang="en">The conclusion, distilled · closing the whole book</span></div>
+    <blockquote><span class="standard-copy">Cuốn sách mở ra bằng ba chữ — <span class="closing-accent">đáng tin, co giãn, dễ bảo trì</span> — và đóng lại bằng cách cho thấy ba chữ ấy không phải khẩu hiệu mà là một lập luận kéo dài mười hai chương<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. Phần I dựng từ vựng, Phần II cho thấy cái giá của việc phân tán, Phần III chỉ ra rằng dữ liệu phái sinh là cách trả cái giá ấy mà vẫn giữ được hệ đứng vững. Chương cuối gộp cả ba lại thành một tư thế làm việc: <span class="closing-accent">chọn một nguồn sự thật và phái sinh phần còn lại</span>, vì đó là cách duy nhất giữ nhiều công cụ chuyên biệt không mâu thuẫn với nhau; <span class="closing-accent">lập luận về tính đúng đắn ở hai đầu</span>, vì không tầng nào bên dưới gánh hộ được; và <span class="closing-accent">tự hỏi hệ ấy đang làm gì với ai</span>, vì đó là phần mà kỹ thuật không trả lời thay được. Mười hai chương, rốt cuộc, là mười hai cách hỏi cùng một câu: chúng ta có thật sự hiểu thứ mình vừa dựng lên không?</span><span class="easy-only">Cuốn sách bắt đầu bằng ba điều: <span class="closing-accent">đáng tin</span>, <span class="closing-accent">chịu được đông</span>, <span class="closing-accent">người sau còn sửa được</span>. Và nó kết thúc bằng cách cho thấy cả mười hai chương chỉ để nói rõ ba điều ấy. Chương cuối thêm một ý: máy chạy tốt vẫn chưa đủ — còn phải hỏi <span class="closing-accent">nó đang được dùng để làm gì</span>. Nhớ nhé: hiểu cái mình dựng lên, và nghĩ tới người nó chạm tới.</span><span class="en-only" lang="en">The book opens with three words — <span class="closing-accent">reliable, scalable, maintainable</span> — and closes by showing they were never slogans but an argument sustained across twelve chapters<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. Part I builds the vocabulary, Part II shows the price of distribution, Part III shows that derived data is how that price is paid while the system still stands. The final chapter folds all three into a working stance: <span class="closing-accent">pick one source of truth and derive the rest</span>, because that is the only way many specialised tools stay free of contradiction; <span class="closing-accent">argue correctness end to end</span>, because no lower layer will carry it for you; and <span class="closing-accent">ask what the system is doing, and to whom</span>, because engineering cannot answer that in your place. Twelve chapters turn out to be twelve ways of asking one question: do we really understand the thing we have just built?</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-11-stream-processing.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 11 · Xử lý luồng</span><span class="en-only" lang="en">Chapter 11 · Stream Processing</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="index.html">
+      <span class="nav-label"><span class="vi-only">Hết cuốn ▶</span><span class="en-only" lang="en">The end ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Về trang bìa · DDIA</span><span class="en-only" lang="en">Back to the cover · DDIA</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 12 <span lang="en">“The Future of Data Systems”</span> (Phần III · <span lang="en">Derived Data</span>)<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>; danh mục tham chiếu gốc của chương do chính tác giả duy trì<span class="cite"><a href="#ref-4">4</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (cuốn sổ chung, số vé xếp hàng, gọt hoa quả từ tối hôm trước, hóa chất trong kho…) là minh họa do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. <strong>Về mục “Làm điều đúng đắn”:</strong> mọi phát biểu quy chuẩn trong mục đó là lập luận của Kleppmann trong sách chứ không phải quan điểm của tài liệu này; phần bối cảnh pháp lý sau năm 2017 được tách riêng trong một khối chế độ Đầy đủ và ghi rõ là bổ sung ngoài sách.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 12 “The Future of Data Systems” (Part III · Derived Data)<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>; the chapter's original reference list, maintained by the author<span class="cite"><a href="#ref-4">4</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (a shared ledger, a queue ticket, fruit peeled the night before, chemicals in a store room…) are illustrations added by this companion, not examples from the book. <strong>On the "Doing the right thing" section:</strong> every normative statement there is Kleppmann's argument in the book, not a view held by this companion; the post-2017 legal context is isolated in a single Đầy đủ-mode block and explicitly marked as an addition from outside the book.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 12 “The Future of Data Systems”.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách (cấu trúc ba phần, Phần III “Derived Data”)</a></li>
+        <li id="ref-3"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O'Reilly — trang sách chính thức (mục lục, định danh chương)</a> <em>(oreilly.com chặn truy cập tự động: trả 403 cho fetcher và chặn cả trình duyệt headless (Akamai “Access Denied”); nguồn có thật và được định danh đầy đủ ở trên)</em></li>
+        <li id="ref-4"><a href="https://github.com/ept/ddia-references/blob/master/chapter-12-refs.md" target="_blank" rel="noopener noreferrer">ept/ddia-references — danh mục tham chiếu Chương 12 do chính Kleppmann duy trì</a></li>
+        <li id="ref-5"><a href="https://groups.csail.mit.edu/ana/Publications/PubPDFs/End-to-End%20Arguments%20in%20System%20Design.pdf" target="_blank" rel="noopener noreferrer">Jerome H. Saltzer, David P. Reed &amp; David D. Clark, “End-to-End Arguments in System Design”, ACM TOCS 2(4), 1984 — bài gốc của lập luận đầu-cuối (bản PDF tại MIT CSAIL)</a></li>
+        <li id="ref-6"><a href="https://martin.kleppmann.com/2015/03/04/turning-the-database-inside-out.html" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “Turning the Database Inside-out with Apache Samza”, Strange Loop 2014 — bản ghi bài nói về việc tháo rời cơ sở dữ liệu</a></li>
+        <li id="ref-7"><a href="https://www.manning.com/books/big-data" target="_blank" rel="noopener noreferrer">Nathan Marz &amp; James Warren, <em>Big Data: Principles and Best Practices of Scalable Real-Time Data Systems</em>, Manning, 2015 — nguồn trình bày kiến trúc lambda</a></li>
+        <li id="ref-8"><a href="https://www.oreilly.com/radar/questioning-the-lambda-architecture/" target="_blank" rel="noopener noreferrer">Jay Kreps, “Questioning the Lambda Architecture”, O'Reilly Radar, 2014 — các phản đối mà Kleppmann dẫn lại</a> <em>(oreilly.com chặn truy cập tự động: trả 403 cho fetcher và chặn cả trình duyệt headless (Akamai “Access Denied”); nguồn có thật và được định danh đầy đủ ở trên)</em></li>
+        <li id="ref-9"><a href="https://cidrdb.org/cidr2007/papers/cidr07p15.pdf" target="_blank" rel="noopener noreferrer">Pat Helland, “Life Beyond Distributed Transactions: An Apostate's Opinion”, CIDR 2007 — lập luận từ bỏ giao dịch phân tán ở quy mô lớn</a></li>
+        <li id="ref-10"><a href="https://arxiv.org/abs/1402.2237" target="_blank" rel="noopener noreferrer">Peter Bailis, Alan Fekete, Michael J. Franklin và cộng sự, “Coordination-Avoiding Database Systems”, VLDB 8(3), 2014 — hệ giữ toàn vẹn mà tránh điều phối</a></li>
+        <li id="ref-11"><a href="https://www.bailis.org/papers/feral-sigmod2015.pdf" target="_blank" rel="noopener noreferrer">Peter Bailis, Alan Fekete, Michael J. Franklin và cộng sự, “Feral Concurrency Control”, SIGMOD 2015 — khảo sát việc ứng dụng tự cưỡng chế ràng buộc toàn vẹn</a></li>
+        <li id="ref-12"><a href="https://dsf.berkeley.edu/cs286/papers/calm-cidr2011.pdf" target="_blank" rel="noopener noreferrer">Peter Alvaro, Neil Conway, Joseph M. Hellerstein &amp; William R. Marczak, “Consistency Analysis in Bloom: A CALM and Collected Approach”, CIDR 2011 — lớp bài toán tính được không cần điều phối</a></li>
+        <li id="ref-13"><a href="https://www.schneier.com/essays/archives/2016/03/data_is_a_toxic_asse.html" target="_blank" rel="noopener noreferrer">Bruce Schneier, “Data Is a Toxic Asset, So Why Not Throw It Out?”, schneier.com, 01/03/2016 — cách nhìn dữ liệu cá nhân như tài sản độc hại</a></li>
+        <li id="ref-14"><a href="https://idlewords.com/talks/sase_panel.htm" target="_blank" rel="noopener noreferrer">Maciej Cegłowski, “The Moral Economy of Tech”, SASE 2016 (idlewords.com) — bài nói trong danh mục đọc thêm của chương</a></li>
+        <li id="ref-15"><a href="https://www.penguinrandomhouse.com/books/241363/weapons-of-math-destruction-by-cathy-oneil/" target="_blank" rel="noopener noreferrer">Cathy O'Neil, <em>Weapons of Math Destruction</em>, Crown Publishing, 2016 — khảo sát các mô hình chấm điểm quy mô lớn</a></li>
+        <li id="ref-16"><a href="https://arxiv.org/abs/1606.08813" target="_blank" rel="noopener noreferrer">Bryce Goodman &amp; Seth Flaxman, “European Union Regulations on Algorithmic Decision-Making and a ‘Right to Explanation’”, arXiv:1606.08813, 2016</a></li>
+        <li id="ref-17"><a href="https://eur-lex.europa.eu/eli/reg/2016/679/oj" target="_blank" rel="noopener noreferrer">EUR-Lex — Quy định (EU) 2016/679 (GDPR): văn bản chính thức, nêu rõ mốc áp dụng từ 25/05/2018</a></li>
+        <li id="ref-18"><a href="https://research.google/pubs/machine-learning-the-high-interest-credit-card-of-technical-debt/" target="_blank" rel="noopener noreferrer">D. Sculley và cộng sự, “Machine Learning: The High-Interest Credit Card of Technical Debt”, NIPS SE4ML 2014 — mắc nối ẩn quanh trạng thái phái sinh kiểu mô hình</a></li>
+        <li id="ref-19"><a href="https://vimeo.com/145492419" target="_blank" rel="noopener noreferrer">Felienne Hermans, “Spreadsheets Are Code”, Code Mesh 2015 — bảng tính như một mô hình dòng dữ liệu</a></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-11-stream-processing.html">Chương 11 — Xử lý luồng</a> · <a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Chương 1 — Tin cậy, mở rộng &amp; bảo trì</a>. Đây là chương cuối của cuốn sách.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-11-stream-processing.html">Chapter 11 — Stream Processing</a> · <a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Chapter 1 — Reliable, Scalable &amp; Maintainable</a>. This is the book's final chapter.</p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

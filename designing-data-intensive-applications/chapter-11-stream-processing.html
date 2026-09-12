@@ -1,0 +1,2145 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 11 &quot;Stream Processing&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: truyền tải luồng sự kiện (broker AMQP/JMS so với nhật ký phân mảnh), CDC và event sourcing, thời gian sự kiện &amp; cửa sổ, join trên luồng, và chịu lỗi với hiệu ứng đúng một lần.">
+<title>Stream Processing</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 11";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 11</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 11</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 11</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Phần III · Chương 11 · Xử lý luồng</span><span class="easy-only">DDIA · Phần III · Chương 11 · Xử lý luồng</span><span class="en-only" lang="en">DDIA · Part III · Chapter 11 · Stream Processing</span></div>
+      <h1 id="page-title"><span class="standard-copy">Theo lô, nhưng <span class="hero-title-accent">không có hồi kết</span></span><span class="easy-only">Dữ liệu chảy mãi không hết</span><span class="en-only" lang="en">Like batch, but <span class="hero-title-accent">it never ends</span></span></h1>
+      <p class="standard-copy">Chương 10 dựng cả thế giới theo lô trên một giả định êm ái: đầu vào <strong>hữu hạn và đã biết</strong>, có điểm bắt đầu và điểm kết thúc, nên một job mới có lúc "chạy xong". Kleppmann mở Chương 11 bằng cách rút đúng giả định ấy đi<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. Thực tế, dữ liệu <strong>đến dần và không bao giờ đủ</strong>: người dùng vẫn gõ, cảm biến vẫn gửi, giao dịch vẫn phát sinh. Chạy lô mỗi ngày một lần nghĩa là kết quả luôn cũ mất một ngày. Xử lý luồng là câu trả lời — bỏ ranh giới lô cố định, xử lý từng sự kiện ngay khi nó xuất hiện. Và cả chương là bản kiểm kê những thứ ta phải trả để có điều đó.</p>
+      <p class="easy-only">Ở chương trước, máy tính làm việc theo <strong>mẻ</strong>: gom đủ dữ liệu rồi mới bắt đầu, làm xong thì nghỉ. Nhưng dữ liệu thật thì chảy mãi — người ta cứ bấm, cứ mua, cứ gửi tin. Nếu mỗi ngày mới tính một lần thì kết quả luôn là chuyện của hôm qua. Chương này nói về cách làm việc với dòng dữ liệu <strong>không bao giờ hết</strong>: tới đâu tính tới đó. Nhớ nhé: luồng cũng giống mẻ thôi, chỉ là mẻ đó không có điểm dừng.</p>
+      <p class="en-only" lang="en">Chapter 10 built the whole batch world on one comfortable assumption: input that is <strong>bounded and known</strong>, with a beginning and an end, so a job can actually finish. Kleppmann opens Chapter 11 by pulling that assumption away<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. In reality data <strong>arrives gradually and is never complete</strong>: users keep typing, sensors keep sending, transactions keep happening. Running a batch once a day means your results are always a day stale. Stream processing is the answer — drop the fixed batch boundary and process each event as it appears. The rest of the chapter is an inventory of what that costs.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Một "luồng" chỉ đơn giản là <strong>dữ liệu được cung cấp dần theo thời gian</strong><span class="cite"><a href="#ref-1">1</a></span>. Nhưng khi ta nhận lấy một <strong>nhật ký nối đuôi bất biến</strong> làm trục chính, thì cơ sở dữ liệu, chỉ mục, cache và view vật chất hóa đều biến thành <em>dẫn xuất</em> của cùng một luồng sự kiện — và cái mà ta quen gọi là "trạng thái" chỉ là kết quả cộng dồn của luồng ấy. Cái giá phải trả gói trong ba câu hỏi khó: <strong>thời gian của ai</strong>, <strong>join vào lúc nào</strong>, và <strong>điều gì còn đúng khi có sự cố</strong>.</p>
+          <p class="easy-only">Hãy tưởng tượng một cuốn sổ chỉ được <strong>viết thêm</strong>, không bao giờ tẩy xóa. Mọi việc đã xảy ra đều ghi vào đó theo thứ tự. Muốn biết "bây giờ ra sao", cứ đọc lại cuốn sổ từ đầu và cộng dồn. Nhớ nhé: giữ cuốn sổ thì lúc nào cũng dựng lại được hiện tại, nhưng xóa cuốn sổ đi thì mất luôn quá khứ.</p>
+          <p class="en-only" lang="en">A "stream" simply means <strong>data made available incrementally over time</strong><span class="cite"><a href="#ref-1">1</a></span>. But once you take an <strong>immutable append-only log</strong> as the spine, databases, indexes, caches and materialized views all become <em>derivations</em> of the same event stream — and what we call "state" is just that stream accumulated. The price comes as three hard questions: <strong>whose time</strong>, <strong>joined when</strong>, and <strong>what still holds when things fail</strong>.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Ba trụ của Chương 11: nhật ký phân mảnh, trạng thái là tích phân của luồng, và hiệu ứng đúng một lần / Three pillars of Chapter 11: the partitioned log, state as the integral of a stream, and effectively-once results">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">LUỒNG<br>KHÔNG CÓ<br>HỒI KẾT</span><span class="en-only" lang="en">A STREAM<br>WITH NO<br>END</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Partitioned log</span><span class="en-only" lang="en">Partitioned log</span></b>
+        <small class="standard-copy">Nối đuôi, đánh offset, phát lại được</small>
+        <small class="easy-only">Cuốn sổ chỉ viết thêm, đọc lại được.</small>
+        <small class="en-only" lang="en">Append-only, offset-addressed, replayable</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">State ⇄ stream</span><span class="en-only" lang="en">State ⇄ stream</span></b>
+        <small class="standard-copy">Trạng thái là tích phân của luồng</small>
+        <small class="easy-only">Cộng dồn cuốn sổ ra hiện tại.</small>
+        <small class="en-only" lang="en">State is the stream, integrated over time</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Effectively-once</span><span class="en-only" lang="en">Effectively-once</span></b>
+        <small class="standard-copy">Lũy đẳng + commit nguyên tử</small>
+        <small class="easy-only">Làm lại mấy lần, kết quả vẫn một.</small>
+        <small class="en-only" lang="en">Idempotence plus atomic commit</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#event-streams"><span><span class="vi-only">Trục 1 · <span lang="en">Event streams</span></span><span class="en-only" lang="en">Axis 1 · Event streams</span></span><b class="standard-copy">Hàng đợi, hay nhật ký phân mảnh?</b><b class="easy-only">Gửi tin đi bằng cách nào</b><b class="en-only" lang="en">A queue, or a partitioned log?</b></a>
+    <a href="#databases-and-streams"><span><span class="vi-only">Trục 2 · <span lang="en">Databases &amp; streams</span></span><span class="en-only" lang="en">Axis 2 · Databases &amp; streams</span></span><b class="standard-copy">CDC, nguồn sự kiện, và tính bất biến</b><b class="easy-only">Cuốn sổ không tẩy xóa</b><b class="en-only" lang="en">CDC, event sourcing, immutability</b></a>
+    <a href="#time-and-windows"><span><span class="vi-only">Trục 3 · <span lang="en">Processing &amp; time</span></span><span class="en-only" lang="en">Axis 3 · Processing &amp; time</span></span><b class="standard-copy">Thời gian của ai, cửa sổ nào, join lúc nào</b><b class="easy-only">Đồng hồ nào mới đúng</b><b class="en-only" lang="en">Whose clock, which window, joined when</b></a>
+    <a href="#stream-fault-tolerance"><span><span class="vi-only">Trục 4 · <span lang="en">Fault tolerance</span></span><span class="en-only" lang="en">Axis 4 · Fault tolerance</span></span><b class="standard-copy">Hiệu ứng đúng một lần, không phải xử lý một lần</b><b class="easy-only">Làm lại mà kết quả vẫn đúng</b><b class="en-only" lang="en">Effectively-once, not literally once</b></a>
+  </nav>
+
+  <section class="section" id="event-streams" aria-labelledby="event-streams-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">Transmitting event streams</span></span><span class="en-only" lang="en">Axis 1 · Transmitting event streams</span></div>
+        <h2 id="event-streams-title"><span class="vi-only">Hàng đợi xóa tin, nhật ký thì nhớ</span><span class="en-only" lang="en">Queues forget; logs remember</span></h2>
+      </div>
+      <p class="standard-copy">Trước khi bàn xử lý, phải bàn <strong>vận chuyển</strong>. Kleppmann chia họ hàng công cụ truyền sự kiện làm hai nhánh khác nhau tận gốc<span class="cite"><a href="#ref-1">1</a></span>: <strong>message broker kiểu AMQP/JMS</strong> — xóa tin sau khi consumer báo đã nhận, và phân phối việc cho nhiều consumer ở mức từng tin; và <strong>nhật ký phân mảnh</strong> kiểu Kafka — chỉ nối đuôi vào đĩa, không xóa sau khi giao, và chỉ ghi nhớ <em>offset</em> mà mỗi consumer đã đọc tới. Sự khác biệt tưởng nhỏ ấy quyết định gần như mọi thứ còn lại trong chương.</p>
+      <p class="easy-only">Có hai kiểu "đưa tin" khác nhau. Kiểu thứ nhất giống <strong>hộp thư</strong>: đưa thư xong là bỏ thư đi, hết. Kiểu thứ hai giống <strong>cuốn sổ ghi chép</strong>: viết vào sổ rồi ai cũng đọc được, đọc tới đâu thì nhớ trang số mấy, muốn đọc lại từ đầu cũng được. Nhớ nhé: hộp thư thì gọn nhưng mất là mất, còn cuốn sổ thì tốn chỗ nhưng đọc lại được bao nhiêu lần tùy thích.</p>
+      <p class="en-only" lang="en">Before processing comes <strong>transport</strong>. Kleppmann splits the family of event-delivery tools into two branches that differ at the root<span class="cite"><a href="#ref-1">1</a></span>: <strong>AMQP/JMS-style message brokers</strong> — which delete a message once a consumer acknowledges it and dispatch work per message; and <strong>partitioned logs</strong> in the Kafka mould — append-only on disk, nothing deleted on delivery, with the broker merely recording each consumer's <em>offset</em>. That seemingly small difference decides almost everything else in the chapter.</p>
+    </div>
+
+    <div class="surprise-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">An event is a small, self-contained, immutable object</div>
+        <p class="definition standard-copy">Một <em>sự kiện</em> là một vật nhỏ, tự chứa, <strong>bất biến</strong>, ghi lại chi tiết của một việc đã xảy ra tại một thời điểm — thường kèm dấu thời gian theo đồng hồ thời-gian-trong-ngày<span class="cite"><a href="#ref-1">1</a></span>. Nó được <em>producer</em> sinh ra <strong>một lần</strong>, rồi có thể được nhiều <em>consumer</em> xử lý; các sự kiện cùng loại gom lại thành một <em>topic</em> hay <em>stream</em>.</p>
+        <p class="definition easy-only">Một "sự kiện" là mẩu ghi chú nhỏ: <strong>chuyện này đã xảy ra, lúc này</strong>. Viết xong là không sửa nữa. Một người viết ra, nhiều người có thể đọc. Nhớ nhé: sự kiện là chuyện đã rồi, nên nó không đổi.</p>
+        <p class="definition en-only" lang="en">An <em>event</em> is a small, self-contained, <strong>immutable</strong> object recording the details of something that happened at some point in time — usually with a time-of-day timestamp<span class="cite"><a href="#ref-1">1</a></span>. A <em>producer</em> generates it <strong>once</strong>, and multiple <em>consumers</em> may process it; related events are grouped into a <em>topic</em> or <em>stream</em>.</p>
+        <p class="deep-only">Về nguyên tắc, một tập tin hay một bảng CSDL cũng đủ để nối producer với consumer: producer ghi thêm, consumer định kỳ đọc xem có gì mới. Nhưng khi ta muốn độ trễ thấp, tần suất hỏi vòng phải dày lên — và chi phí hỏi vòng tăng theo, trong khi phần lớn lần hỏi trả về "chưa có gì". Càng hỏi dày thì tỉ lệ lần hỏi vô ích càng cao. Đó là lý do ta cần một cơ chế <strong>thông báo</strong> chủ động khi có sự kiện mới — và đó chính là công việc của hệ nhắn tin.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về truyền luồng sự kiện">
+        <div class="equation-row">
+          <b>Log ≠ hàng đợi</b>
+          <span>Broker xóa tin sau khi được ack; nhật ký giữ tin lại và chỉ nhớ offset của consumer.</span>
+        </div>
+        <div class="equation-row">
+          <b>Ba lối thoát</b>
+          <span>Consumer không theo kịp thì chỉ có ba lựa chọn: bỏ tin, đệm vào hàng đợi, hoặc đẩy ngược áp lực.</span>
+        </div>
+        <div class="equation-row">
+          <b>Phát lại được</b>
+          <span>Đọc nhật ký không làm đổi nhật ký, nên có thể tua offset về và chạy lại từ đầu.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về truyền luồng sự kiện">
+        <div class="equation-row">
+          <b>Sổ và hộp thư</b>
+          <span>Hộp thư đưa xong là bỏ; cuốn sổ thì vẫn còn đó.</span>
+        </div>
+        <div class="equation-row">
+          <b>Ba cách xử khi nghẽn</b>
+          <span>Bỏ bớt tin, xếp hàng chờ, hoặc bảo người gửi chậm lại.</span>
+        </div>
+        <div class="equation-row">
+          <b>Đọc lại được</b>
+          <span>Đọc sổ không làm mất chữ, nên muốn đọc lại lúc nào cũng được.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about transmitting event streams">
+        <div class="equation-row">
+          <b>Log ≠ queue</b>
+          <span>A broker deletes a message once acked; a log keeps it and only records the consumer's offset.</span>
+        </div>
+        <div class="equation-row">
+          <b>Three ways out</b>
+          <span>When consumers fall behind there are only three options: drop, buffer in a queue, or apply backpressure.</span>
+        </div>
+        <div class="equation-row">
+          <b>Replayable</b>
+          <span>Reading a log doesn't change it, so you can rewind the offset and run again.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Producers, consumers, and the cost of polling</div>
+          <h3><span class="vi-only">Vì sao phải có hệ nhắn tin</span><span class="en-only" lang="en">Why a messaging system at all</span></h3>
+          <p class="standard-copy">Một hệ nhắn tin tồn tại để producer không phải chờ consumer, và consumer không phải hỏi vòng. Kleppmann gợi ý phân loại mọi hệ như thế bằng <strong>hai câu hỏi</strong><span class="cite"><a href="#ref-1">1</a></span>. Thứ nhất: <em>nếu producer gửi nhanh hơn consumer xử lý thì sao?</em> Chỉ có ba câu trả lời — <strong>bỏ tin</strong>, <strong>đệm tin trong hàng đợi</strong>, hoặc <strong>đẩy ngược áp lực</strong> (backpressure, cũng gọi là điều tiết luồng: chặn producer lại cho tới khi consumer bắt kịp). Thứ hai: <em>nếu một nút sập hay ngoại tuyến thì có mất tin không?</em> Muốn không mất thì phải ghi đĩa và/hoặc nhân bản — và cả hai đều có giá.</p>
+          <p class="easy-only">Người gửi và người nhận không nên phải đợi nhau. Nhưng nếu người gửi gửi nhanh hơn người nhận kịp đọc thì sao? Chỉ có ba cách: <strong>bỏ bớt tin</strong>, <strong>xếp tin vào hàng chờ</strong>, hoặc <strong>bảo người gửi chậm lại</strong>. Rồi còn câu hỏi thứ hai: nếu máy mất điện thì tin có bay mất không? Muốn chắc thì phải chép tin xuống đĩa. Nhớ nhé: không có cách thứ tư đâu — chỉ ba cách ấy thôi.</p>
+          <p class="en-only" lang="en">A messaging system exists so producers needn't wait for consumers and consumers needn't poll. Kleppmann suggests classifying any such system with <strong>two questions</strong><span class="cite"><a href="#ref-1">1</a></span>. First: <em>what if producers send faster than consumers can process?</em> There are only three answers — <strong>drop messages</strong>, <strong>buffer them in a queue</strong>, or apply <strong>backpressure</strong> (flow control: block the producer until the consumer catches up). Second: <em>what if nodes crash or go offline — are messages lost?</em> Durability means writing to disk and/or replicating, and both cost something.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhìn thấy ở đâu</strong>Mỗi lần bạn chọn kích thước hàng đợi, thời gian giữ tin, hay bật tắt xác nhận ghi đĩa, bạn đang trả lời đúng hai câu hỏi này — dù có gọi tên chúng hay không.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Chỉnh hàng đợi to hay nhỏ chính là đang chọn: bỏ tin, chờ, hay bắt người gửi chậm lại.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every time you size a queue, set a retention window, or toggle durable acks, you are answering these two questions — named or not.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao hỏi vòng là lối cụt</h4>
+              <p>Cơ sở dữ liệu vốn không được thiết kế để bị hỏi liên tục. Muốn độ trễ xuống thấp thì phải hỏi dày hơn, mà càng dày thì tỉ lệ lần hỏi trả về "chưa có gì" càng cao — chi phí tăng tuyến tính còn giá trị thu về thì không. Cơ chế thông báo đảo chiều: hệ báo cho ta, thay vì ta liên tục đi hỏi hệ.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ranh giới với xử lý theo lô</h4>
+              <p>Chương 10 có thể <em>sắp xếp</em> toàn bộ đầu vào vì đầu vào hữu hạn; chương 11 thì không. Mất khả năng sắp xếp toàn cục là mất luôn sort-merge join, mất luôn "chạy xong rồi vứt kết quả dở đi làm lại". Gần như mọi khác biệt kỹ thuật còn lại của chương này đều truy ngược về đúng chỗ đó.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Direct messaging: fast, and unforgiving</div>
+          <h3><span class="vi-only">Nhắn tin trực tiếp: nhanh nhưng không tha thứ</span><span class="en-only" lang="en">Direct messaging: fast, and unforgiving</span></h3>
+          <p class="standard-copy">Nhánh đơn giản nhất là bỏ hẳn trung gian: producer nói thẳng với consumer qua mạng. Kleppmann liệt kê những ví dụ thật<span class="cite"><a href="#ref-1">1</a></span> — UDP multicast cho dữ liệu thị trường chứng khoán, các thư viện không-broker như ZeroMQ và nanomsg, StatsD và Brubeck dùng UDP <em>không tin cậy</em> để gom chỉ số, hay webhook: gọi ngược qua HTTP/RPC tới một điểm cuối do consumer đăng ký. Tất cả đều nhanh và gọn, nhưng đều dựa trên một giả định mong manh: <strong>producer và consumer đều đang online</strong>. Nếu consumer chết hay tạm ngoại tuyến, tin gửi trong quãng đó mất hẳn — và producer thì cũng chẳng nhớ gì để gửi lại.</p>
+          <p class="easy-only">Cách đơn giản nhất là gọi thẳng: "ê, có chuyện này!" Nhanh, không cần ai đứng giữa. Nhưng nếu người kia đang ngủ thì lời gọi rơi vào khoảng không, và người gọi cũng không nhớ mình đã nói gì để nói lại. Nhớ nhé: gọi thẳng thì nhanh nhất, nhưng ai vắng mặt là người đó mất tin.</p>
+          <p class="en-only" lang="en">The simplest branch drops the middleman: producers talk straight to consumers over the network. Kleppmann lists real examples<span class="cite"><a href="#ref-1">1</a></span> — UDP multicast for stock-market feeds, brokerless libraries like ZeroMQ and nanomsg, StatsD and Brubeck collecting metrics over <em>unreliable</em> UDP, and webhooks: an HTTP/RPC callback to an endpoint the consumer registered. All are fast and lean, and all rest on one fragile assumption: <strong>producer and consumer are both online</strong>. If a consumer dies or goes briefly offline, messages sent meanwhile are simply gone — and the producer remembers nothing to resend.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Dùng khi nào</strong>Khi mất vài mẩu dữ liệu là chấp nhận được và độ trễ mới là thứ quý — ví dụ gom chỉ số đo đạc, nơi mất 0,1% mẫu không làm lệch kết luận.</div>
+            <div class="easy-only"><strong>Dùng khi nào</strong>Khi mất vài tin cũng không sao, mà nhanh mới quan trọng.</div>
+            <div class="en-only" lang="en"><strong>When to use</strong>When losing a few data points is acceptable and latency is what matters — metrics collection, say, where dropping 0.1% of samples changes no conclusion.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Message brokers, AMQP/JMS style</div>
+          <h3><span class="vi-only">Broker: một CSDL chuyên cho luồng tin</span><span class="en-only" lang="en">A broker is a database for message streams</span></h3>
+          <p class="standard-copy">Message broker (hàng đợi tin) về bản chất là <strong>một cơ sở dữ liệu được tối ưu cho luồng tin</strong><span class="cite"><a href="#ref-1">1</a></span>: producer ghi vào broker, consumer đọc ra, và broker lo phần độ bền. Nhưng Kleppmann nhấn mấy khác biệt quan trọng so với một CSDL thật: broker <strong>xóa tin sau khi giao thành công</strong>, còn CSDL giữ dữ liệu tới khi bị xóa tường minh; broker giả định <strong>hàng đợi luôn ngắn</strong> — hàng dài lên thì thông lượng tụt; CSDL có chỉ mục phụ và truy vấn, còn broker chỉ có cơ chế khớp topic; và CSDL trả kết quả theo một ảnh chụp tại thời điểm truy vấn, trong khi broker thì <em>báo</em> khi dữ liệu đổi. Đây là dòng họ AMQP và JMS<span class="cite"><a href="#ref-10">10</a></span><span class="cite"><a href="#ref-11">11</a></span>.</p>
+          <p class="easy-only">Broker giống một <strong>bưu điện</strong>: người gửi bỏ thư vào, bưu điện giữ hộ, người nhận tới lấy. Lấy xong thì bưu điện bỏ thư đi — nó không giữ bản sao. Bưu điện cũng chỉ chịu được một đống thư vừa phải; thư chất cao quá thì chậm hẳn. Nhớ nhé: bưu điện giữ hộ giúp hai bên không phải đợi nhau, nhưng thư đã lấy rồi là không xin lại được.</p>
+          <p class="en-only" lang="en">A message broker (message queue) is essentially <strong>a database optimized for handling message streams</strong><span class="cite"><a href="#ref-1">1</a></span>: producers write to it, consumers read from it, and it handles durability. But Kleppmann stresses the differences from a real database: a broker <strong>deletes a message once delivery succeeds</strong>, whereas a database keeps data until explicitly deleted; a broker assumes <strong>queues stay short</strong> — throughput degrades as they grow; databases offer secondary indexes and queries, brokers only topic-subscription matching; and a database answers from a point-in-time snapshot, while a broker <em>notifies</em> when data changes. This is the AMQP and JMS family<span class="cite"><a href="#ref-10">10</a></span><span class="cite"><a href="#ref-11">11</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hai kiểu chia việc</strong><strong>Cân bằng tải</strong>: mỗi tin chỉ tới <em>một</em> consumer trong nhóm — dùng khi việc xử lý đắt và ta muốn song song hóa. <strong>Fan-out</strong>: mỗi tin tới <em>mọi</em> consumer — dùng khi nhiều hệ độc lập cùng cần nghe. Hai kiểu có thể kết hợp.</div>
+            <div class="easy-only"><strong>Hai kiểu chia việc</strong>Một là chia nhau làm: mỗi thư một người nhận. Hai là phát cho tất cả: ai cũng nhận một bản.</div>
+            <div class="en-only" lang="en"><strong>Two dispatch modes</strong><strong>Load balancing</strong>: each message goes to <em>one</em> consumer in the group — for parallelising expensive work. <strong>Fan-out</strong>: each message goes to <em>every</em> consumer — when several independent systems must all hear it. The two can be combined.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Ack và gửi lại làm đảo thứ tự</h4>
+              <p>Consumer phải <strong>báo nhận</strong> tường minh; nếu kết nối đứt hoặc hết thời gian chờ mà chưa có ack, broker <strong>gửi lại</strong> tin đó. Kết hợp với cân bằng tải, hậu quả là thứ tự bị đảo: tin thứ hai có thể đã xử lý xong trong khi tin thứ nhất quay lại lượt gửi thứ hai và rơi vào một consumer khác. Muốn giữ thứ tự thì phải bỏ cân bằng tải và dùng <strong>một hàng đợi riêng cho mỗi consumer</strong>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao "hàng đợi ngắn" là giả định</h4>
+              <p>Broker thường giữ tin trong bộ nhớ (có thể tràn xuống đĩa) với kỳ vọng consumer tiêu thụ gần như tức thời. Khi consumer tụt lại, hàng đợi phình ra, dữ liệu bị đẩy khỏi bộ nhớ và mỗi tin lại thêm chi phí truy đĩa ngẫu nhiên — thông lượng xuống đúng lúc ta cần nó lên nhất.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Partitioned logs: topics, partitions, offsets</div>
+          <h3><span class="vi-only">Nhật ký phân mảnh: đọc như <span lang="en">tail -f</span>, nhớ bằng offset</span><span class="en-only" lang="en">Partitioned logs: read like tail -f, remember by offset</span></h3>
+          <p class="standard-copy">Nhánh thứ hai lấy chính <strong>nhật ký</strong> làm cấu trúc: một chuỗi bản ghi <strong>chỉ nối đuôi</strong> trên đĩa<span class="cite"><a href="#ref-1">1</a></span>. Producer nối vào cuối; consumer đọc tuần tự rồi chờ tin mới — hệt như <span lang="en">tail -f</span> một tập tin. Để vượt thông lượng của một ổ đĩa, nhật ký được <strong>phân mảnh</strong>, mỗi mảnh nằm trên một máy khác nhau; một topic là một nhóm mảnh chở cùng loại tin. Trong <em>một</em> mảnh, broker gán cho mỗi tin một <strong>offset</strong> tăng đơn điệu, và vì mảnh chỉ được nối đuôi nên thứ tự trong mảnh là tất định — nhưng <strong>không có bảo đảm thứ tự nào giữa các mảnh khác nhau</strong>. Apache Kafka, Amazon Kinesis Streams và DistributedLog của Twitter đều thuộc nhóm này<span class="cite"><a href="#ref-4">4</a></span><span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <p class="easy-only">Kiểu thứ hai không dùng hộp thư mà dùng <strong>cuốn sổ</strong>: ai có chuyện gì thì viết thêm một dòng vào cuối sổ, không bao giờ xóa dòng cũ. Người đọc cứ đọc từ trên xuống và nhớ mình đang ở <strong>dòng số mấy</strong>. Sổ dày quá thì chia ra nhiều quyển, mỗi quyển để một chỗ. Nhớ nhé: trong một quyển thì thứ tự luôn đúng, nhưng giữa các quyển thì không ai bảo đảm quyển nào trước quyển nào.</p>
+          <p class="en-only" lang="en">The second branch takes the <strong>log</strong> itself as the structure: an <strong>append-only</strong> sequence of records on disk<span class="cite"><a href="#ref-1">1</a></span>. Producers append to the end; consumers read sequentially and then wait for new records — exactly like <span lang="en">tail -f</span> on a file. To exceed a single disk's throughput the log is <strong>partitioned</strong>, with different partitions on different machines; a topic is a group of partitions carrying the same kind of message. Within <em>one</em> partition the broker assigns each message a monotonically increasing <strong>offset</strong>, and because the partition is append-only its order is deterministic — but there is <strong>no ordering guarantee across different partitions</strong>. Apache Kafka, Amazon Kinesis Streams and Twitter's DistributedLog all belong here<span class="cite"><a href="#ref-4">4</a></span><span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Được gì, mất gì</strong>Được: fan-out gần như miễn phí — nhiều consumer đọc độc lập mà không ảnh hưởng nhau, vì đọc không làm đổi nhật ký. Mất: cân bằng tải trở nên <strong>thô</strong> — cả một mảnh được giao cho một nút trong nhóm consumer, nên số nút chia việc <em>không vượt quá</em> số mảnh; và một tin xử lý chậm sẽ <strong>chặn đầu hàng</strong> mọi tin sau nó trong cùng mảnh.</div>
+            <div class="easy-only"><strong>Được gì, mất gì</strong>Được: ai cũng đọc được cùng cuốn sổ mà không phiền nhau. Mất: một dòng khó nhằn nằm giữa sổ sẽ chắn luôn những dòng phía sau.</div>
+            <div class="en-only" lang="en"><strong>What you gain and lose</strong>Gain: fan-out is nearly free — many consumers read independently without affecting each other, since reading doesn't change the log. Lose: load balancing gets <strong>coarse</strong> — a whole partition is assigned to one node in the consumer group, so the number of nodes sharing the work <em>cannot exceed</em> the number of partitions; and one slow message <strong>head-of-line blocks</strong> everything behind it in that partition.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Offset thay cho ack</h4>
+              <p>Broker kiểu nhật ký <strong>không</strong> theo dõi ack của từng tin — nó chỉ ghi lại offset mà consumer đã đọc tới<span class="cite"><a href="#ref-5">5</a></span>: mọi tin trước offset coi như đã xử lý, mọi tin sau thì chưa. Kleppmann chỉ ra đây đúng là <em>số thứ tự nhật ký</em> trong nhân bản một-leader ở Chương 5: broker đóng vai leader, consumer đóng vai follower. Nhờ vậy broker chỉ phải nhớ một con số cho mỗi nhóm consumer, thay vì trạng thái của từng tin.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cái giá của việc đơn giản hóa</h4>
+              <p>Vì offset là <em>một</em> con số cho cả mảnh, ta không thể nói "tin này xong rồi nhưng tin kia chưa". Một tin xử lý lâu bất thường buộc cả mảnh phải chờ. Với broker kiểu AMQP/JMS thì ngược lại: mỗi tin được ack riêng nên tin khó không chặn tin dễ — đổi lại là mất thứ tự và mất khả năng phát lại.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Replay, retention, and consumer lag</div>
+          <h3><span class="vi-only">Phát lại được — nhưng đĩa vẫn hữu hạn</span><span class="en-only" lang="en">Replayable — but the disk is still finite</span></h3>
+          <p class="standard-copy">Hệ quả đắt giá nhất của nhật ký: <strong>tiêu thụ một nhật ký giống đọc một tập tin hơn là nhận thư</strong><span class="cite"><a href="#ref-1">1</a></span>. Đọc là thao tác <em>chỉ-đọc</em>, không làm nhật ký đổi đi, nên ta có thể khởi động lại consumer ở một offset cũ hơn và <strong>chạy lại</strong> — cực kỳ quý khi thử nghiệm một phiên bản mới, hay khi cần khắc phục hậu quả của một lỗi vừa vá. Broker kiểu AMQP/JMS không làm được điều này, vì tin đã ack là đã biến mất. Cái giá là đĩa: nhật ký thực chất là một <strong>bộ đệm vòng có giới hạn</strong>, đoạn cũ bị xóa dần khi đầy. Nếu một consumer tụt xa tới mức những tin nó cần đã bị xóa, nó <strong>mất hẳn</strong> chúng — nên phải theo dõi liên tục khoảng cách giữa offset của consumer và đầu nhật ký.</p>
+          <p class="easy-only">Vì đọc sổ không làm mất chữ, nên muốn đọc lại từ trang 10 lúc nào cũng được. Rất tiện khi ta lỡ tính sai và muốn tính lại. Nhưng sổ dày mãi thì hết chỗ để, nên người ta xé dần những trang cũ nhất. Ai đọc chậm quá, tới lúc quay lại thì trang mình cần đã bị xé mất rồi. Nhớ nhé: đọc lại được là món quà, nhưng chỉ trong khoảng thời gian mà sổ còn giữ.</p>
+          <p class="en-only" lang="en">The log's most valuable consequence: <strong>consuming a log is more like reading a file than receiving mail</strong><span class="cite"><a href="#ref-1">1</a></span>. Reading is a <em>read-only</em> operation that leaves the log unchanged, so you can restart a consumer at an older offset and <strong>replay</strong> — invaluable when testing a new version, or recovering from a bug you just fixed. AMQP/JMS-style brokers cannot do this, because an acked message is gone. The price is disk: the log is effectively a <strong>bounded ring buffer</strong>, discarding old segments as it fills. If a consumer falls so far behind that the messages it needs have been deleted, it <strong>loses them outright</strong> — so you must continuously monitor the gap between a consumer's offset and the head of the log.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhìn thấy ở đâu</strong>Mỗi chỉ số "consumer lag" trên bảng theo dõi chính là khoảng cách này. Nó không chỉ nói hệ đang chậm — nó nói bạn còn bao nhiêu thời gian trước khi sự chậm đó biến thành mất dữ liệu.</div>
+            <div class="easy-only"><strong>Nhìn thấy ở đâu</strong>Con số "đang tụt lại bao xa" cho biết còn bao lâu nữa thì tụt thành mất luôn.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every "consumer lag" metric on a dashboard is exactly this gap. It doesn't just say the system is slow — it says how long you have before slow becomes lost.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Chọn lối "đệm", với một cái đệm rất lớn</h4>
+              <p>Trở lại ba lựa chọn lúc nghẽn: broker kiểu nhật ký chọn dứt khoát lối <strong>đệm</strong>. Đệm ở đây lớn hơn nhiều so với bộ nhớ của một broker thường — nó là dung lượng đĩa dành cho nhật ký, thường đủ cho nhiều ngày. Nhưng "rất lớn" vẫn không phải "vô hạn", và ranh giới giữa chậm và mất chính là thời gian giữ tin.</p>
+            </div>
+            <div class="info-block">
+              <h4>Lối thoát thứ hai cho dung lượng: nén nhật ký</h4>
+              <p>Ngoài việc xóa theo thời gian, còn một cách để nhật ký không phình mãi: <strong>nén nhật ký</strong> — quét các bản ghi có cùng khóa và chỉ giữ lại bản cập nhật mới nhất, đánh dấu việc xóa bằng một bản ghi <em>tombstone</em>. Tài liệu Kafka mô tả đúng cơ chế này<span class="cite"><a href="#ref-6">6</a></span>. Nhờ vậy nhật ký được bảo đảm chứa <em>giá trị mới nhất cho mọi khóa</em> — một tính chất sẽ thành nền móng cho toàn bộ trục tiếp theo.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ hàng đợi tới nhật ký ghi của cơ sở dữ liệu</strong>
+      <strong class="en-only" lang="en">From the queue to the database's write log</strong>
+      <span class="standard-copy">Nếu một nhật ký nối đuôi đủ sức thay hàng đợi, thì bước tiếp theo gần như hiển nhiên: <strong>nhật ký nhân bản của một cơ sở dữ liệu cũng chính là một luồng sự kiện ghi</strong>. Nhận ra điều đó là đổi hẳn cách ta giữ nhiều hệ đồng bộ với nhau.</span>
+      <span class="easy-only">Nếu cuốn sổ thay được hộp thư, thì hãy để ý: cơ sở dữ liệu cũng có một cuốn sổ riêng — nơi nó ghi mọi thay đổi. Phần tiếp nói về chuyện dùng chính cuốn sổ đó.</span>
+      <span class="en-only" lang="en">If an append-only log can replace a queue, the next step is almost obvious: <strong>a database's replication log is itself a stream of write events</strong>. Seeing that changes how we keep several systems in sync.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="databases-and-streams" aria-labelledby="databases-and-streams-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · <span lang="en">Databases and streams</span></span><span class="en-only" lang="en">Axis 2 · Databases and streams</span></div>
+        <h2 id="databases-and-streams-title"><span class="vi-only">Trạng thái là tích phân của luồng</span><span class="en-only" lang="en">State is a stream, integrated</span></h2>
+      </div>
+      <p class="standard-copy">Đây là chỗ chương 11 chuyển từ kỹ thuật vận chuyển sang một luận điểm về <em>bản thể</em>. Kleppmann hỏi: nếu nhật ký nhân bản của cơ sở dữ liệu là một luồng sự kiện, thì cái gì mới là gốc — bảng dữ liệu hay cuốn nhật ký? Câu trả lời của ông đảo ngược trực giác thông thường: <strong>bảng là dẫn xuất, nhật ký mới là gốc</strong>. Từ đó mở ra hai kỹ thuật rất dễ bị gộp làm một nhưng thực ra khác hẳn — <strong>bắt thay đổi dữ liệu</strong> (CDC) và <strong>nguồn sự kiện</strong> (event sourcing)<span class="cite"><a href="#ref-15">15</a></span>.</p>
+      <p class="easy-only">Bình thường ta nghĩ: cái bảng dữ liệu mới là thật, còn cuốn sổ ghi chép chỉ là phụ. Chương này lật ngược lại: <strong>cuốn sổ mới là thật</strong>, còn cái bảng chỉ là kết quả cộng dồn cuốn sổ. Nhớ nhé: giữ cuốn sổ thì dựng lại bảng lúc nào cũng được, nhưng mất cuốn sổ thì không dựng lại được quá khứ.</p>
+      <p class="en-only" lang="en">Here Chapter 11 turns from transport engineering to a claim about <em>what is primary</em>. Kleppmann asks: if a database's replication log is a stream of events, which is the original — the table, or the log? His answer inverts the usual intuition: <strong>the table is the derivation; the log is the original</strong>. From there follow two techniques that are easily conflated but are genuinely different — <strong>change data capture</strong> (CDC) and <strong>event sourcing</strong><span class="cite"><a href="#ref-15">15</a></span>.</p>
+    </div>
+
+    <div class="surprise-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Dual writes are the problem this solves</div>
+        <p class="definition standard-copy">Bài toán thật sự là <em>giữ nhiều hệ đồng bộ</em>: cùng một dữ liệu phải xuất hiện trong CSDL, trong chỉ mục tìm kiếm, trong cache và trong kho phân tích. Cách ngây thơ — <strong>ghi song song vào từng nơi</strong> (dual writes) — hỏng theo hai kiểu. Lời giải là chọn <strong>một</strong> nguồn chân lý và để mọi hệ còn lại dẫn xuất từ nhật ký của nó.</p>
+        <p class="definition easy-only">Nếu cùng một thông tin phải có mặt ở bốn chỗ, đừng đi chép tay vào cả bốn. Hãy chọn <strong>một chỗ làm gốc</strong>, rồi để ba chỗ kia tự chép theo cuốn sổ của chỗ gốc. Nhớ nhé: một nguồn duy nhất thì mới khỏi lệch nhau.</p>
+        <p class="definition en-only" lang="en">The real problem is <em>keeping systems in sync</em>: the same data must appear in the database, the search index, the cache and the analytics warehouse. The naive approach — <strong>writing to each in parallel</strong> (dual writes) — fails in two ways. The fix is to pick <strong>one</strong> source of truth and derive everything else from its log.</p>
+        <p class="deep-only">Hai kiểu hỏng của dual write đáng gọi tên riêng<span class="cite"><a href="#ref-1">1</a></span>. Thứ nhất là <strong>tranh đua</strong>: hai client ghi đồng thời, client A tới CSDL trước còn client B tới chỉ mục trước — kết quả là CSDL giữ giá trị của B còn chỉ mục giữ giá trị của A, và hai kho <em>lệch nhau vĩnh viễn</em> dù không có lỗi nào xảy ra. Thứ hai là <strong>commit nguyên tử</strong>: một phép ghi thành công còn phép kia hỏng, và hai kho lại lệch nhau. Muốn gỡ đúng cách thì cần giao dịch phân tán kiểu hai pha — thứ mà Chương 9 đã cho thấy là đắt và giòn. Đơn giản hơn nhiều: đừng ghi song song, hãy ghi một chỗ rồi dẫn xuất.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về cơ sở dữ liệu và luồng">
+        <div class="equation-row">
+          <b>Dual write hỏng</b>
+          <span>Ghi song song nhiều kho sinh tranh đua và nửa-thành-công; không có cách sửa rẻ.</span>
+        </div>
+        <div class="equation-row">
+          <b>CDC ở tầng kho</b>
+          <span>Trích changelog của CSDL; ứng dụng vẫn cập nhật và xóa tự do như thường.</span>
+        </div>
+        <div class="equation-row">
+          <b>Event sourcing ở tầng app</b>
+          <span>Sự kiện mô tả ý định người dùng, và không bao giờ bị sự kiện sau đè lên.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về cơ sở dữ liệu và luồng">
+        <div class="equation-row">
+          <b>Đừng chép tay bốn nơi</b>
+          <span>Chọn một chỗ làm gốc, ba chỗ kia chép theo.</span>
+        </div>
+        <div class="equation-row">
+          <b>CDC: nghe lén cuốn sổ</b>
+          <span>Cứ dùng kho như cũ, rồi đọc cuốn sổ nó tự ghi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Nguồn sự kiện: viết sổ trước</b>
+          <span>Ghi thẳng việc đã xảy ra, rồi mới dựng ra bảng.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about databases and streams">
+        <div class="equation-row">
+          <b>Dual writes break</b>
+          <span>Writing to several stores in parallel creates races and half-successes; there is no cheap fix.</span>
+        </div>
+        <div class="equation-row">
+          <b>CDC sits at the store</b>
+          <span>Extract the database's changelog; the application keeps updating and deleting as usual.</span>
+        </div>
+        <div class="equation-row">
+          <b>Event sourcing sits at the app</b>
+          <span>Events describe user intent, and later events never overwrite earlier ones.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Change data capture (CDC)</div>
+          <h3><span class="vi-only">CDC: phong một kho làm leader</span><span class="en-only" lang="en">CDC: crowning one store the leader</span></h3>
+          <p class="standard-copy"><strong>Bắt thay đổi dữ liệu</strong> là việc quan sát mọi thay đổi được ghi vào một cơ sở dữ liệu và trích chúng ra ở dạng có thể nhân bản sang hệ khác<span class="cite"><a href="#ref-1">1</a></span>. Về mặt kiến trúc, nó <strong>phong CSDL đó làm leader</strong> và biến mọi hệ dẫn xuất — chỉ mục tìm kiếm, kho dữ liệu, cache — thành follower; nhật ký phân mảnh là phương tiện chở changelog rất hợp vì nó giữ nguyên thứ tự. Kleppmann liệt kê một loạt hiện thực có thật: LinkedIn Databus, Facebook Wormhole, Yahoo! Sherpa, Bottled Water cho PostgreSQL, Maxwell và Debezium cho MySQL, Mongoriver, Oracle GoldenGate. CDC gần như luôn <strong>bất đồng bộ</strong>, nên nó thừa hưởng trọn vẹn các vấn đề trễ nhân bản của Chương 5.</p>
+          <p class="easy-only">CDC là <strong>nghe lén cuốn sổ</strong> của kho dữ liệu. Ứng dụng vẫn ghi vào kho như bình thường, chẳng cần sửa gì; ở phía sau, ta đọc cuốn sổ mà kho tự ghi và chép lại vào những nơi khác. Nhớ nhé: một nơi làm chủ, những nơi còn lại chép theo — chứ đừng ai cũng tự viết.</p>
+          <p class="en-only" lang="en"><strong>Change data capture</strong> means observing all data changes written to a database and extracting them in a form that can be replicated to other systems<span class="cite"><a href="#ref-1">1</a></span>. Architecturally it <strong>makes that database the leader</strong> and turns every derived system — search index, warehouse, cache — into a follower; a partitioned log is a natural transport because it preserves order. Kleppmann lists real implementations: LinkedIn's Databus, Facebook's Wormhole, Yahoo!'s Sherpa, Bottled Water for PostgreSQL, Maxwell and Debezium for MySQL, Mongoriver, Oracle GoldenGate. CDC is almost always <strong>asynchronous</strong>, so it inherits every replication-lag problem from Chapter 5.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hai chi tiết vận hành quyết định</strong><strong>Ảnh chụp ban đầu</strong>: muốn dựng một chỉ mục đầy đủ thì cần toàn bộ dữ liệu, mà nhật ký thì không giữ mãi từ đầu — nên phải chụp một ảnh và ảnh đó phải ứng với <em>một vị trí đã biết</em> trong changelog để nối tiếp không sót, không lặp. <strong>Nén nhật ký</strong>: giữ bản ghi mới nhất cho mỗi khóa và đánh dấu xóa bằng tombstone, nhờ đó nhật ký đủ để dựng lại toàn bộ nội dung mà không phình mãi<span class="cite"><a href="#ref-6">6</a></span>.</div>
+            <div class="easy-only"><strong>Hai điều phải nhớ</strong>Một: chụp một ảnh của kho lúc bắt đầu, và phải biết ảnh đó ứng với dòng số mấy trong sổ. Hai: mỗi khóa chỉ giữ dòng mới nhất, để sổ khỏi dày mãi.</div>
+            <div class="en-only" lang="en"><strong>Two operational details that decide it</strong><strong>Initial snapshot</strong>: building a full index needs the entire dataset, and the log doesn't stretch back forever — so take a snapshot, and it must correspond to <em>a known position</em> in the changelog to resume without gaps or duplicates. <strong>Log compaction</strong>: keep the most recent record per key and mark deletions with a tombstone, so the log can reconstruct the whole contents without growing forever<span class="cite"><a href="#ref-6">6</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Hiện thực đọc từ đâu</h4>
+              <p>Những công cụ CDC hiện đại thường đọc thẳng <strong>nhật ký ghi</strong> của chính CSDL — với MySQL là binlog, với PostgreSQL là luồng giải mã logic — thay vì dùng trigger hay cột <span lang="en">updated_at</span><span class="cite"><a href="#ref-12">12</a></span>. Đọc nhật ký cho ta đúng thứ tự đã commit và không bỏ sót thay đổi trung gian, hai thứ mà cách quét-theo-chu-kỳ không bảo đảm được.</p>
+            </div>
+            <div class="info-block">
+              <h4>Điều CDC <em>không</em> cho bạn</h4>
+              <p>Changelog của kho chỉ nói <em>hàng dữ liệu đã đổi thành gì</em>, không nói <em>vì sao</em>. Một dòng đổi từ "đang hoạt động" sang "đã hủy" có thể là người dùng tự hủy, là quản trị viên khóa tài khoản, hay là một tác vụ dọn dẹp — và CDC không phân biệt được. Ý định đã bị đánh rơi ngay tại tầng ứng dụng, trước khi changelog kịp nhìn thấy. Đây chính là chỗ event sourcing bước vào.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Event sourcing</div>
+          <h3><span class="vi-only">Nguồn sự kiện: lưu cái đã xảy ra, không lưu cái đang là</span><span class="en-only" lang="en">Event sourcing: store what happened, not what is</span></h3>
+          <p class="standard-copy"><strong>Nguồn sự kiện</strong> ra đời trong cộng đồng thiết kế hướng miền (DDD)<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-13">13</a></span>. Ý tưởng: lưu <strong>mọi thay đổi trạng thái của ứng dụng</strong> dưới dạng một nhật ký sự kiện. Khác biệt then chốt nằm ở <em>tầng</em>: sự kiện ở đây phản ánh việc xảy ra ở <strong>tầng ứng dụng</strong> — "sinh viên hủy đăng ký môn học", "đơn hàng bị trả lại" — chứ không phải "hàng số 4711 đổi cột status từ 1 thành 2". Sự kiện là bất biến, nhật ký chỉ được nối đuôi, và mã ứng dụng <strong>không được phép</strong> ghi đè hay viết lại quá khứ. Trạng thái hiện thời không được lưu trực tiếp — nó là thứ ta <em>dựng lại</em> bằng cách phát lại nhật ký.</p>
+          <p class="easy-only">Thay vì ghi "trong tủ còn 3 quả táo", ta ghi từng việc đã xảy ra: "bỏ vào 5 quả", "lấy ra 1 quả", "lấy ra 1 quả". Muốn biết còn mấy quả thì cộng lại. Ghi kiểu này tốn công hơn, nhưng đổi lại ta biết <strong>vì sao</strong> lại còn 3 quả. Nhớ nhé: ghi việc đã xảy ra thì giữ được câu chuyện, ghi con số thì chỉ giữ được kết quả.</p>
+          <p class="en-only" lang="en"><strong>Event sourcing</strong> came out of the domain-driven design community<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-13">13</a></span>. The idea: store <strong>all changes to application state</strong> as a log of events. The key difference is the <em>level</em>: these events reflect things that happened at the <strong>application level</strong> — "student cancelled course enrolment", "order returned" — not "row 4711 changed column status from 1 to 2". Events are immutable, the log is append-only, and application code <strong>must not</strong> overwrite or rewrite the past. Current state is not stored directly — it is something you <em>reconstruct</em> by replaying the log.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao đáng công</strong>Sự kiện ở tầng ứng dụng mang theo <strong>ý định</strong>, nên về sau ta có thể dẫn ra những cách nhìn mà lúc viết chưa hề nghĩ tới. Một log ghi "đã hủy đăng ký vì trùng lịch" trả lời được vô số câu hỏi mà một log ghi "status: 1 → 2" không bao giờ trả lời nổi.</div>
+            <div class="easy-only"><strong>Vì sao đáng công</strong>Vì sau này muốn hỏi gì cũng có câu trả lời, kể cả câu hỏi mà hôm nay chưa nghĩ ra.</div>
+            <div class="en-only" lang="en"><strong>Why it's worth the work</strong>Application-level events carry <strong>intent</strong>, so later you can derive views nobody imagined when the code was written. A log saying "cancelled enrolment due to timetable clash" answers questions that "status: 1 → 2" never can.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Ảnh chụp chỉ là tối ưu</h4>
+              <p>Phát lại toàn bộ nhật ký mỗi lần khởi động là quá đắt, nên trong thực tế người ta chụp ảnh trạng thái định kỳ và chỉ phát lại phần đuôi. Nhưng Kleppmann phân biệt rõ: ảnh chụp là <em>tối ưu hiệu năng</em>, không phải nguồn chân lý. Xóa mọi ảnh chụp đi thì hệ vẫn đúng, chỉ chậm hơn; xóa nhật ký đi thì hệ mất luôn khả năng tồn tại.</p>
+            </div>
+            <div class="info-block">
+              <h4>Công cụ chuyên dụng</h4>
+              <p>Có những kho được xây riêng cho lối này — Kleppmann nhắc Event Store và mô hình Chronicle trong nghiên cứu về duy trì view<span class="cite"><a href="#ref-3">3</a></span>. Nhưng lối dùng phổ biến hơn nhiều là ghép: một nhật ký phân mảnh làm kho sự kiện, cộng với các bộ xử lý luồng dựng ra view đọc.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">CDC ≠ event sourcing</div>
+          <h3><span class="vi-only">Hai thứ trông giống nhau, khác ở tầng và ở nguồn chân lý</span><span class="en-only" lang="en">Two lookalikes, split by level and by source of truth</span></h3>
+          <p class="standard-copy">Kleppmann tách bạch hai khái niệm này rất dứt khoát, và đây là chỗ người đọc lần đầu hay trộn lẫn<span class="cite"><a href="#ref-1">1</a></span>. Với <strong>CDC</strong>, ứng dụng vẫn dùng cơ sở dữ liệu theo lối <em>có thể sửa đổi</em> — cập nhật và xóa tùy ý; changelog được trích ra ở <strong>tầng thấp</strong>, từ nhật ký ghi của kho, và mỗi sự kiện cập nhật thường chứa <strong>toàn bộ bản ghi mới</strong>. Vì sự kiện sau <em>đè hẳn</em> sự kiện trước cho cùng một khóa, nén nhật ký hoạt động tốt. Với <strong>event sourcing</strong>, logic ứng dụng được xây <strong>tường minh</strong> trên các sự kiện bất biến; kho sự kiện chỉ nối đuôi, và việc cập nhật hay xóa bị ngăn cản. Vì sự kiện mô tả <em>ý định</em> nên chúng <strong>không đè lên nhau</strong> — muốn dựng lại trạng thái phải có <strong>toàn bộ lịch sử</strong>, và nén nhật ký theo cùng kiểu ấy là bất khả.</p>
+          <p class="easy-only">Hai cách này nhìn xa thì giống: cả hai đều cho ra một cuốn sổ. Nhưng khác nhau ở chỗ <strong>ai viết sổ</strong>. CDC: cái kho tự viết sổ, ghi lại "giờ hàng này thành thế này". Nguồn sự kiện: ứng dụng chủ động viết sổ, ghi lại "người dùng vừa làm việc này". Nhớ nhé: một bên chép kết quả, một bên chép việc làm — và chỉ bên sau mới giữ được lý do.</p>
+          <p class="en-only" lang="en">Kleppmann separates these two firmly, and this is exactly where first-time readers blur them<span class="cite"><a href="#ref-1">1</a></span>. With <strong>CDC</strong>, the application still uses the database <em>mutably</em> — updating and deleting freely; the changelog is extracted at a <strong>low level</strong>, from the store's write log, and each update event typically carries the <strong>entire new record</strong>. Because a later event fully <em>overwrites</em> an earlier one for the same key, log compaction works well. With <strong>event sourcing</strong>, application logic is built <strong>explicitly</strong> on immutable events; the event store is append-only, and updates or deletes are discouraged. Because events describe <em>intent</em> they <strong>do not overwrite each other</strong> — reconstructing state requires the <strong>full history</strong>, and compaction in the same sense is impossible.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Chọn cái nào</strong>Muốn bổ sung hệ dẫn xuất cho một ứng dụng <em>đang chạy</em> mà không phải viết lại nó: chọn CDC. Muốn ý định của người dùng trở thành tài sản lâu dài và chấp nhận thiết kế ứng dụng quanh nhật ký ngay từ đầu: chọn event sourcing. Nguồn chân lý cũng khác — với CDC là bảng trong CSDL, với event sourcing là chính nhật ký sự kiện.</div>
+            <div class="easy-only"><strong>Chọn cái nào</strong>App đã chạy rồi, không muốn sửa: chọn CDC. Làm mới từ đầu và muốn giữ lý do: chọn nguồn sự kiện.</div>
+            <div class="en-only" lang="en"><strong>Which to choose</strong>To add derived systems to an application that is <em>already running</em>, without rewriting it: CDC. To make user intent a long-lived asset and design the application around the log from the start: event sourcing. The source of truth differs too — for CDC it's the table in the database; for event sourcing it's the event log itself.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Commands and events</div>
+          <h3><span class="vi-only">Lệnh còn có thể bị từ chối; sự kiện thì đã rồi</span><span class="en-only" lang="en">A command may be refused; an event already happened</span></h3>
+          <p class="standard-copy">Một yêu cầu của người dùng đến hệ dưới dạng <strong>lệnh</strong> — và lệnh thì <em>có thể thất bại</em>, chẳng hạn vì vi phạm một ràng buộc<span class="cite"><a href="#ref-1">1</a></span>. Việc kiểm tra tính hợp lệ phải diễn ra <strong>đồng bộ</strong>, <em>trước khi</em> có bất kỳ sự kiện nào. Chỉ khi lệnh đã được chấp nhận, nó mới trở thành một <strong>sự kiện</strong> — một sự thật bền vững và bất biến. Ví dụ Kleppmann dùng là đặt chỗ ngồi: việc kiểm tra ghế còn trống và việc giữ ghế cho người này phải xảy ra trong <strong>một thao tác nguyên tử</strong>. Một cách khác là tách làm hai sự kiện — phát ra "đặt tạm" trước, rồi để một bộ xử lý riêng phát tiếp "xác nhận" hoặc "từ chối".</p>
+          <p class="easy-only">"Cho tôi mượn quyển sách này" là một <strong>lời đề nghị</strong> — thủ thư có thể nói không, vì sách đã có người mượn. Nhưng khi thủ thư gật đầu và ghi vào sổ thì chuyện đã xong: không ai rút lại được nữa. Nhớ nhé: hỏi thì có thể bị từ chối, còn đã ghi vào sổ thì là chuyện đã rồi.</p>
+          <p class="en-only" lang="en">A user's request arrives as a <strong>command</strong> — and a command <em>may fail</em>, for instance by violating a constraint<span class="cite"><a href="#ref-1">1</a></span>. Validation must happen <strong>synchronously</strong>, <em>before</em> any event exists. Only once the command is accepted does it become an <strong>event</strong> — a durable, immutable fact. Kleppmann's example is reserving a seat: checking availability and reserving the seat for this person must happen in <strong>one atomic operation</strong>. An alternative is to split it in two events — emit a "tentative reservation", then let a separate processor emit "confirmation" or "rejection".</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao phải tách</strong>Nếu để lệnh chảy thẳng vào nhật ký rồi mới kiểm tra, ta đã ghi vào lịch sử một việc có thể chưa từng hợp lệ — và lịch sử thì theo định nghĩa không sửa được. Ranh giới đồng bộ/bất đồng bộ của cả hệ nằm đúng ở chỗ này.</div>
+            <div class="easy-only"><strong>Vì sao phải tách</strong>Vì sổ đã ghi là không tẩy được, nên phải hỏi cho chắc rồi mới ghi.</div>
+            <div class="en-only" lang="en"><strong>Why the split matters</strong>If commands flow straight into the log and are validated afterwards, you have written into history something that may never have been valid — and history, by definition, cannot be edited. The system's synchronous/asynchronous boundary sits exactly here.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Nơi ràng buộc phải sống</h4>
+              <p>Phần cần đồng bộ hóa thường rất nhỏ: một phép kiểm tra duy nhất trên một khóa (ghế này, tên đăng nhập này, số dư này). Mọi thứ còn lại — gửi email, cập nhật chỉ mục, dựng báo cáo — có thể bất đồng bộ hoàn toàn. Thiết kế tốt là co cái lõi đồng bộ lại nhỏ nhất có thể, chứ không phải bỏ nó đi.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khi phải phát ra một sự kiện "tạm"</h4>
+              <p>Lối hai-sự-kiện có ích khi việc kiểm tra cần tra cứu nhiều nơi và không thể gói trong một thao tác nguyên tử. Đổi lại, giao diện người dùng phải chịu được trạng thái "đang chờ", và phải có đường xử lý cho sự kiện từ chối — thứ mà thiết kế nào bỏ quên cũng để lại chỗ treo.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">State, streams, and immutability</div>
+          <h3><span class="vi-only">Sổ cái không dùng tẩy</span><span class="en-only" lang="en">Ledgers don't use erasers</span></h3>
+          <p class="standard-copy">Kleppmann đóng khung quan hệ giữa trạng thái và luồng bằng một hình ảnh giải tích: <strong>trạng thái là cái ta có khi tích phân một luồng sự kiện theo thời gian, còn luồng thay đổi là cái ta có khi vi phân trạng thái theo thời gian</strong><span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-15">15</a></span>. Trạng thái khả biến và một nhật ký bất biến <em>không</em> mâu thuẫn nhau — chúng là hai mặt của cùng một dữ liệu. Ông mượn tiếp hình ảnh sổ cái kế toán: sổ chỉ được ghi thêm; ghi sai thì sửa bằng một <strong>bút toán bù</strong>, chứ không tẩy xóa dòng cũ; số dư luôn là kết quả cộng dồn<span class="cite"><a href="#ref-16">16</a></span>. Pat Helland đẩy cùng lập luận xa hơn trong một bài mà Kleppmann tham chiếu: khi lưu trữ đủ rẻ, bất biến trở thành lựa chọn mặc định hợp lý<span class="cite"><a href="#ref-27">27</a></span>.</p>
+          <p class="easy-only">Kế toán không bao giờ dùng tẩy. Ghi nhầm thì viết thêm một dòng sửa lại, chứ không xóa dòng cũ đi. Nhờ vậy ai cũng thấy được chuyện gì đã xảy ra, kể cả cái nhầm và cách sửa nó. Nhớ nhé: viết thêm thì giữ được sự thật, tẩy xóa thì mất luôn.</p>
+          <p class="en-only" lang="en">Kleppmann frames the state/stream relationship with an image from calculus: <strong>state is what you get when you integrate an event stream over time; a change stream is what you get when you differentiate state by time</strong><span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-15">15</a></span>. Mutable state and an immutable log do <em>not</em> contradict each other — they are two faces of the same data. He borrows the accountant's ledger: entries are only appended; a mistake is fixed with a <strong>compensating entry</strong>, never by erasing the old line; the balance is always an accumulation<span class="cite"><a href="#ref-16">16</a></span>. Pat Helland pushes the same argument further in a paper Kleppmann cites: once storage is cheap enough, immutability becomes the sensible default<span class="cite"><a href="#ref-27">27</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Ba món lợi</strong>Một: có <strong>dấu vết kiểm toán</strong> đầy đủ, vì quá khứ không bị ghi đè. Hai: sửa được hậu quả của mã lỗi — triển khai bản vá rồi <strong>chạy lại</strong> nhật ký để dựng lại view, thứ hoàn toàn bất khả nếu ta chỉ giữ trạng thái hiện thời. Ba: dẫn ra <strong>nhiều view khác nhau</strong> từ cùng một nhật ký — tách dạng dữ liệu <em>được ghi</em> khỏi dạng dữ liệu <em>được đọc</em>, đúng tinh thần CQRS<span class="cite"><a href="#ref-14">14</a></span>.</div>
+            <div class="easy-only"><strong>Ba món lợi</strong>Một: lúc nào cũng tra lại được chuyện cũ. Hai: sửa lỗi xong thì tính lại từ đầu được. Ba: từ một cuốn sổ dựng ra nhiều kiểu bảng khác nhau.</div>
+            <div class="en-only" lang="en"><strong>Three benefits</strong>One: a full <strong>audit trail</strong>, since the past is never overwritten. Two: recovery from buggy code — deploy the fix and <strong>reprocess</strong> the log to rebuild the view, which is simply impossible if you only keep current state. Three: derive <strong>several different views</strong> from the same log — separating the form data is <em>written</em> in from the form it is <em>read</em> in, which is the CQRS idea<span class="cite"><a href="#ref-14">14</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cái giá lớn nhất: đọc-thấy-cái-mình-vừa-ghi</h4>
+              <p>Nhược điểm nặng nhất là các consumer của nhật ký thường <strong>bất đồng bộ</strong>, nên người vừa ghi có thể chưa thấy thay đổi của chính mình trong view đọc. Lối gỡ: thực hiện phép đọc và phép ghi view dẫn xuất trong <em>cùng một đơn vị nguyên tử</em> — điều này đòi giao dịch — hoặc chấp nhận và thiết kế giao diện quanh nó. Một lợi thế nhỏ đi kèm: nhật ký chỉ có một điểm nối đuôi, nên nhiều chỗ vốn cần khóa lại hóa ra không cần.</p>
+            </div>
+            <div class="info-block">
+              <h4>Giới hạn của bất biến</h4>
+              <p>Bất biến không hợp với mọi workload: nơi tỉ lệ cập nhật và xóa rất cao, nhật ký phình nhanh còn việc nén thì thành nút thắt. Và có những lúc <em>buộc phải</em> xóa thật — vì quyền riêng tư hoặc vì luật. Kleppmann nhấn rằng việc này khó hơn nhiều so với vẻ ngoài của nó: bản sao nằm rải rác ở bản sao lưu, ở chỉ mục, ở cache, và "xóa" thường chỉ là đánh dấu chứ không phải làm cho dữ liệu thật sự biến mất khỏi đĩa<span class="cite"><a href="#ref-3">3</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Có nhật ký rồi, giờ tính gì trên nó?</strong>
+      <strong class="en-only" lang="en">We have the log — now what do we compute on it?</strong>
+      <span class="standard-copy">Hai trục đầu đã dựng xong đường ống và nguồn chân lý. Trục tiếp theo là phần <em>xử lý</em> thật sự — và nó lập tức đụng phải câu hỏi mà xử lý theo lô chưa bao giờ phải trả lời: <strong>"phút vừa rồi" là phút theo đồng hồ của ai?</strong></span>
+      <span class="easy-only">Đã có cuốn sổ rồi thì tính toán gì trên đó? Và ngay lập tức có một câu hỏi khó: "một phút vừa rồi" là tính theo đồng hồ nào?</span>
+      <span class="en-only" lang="en">The first two axes built the pipeline and the source of truth. The next is the <em>processing</em> itself — and it immediately hits a question batch never had to answer: <strong>"the last minute" by whose clock?</strong></span>
+    </aside>
+  </section>
+
+  <section class="section" id="time-and-windows" aria-labelledby="time-and-windows-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Processing streams &amp; reasoning about time</span></span><span class="en-only" lang="en">Axis 3 · Processing streams &amp; reasoning about time</span></div>
+        <h2 id="time-and-windows-title"><span class="vi-only">Truy vấn đứng yên, dữ liệu chạy qua</span><span class="en-only" lang="en">The query stands still; the data runs past</span></h2>
+      </div>
+      <p class="standard-copy">Có <strong>ba</strong> việc có thể làm với một luồng đã xử lý<span class="cite"><a href="#ref-1">1</a></span>: ghi vào một kho (cơ sở dữ liệu, cache, chỉ mục tìm kiếm); đẩy thẳng tới con người (thông báo, email, bảng điều khiển thời gian thực); hoặc sinh ra <strong>một hay nhiều luồng khác</strong>, nối thành đường ống. Nhưng khác biệt cốt tử với xử lý theo lô vẫn ở đó và không gỡ được: <strong>luồng không bao giờ kết thúc</strong>. Vì thế không thể sắp xếp toàn bộ đầu vào, sort-merge join của Chương 10 mất chỗ đứng, và mọi phép tính "trong khoảng thời gian X" buộc ta phải trả lời trước một câu hỏi tưởng đơn giản: <em>thời gian nào?</em></p>
+      <p class="easy-only">Sau khi tính toán trên dòng dữ liệu, kết quả đi được ba nơi: cất vào kho, báo cho người biết, hoặc chảy tiếp thành một dòng mới. Nhưng có một chuyện khó: dòng dữ liệu <strong>không bao giờ hết</strong>, nên không thể xếp hết tất cả ra rồi mới tính. Nhớ nhé: khi không thể chờ "đủ dữ liệu", ta phải học cách tính với cái mình đang có.</p>
+      <p class="en-only" lang="en">There are <strong>three</strong> things you can do with a processed stream<span class="cite"><a href="#ref-1">1</a></span>: write it to a store (database, cache, search index); push it to people (notifications, emails, real-time dashboards); or produce <strong>one or more further streams</strong>, chained into a pipeline. But the crucial difference from batch remains and cannot be engineered away: <strong>a stream never ends</strong>. So you cannot sort the whole input, Chapter 10's sort-merge join loses its footing, and every "over the last X" computation forces you to answer a deceptively simple question first: <em>which time?</em></p>
+    </div>
+
+    <div class="surprise-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">The query/data relationship is inverted</div>
+        <p class="definition standard-copy">Trong một cơ sở dữ liệu thường, <strong>dữ liệu nằm yên còn truy vấn chạy qua</strong> nó. Xử lý luồng đảo ngược điều đó: <strong>truy vấn được lưu lâu dài, còn sự kiện liên tục chảy ngang qua chúng</strong><span class="cite"><a href="#ref-1">1</a></span>. Một khi đã quen với phép đảo này, cả một họ kỹ thuật hiện ra — tìm mẫu, tổng hợp thống kê, duy trì view, và cả tìm kiếm ngược chiều.</p>
+        <p class="definition easy-only">Trong tủ hồ sơ, giấy tờ nằm im còn ta đi tìm. Xử lý luồng thì ngược lại: <strong>câu hỏi nằm im, giấy tờ tự chạy qua</strong> và hễ cái nào khớp thì báo lên. Nhớ nhé: đổi chiều như vậy thì biết ngay khi có chuyện, khỏi phải đi hỏi lại mãi.</p>
+        <p class="definition en-only" lang="en">In an ordinary database, <strong>the data sits still and the query runs over it</strong>. Stream processing inverts that: <strong>queries are stored long-term while events flow continuously past them</strong><span class="cite"><a href="#ref-1">1</a></span>. Once that inversion clicks, a whole family of techniques appears — pattern matching, statistical aggregation, view maintenance, and even search run backwards.</p>
+        <p class="deep-only">Kleppmann nhắc rằng ý này không mới: xử lý sự kiện phức hợp đã xuất hiện từ những năm 1990, với ngôn ngữ truy vấn khai báo kiểu SQL hoặc giao diện đồ họa, và nhiều hệ thương mại như Esper, IBM InfoSphere Streams, Apama, TIBCO StreamBase, SQLstream<span class="cite"><a href="#ref-1">1</a></span>. Cái mới của thập niên 2010 không phải bản thân phép đảo, mà là quy mô: khi nhật ký phân mảnh cho phép cùng một luồng được nhiều hệ đọc độc lập và phát lại được, phép đảo này thôi là một sản phẩm chuyên dụng và trở thành một <em>lối kiến trúc</em> chung.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về xử lý luồng và thời gian">
+        <div class="equation-row">
+          <b>Truy vấn đứng yên</b>
+          <span>CEP lưu truy vấn lâu dài và cho sự kiện chảy qua — ngược hẳn cơ sở dữ liệu.</span>
+        </div>
+        <div class="equation-row">
+          <b>Hai đồng hồ</b>
+          <span>Thời gian sự kiện và thời gian xử lý là hai thứ khác nhau; lẫn lộn là ra dữ liệu sai.</span>
+        </div>
+        <div class="equation-row">
+          <b>Join có thời điểm</b>
+          <span>Kết quả join phụ thuộc thứ tự sự kiện đến, nên có thể phi tất định.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về xử lý luồng và thời gian">
+        <div class="equation-row">
+          <b>Câu hỏi nằm im</b>
+          <span>Đặt sẵn câu hỏi, dữ liệu chạy qua thì báo.</span>
+        </div>
+        <div class="equation-row">
+          <b>Hai đồng hồ</b>
+          <span>Lúc chuyện xảy ra và lúc máy tính biết là hai lúc khác nhau.</span>
+        </div>
+        <div class="equation-row">
+          <b>Ghép đôi theo giờ</b>
+          <span>Ghép hai dòng lại thì kết quả phụ thuộc cái nào tới trước.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about stream processing and time">
+        <div class="equation-row">
+          <b>Standing queries</b>
+          <span>CEP stores queries long-term and lets events flow past — the reverse of a database.</span>
+        </div>
+        <div class="equation-row">
+          <b>Two clocks</b>
+          <span>Event time and processing time are different things; confusing them produces bad data.</span>
+        </div>
+        <div class="equation-row">
+          <b>Joins have a when</b>
+          <span>A join's result depends on the order events arrive, so it can be nondeterministic.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Complex event processing &amp; stream analytics</div>
+          <h3><span class="vi-only">Tìm mẫu, và đếm thống kê</span><span class="en-only" lang="en">Matching patterns, and counting statistics</span></h3>
+          <p class="standard-copy"><strong>Xử lý sự kiện phức hợp (CEP)</strong> cho ta đặc tả các quy tắc để tìm những <em>mẫu sự kiện</em> nhất định — Kleppmann ví như một biểu thức chính quy chạy trên luồng<span class="cite"><a href="#ref-1">1</a></span>. Truy vấn được đăng ký một lần và nằm đó; khi một chuỗi sự kiện khớp mẫu, hệ phát ra một <em>sự kiện phức hợp</em>. Esper là hiện thực tiêu biểu của dòng này<span class="cite"><a href="#ref-23">23</a></span>. <strong>Phân tích luồng</strong> thì không tìm mẫu mà tính <em>tổng hợp</em> trên rất nhiều sự kiện: tần suất một loại sự kiện, trung bình trượt trong một khoảng, so sánh khoảng hiện tại với khoảng trước. Vì phải tính trên lượng dữ liệu lớn với bộ nhớ nhỏ, các hệ này hay dùng thuật toán xác suất — bộ lọc Bloom cho kiểm tra thành viên, HyperLogLog cho ước lượng lực lượng, các thuật toán ước lượng percentile.</p>
+          <p class="easy-only">Có hai kiểu "tính trên dòng". Kiểu một là <strong>canh mẫu</strong>: dặn trước "hễ thấy ba lần rút tiền trong mười phút thì báo tôi", rồi cứ để đó. Kiểu hai là <strong>đếm</strong>: mỗi phút có bao nhiêu lượt bấm, trung bình năm phút qua là bao nhiêu. Nhớ nhé: một bên canh chuyện lạ, một bên đo chuyện thường.</p>
+          <p class="en-only" lang="en"><strong>Complex event processing (CEP)</strong> lets you specify rules to search for certain <em>patterns of events</em> — Kleppmann likens it to a regular expression running over a stream<span class="cite"><a href="#ref-1">1</a></span>. The query is registered once and stays; when a sequence of events matches, the system emits a <em>complex event</em>. Esper is the canonical implementation<span class="cite"><a href="#ref-23">23</a></span>. <strong>Stream analytics</strong> looks for no patterns but computes <em>aggregations</em> over huge numbers of events: the rate of some event type, a rolling average over an interval, comparing the current interval with the previous one. Because they must compute over a lot of data with little memory, these systems often use probabilistic algorithms — Bloom filters for set membership, HyperLogLog for cardinality estimation, percentile estimation algorithms.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Một hiểu lầm đáng sửa</strong>Kleppmann nhấn: <strong>thuật toán xác suất không có nghĩa là kết quả gần đúng</strong>. Chúng là một <em>tối ưu hóa</em> — một thuật toán xử lý luồng hoàn toàn có thể cho kết quả chính xác nếu ta chịu trả chi phí bộ nhớ. Xấp xỉ là lựa chọn kỹ thuật, không phải giới hạn cố hữu của việc xử lý theo luồng.</div>
+            <div class="easy-only"><strong>Một hiểu lầm</strong>Dùng mẹo đếm nhanh không có nghĩa là kết quả sai. Muốn chính xác vẫn được, chỉ là tốn hơn.</div>
+            <div class="en-only" lang="en"><strong>A misreading worth fixing</strong>Kleppmann stresses that <strong>probabilistic algorithms do not mean approximate results</strong>. They are an <em>optimization</em> — a stream processing algorithm can be perfectly accurate if you are willing to pay in memory. Approximation is an engineering choice, not an inherent limit of streaming.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao CEP cần ngôn ngữ riêng</h4>
+              <p>Mẫu mà CEP tìm thường mang tính <em>thời gian</em>: "A rồi B trong vòng 30 giây, mà không có C xen giữa". SQL thường không diễn đạt nổi loại điều kiện này một cách gọn gàng, nên các hệ CEP mở rộng SQL hoặc dựng ngôn ngữ khai báo riêng. Đây cũng là lý do Kleppmann xếp CEP thành một nhánh riêng thay vì gộp chung vào phân tích luồng.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ranh giới đang mờ dần</h4>
+              <p>Nhiều khung xử lý luồng ngày nay đồng thời làm cả hai việc, và cung cấp giao diện SQL để khai báo phép tổng hợp lẫn mẫu sự kiện<span class="cite"><a href="#ref-9">9</a></span>. Phân loại của Kleppmann vẫn hữu ích như một cách <em>suy nghĩ</em> — nó nói cho ta biết đang hỏi loại câu hỏi nào — chứ không còn là ranh giới giữa các sản phẩm.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Materialized views &amp; search on streams</div>
+          <h3><span class="vi-only">Duy trì view, và tìm kiếm ngược chiều</span><span class="en-only" lang="en">Maintaining views, and search run backwards</span></h3>
+          <p class="standard-copy"><strong>Duy trì view vật chất hóa</strong> là dẫn ra một cách nhìn khác lên dữ liệu để truy vấn cho hiệu quả, rồi cập nhật cách nhìn đó mỗi khi dữ liệu nền đổi<span class="cite"><a href="#ref-1">1</a></span>. Điểm khác biệt so với phân tích luồng nằm ở <strong>cửa sổ</strong>: dựng lại trạng thái ứng dụng từ nhật ký sự kiện đòi <em>mọi sự kiện trong khoảng thời gian bất kỳ</em>, chứ không chỉ vài phút gần nhất — đây chính là event sourcing nhìn từ phía xử lý. Samza và Kafka Streams hỗ trợ lối dùng này, dựa trên cơ chế nén nhật ký của Kafka để nhật ký vẫn đủ dựng lại toàn bộ trạng thái mà không phình vô hạn<span class="cite"><a href="#ref-9">9</a></span><span class="cite"><a href="#ref-24">24</a></span><span class="cite"><a href="#ref-6">6</a></span>. <strong>Tìm kiếm trên luồng</strong> thì lật ngược công cụ tìm kiếm quen thuộc: thay vì đánh chỉ mục tài liệu rồi chạy truy vấn, ta lưu <em>truy vấn</em> trước và cho tài liệu chạy ngang qua chúng — Elasticsearch gọi đây là <em>percolate query</em><span class="cite"><a href="#ref-22">22</a></span>.</p>
+          <p class="easy-only">Hai việc nữa làm được trên dòng. Một: giữ sẵn một cái bảng tóm tắt và cứ có tin mới thì sửa bảng ngay, để lúc cần xem là có liền. Hai: đăng ký trước điều mình quan tâm — "có tin nào nhắc tới đội bóng của tôi thì báo" — rồi tin tức chạy qua, cái nào khớp thì hệ báo. Nhớ nhé: tìm kiếm bình thường là mình đi tìm; tìm kiếm trên dòng là để nó tự tìm đến mình.</p>
+          <p class="en-only" lang="en"><strong>Maintaining materialized views</strong> means deriving an alternative view of a dataset so you can query it efficiently, and updating that view whenever the underlying data changes<span class="cite"><a href="#ref-1">1</a></span>. What sets it apart from stream analytics is the <strong>window</strong>: rebuilding application state from an event log requires <em>all events over an arbitrary time period</em>, not just the last few minutes — this is event sourcing seen from the processing side. Samza and Kafka Streams support this, leaning on Kafka's log compaction so the log can still reconstruct the whole state without growing without bound<span class="cite"><a href="#ref-9">9</a></span><span class="cite"><a href="#ref-24">24</a></span><span class="cite"><a href="#ref-6">6</a></span>. <strong>Searching on streams</strong> turns conventional search inside out: instead of indexing documents and then running queries, you store the <em>queries</em> and run documents past them — Elasticsearch calls this a <em>percolate query</em><span class="cite"><a href="#ref-22">22</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhìn thấy ở đâu</strong>Mọi cảnh báo dạng "báo cho tôi khi giá dưới X", mọi bộ đệm dòng thời gian, mọi bảng tổng hợp được cập nhật liên tục — đều là một trong hai lối này. Điều đáng nhớ: cả hai đều <em>đổi chỗ</em> chi phí, chuyển công việc từ lúc đọc sang lúc ghi.</div>
+            <div class="easy-only"><strong>Nhìn thấy ở đâu</strong>Mấy cái "báo tôi khi có tin mới" và mấy bảng thống kê luôn cập nhật — đều là hai lối này.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every "alert me when the price drops below X", every timeline cache, every continuously updated summary table is one of these two. Worth remembering: both <em>move</em> the cost, shifting work from read time to write time.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Event time vs processing time</div>
+          <h3><span class="vi-only">"Phút vừa rồi" theo đồng hồ nào?</span><span class="en-only" lang="en">"The last minute" — by whose clock?</span></h3>
+          <p class="standard-copy">Nhiều khung xử lý luồng dùng <strong>đồng hồ hệ thống cục bộ</strong> của máy đang xử lý để chia cửa sổ — tức là dùng <em>thời gian xử lý</em><span class="cite"><a href="#ref-1">1</a></span>. Cách này đơn giản và hoàn toàn hợp lý <em>nếu</em> độ trễ giữa lúc sự kiện sinh ra và lúc nó được xử lý là không đáng kể. Nó sụp đổ khi có trễ thật: hàng đợi, sự cố mạng, tranh chấp tài nguyên, consumer khởi động lại, hoặc chạy lại nhật ký sau khi vá lỗi. Kleppmann nêu một hiện vật kinh điển: khi bộ xử lý luồng được bật lại sau một quãng ngừng, nó ngốn rất nhanh phần tồn đọng — và nếu biểu đồ vẽ theo thời gian xử lý, ta thấy một <strong>đỉnh lưu lượng</strong> dựng đứng. Nhưng tốc độ sự kiện thật <em>chưa hề đổi</em>; cái đỉnh ấy là hiện vật của chính việc xử lý.</p>
+          <p class="easy-only">Chuyện xảy ra lúc 9 giờ, nhưng máy tính mãi 10 giờ mới biết. Vậy khi hỏi "trong giờ vừa rồi có bao nhiêu chuyện", ta tính theo lúc <strong>chuyện xảy ra</strong> hay lúc <strong>máy biết</strong>? Nếu máy bị hỏng rồi bật lại, nó sẽ đọc dồn một lúc — nhìn biểu đồ tưởng có một trận bão, thật ra chỉ là máy đang đọc bù. Nhớ nhé: đừng lẫn lúc chuyện xảy ra với lúc mình biết chuyện.</p>
+          <p class="en-only" lang="en">Many stream processing frameworks use the <strong>local system clock</strong> of the processing machine to cut windows — that is, <em>processing time</em><span class="cite"><a href="#ref-1">1</a></span>. This is simple and entirely reasonable <em>if</em> the delay between an event occurring and being processed is negligible. It collapses when the delay is real: queueing, network faults, contention, consumer restarts, or replaying a log after a bug fix. Kleppmann gives a classic artifact: when a stream processor restarts after an outage, it chews through the backlog fast — and a chart plotted on processing time shows a vertical <strong>traffic spike</strong>. But the real event rate <em>never changed</em>; the spike is an artifact of the processing itself.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thực tế</strong>Bất kỳ chỉ số nào dùng để cảnh báo mà lại tính theo thời gian xử lý đều có thể báo động giả đúng vào lúc hệ vừa hồi phục — tức là đúng lúc bạn cần một tín hiệu đáng tin nhất.</div>
+            <div class="easy-only"><strong>Hệ quả</strong>Hệ vừa hồi phục thì biểu đồ dễ báo động giả, đúng lúc mình cần tin nó nhất.</div>
+            <div class="en-only" lang="en"><strong>The practical upshot</strong>Any alerting metric computed on processing time can fire falsely exactly when the system has just recovered — precisely when you most need a trustworthy signal.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao cả hai đồng hồ đều cần</h4>
+              <p>Thời gian sự kiện cho biết <em>chuyện gì đã thật sự xảy ra</em>; thời gian xử lý cho biết <em>hệ của ta đang khỏe tới đâu</em>. Chỉ số nghiệp vụ nên tính theo thời gian sự kiện, còn chỉ số vận hành — độ trễ, tồn đọng, thông lượng — thì chính là hiệu số giữa hai đồng hồ. Lẫn lộn chúng là lấy sức khỏe của hạ tầng làm tín hiệu kinh doanh.</p>
+            </div>
+            <div class="info-block">
+              <h4>Mô hình Dataflow đặt lại câu hỏi</h4>
+              <p>Bài Dataflow của Google — mà Kleppmann tham chiếu — tách bài toán thành những câu hỏi độc lập: kết quả tính trên <em>cái gì</em>, <em>ở đâu trong thời gian sự kiện</em>, <em>khi nào</em> thì phát ra, và kết quả đã phát rồi thì <em>chỉnh sửa</em> ra sao<span class="cite"><a href="#ref-17">17</a></span>. Cách tách này giải thích vì sao "chọn cửa sổ" và "chọn lúc phát" là hai quyết định riêng biệt chứ không phải một.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Knowing when you're ready</div>
+          <h3><span class="vi-only">Không bao giờ chắc là đã nhận đủ</span><span class="en-only" lang="en">You can never be sure you have it all</span></h3>
+          <p class="standard-copy">Khi cửa sổ được chia theo <strong>thời gian sự kiện</strong>, một vấn đề khó chịu hiện ra: ta <em>không bao giờ biết chắc</em> đã nhận đủ sự kiện cho một cửa sổ, hay vẫn còn những sự kiện <strong>đến muộn</strong> đang trên đường<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann đưa ra hai lựa chọn, và cả hai đều là đánh đổi chứ không phải lời giải. Một: <strong>bỏ qua</strong> các sự kiện muộn — và theo dõi tỉ lệ bị bỏ như một <em>chỉ số</em>, để biết mình đang đánh mất bao nhiêu sự thật. Hai: <strong>phát một bản sửa</strong> — một giá trị cập nhật cho cửa sổ đã công bố, và có thể phải <strong>thu hồi</strong> kết quả cũ nếu nó đã đi tiếp xuống hạ nguồn.</p>
+          <p class="easy-only">Muốn đếm "có bao nhiêu chuyện xảy ra lúc 9 giờ", ta phải đợi tới khi nào mới chắc là đã nhận đủ? Câu trả lời buồn: không bao giờ chắc cả — vẫn có thể còn một tin lạc đường về muộn. Nên hoặc là chốt sổ rồi thôi, hoặc là chốt tạm và sửa sau. Nhớ nhé: không có lúc nào gọi là "đủ", chỉ có lúc mình quyết định dừng.</p>
+          <p class="en-only" lang="en">Once windows are cut by <strong>event time</strong>, an awkward problem appears: you can <em>never be sure</em> you have received all events for a window, or whether <strong>stragglers</strong> are still on the way<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann offers two options, and both are trade-offs rather than solutions. One: <strong>ignore</strong> the late events — and track the proportion dropped as a <em>metric</em>, so you know how much truth you are losing. Two: <strong>publish a correction</strong> — an updated value for the window already published, possibly <strong>retracting</strong> the earlier output if it has flowed downstream.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao không thể có "đủ"</strong>Không tồn tại một ranh giới nào chứng minh được rằng mạng sẽ không giao thêm một sự kiện cũ nữa. Đây không phải thiếu sót kỹ thuật có thể vá — nó là hệ quả trực tiếp của những giới hạn mà Chương 8 đã đặt ra về đồng hồ và mạng bất đồng bộ.</div>
+            <div class="easy-only"><strong>Vì sao vậy</strong>Vì không ai bảo đảm được là mạng sẽ không giao thêm một tin cũ nữa.</div>
+            <div class="en-only" lang="en"><strong>Why "complete" is unreachable</strong>No boundary can prove the network will not deliver one more old event. This is not a fixable engineering gap — it follows directly from the limits Chapter 8 established about clocks and asynchronous networks.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Whose clock are you using?</div>
+          <h3><span class="vi-only">Đồng hồ của thiết bị có thể nói dối</span><span class="en-only" lang="en">The device's clock may be lying</span></h3>
+          <p class="standard-copy">Một sự kiện có thể bị <strong>đệm lại ở nhiều chặng</strong> trước khi tới nơi xử lý<span class="cite"><a href="#ref-1">1</a></span>. Ví dụ Kleppmann dùng rất sắc: một ứng dụng di động được dùng khi máy không có mạng sẽ ghi sự kiện vào bộ nhớ máy và chỉ gửi lên khi có kết nối trở lại — có thể hàng <em>ngày</em> sau. Tệ hơn, đồng hồ của thiết bị có thể sai, vô tình (cấu hình sai, pin cạn) hoặc cố ý (người dùng chỉnh giờ để qua mặt một giới hạn trong game). Cách hiệu chỉnh ông đề xuất là ghi <strong>ba dấu thời gian</strong>: (1) lúc sự kiện xảy ra, theo đồng hồ thiết bị; (2) lúc sự kiện được gửi lên máy chủ, theo đồng hồ thiết bị; (3) lúc máy chủ nhận được, theo đồng hồ máy chủ. Lấy (3) trừ (2) cho ta ước lượng độ lệch giữa hai đồng hồ — giả định độ trễ mạng không đáng kể — rồi áp độ lệch đó vào (1) để suy ra thời gian sự kiện thật.</p>
+          <p class="easy-only">Điện thoại có thể ghi lại chuyện xảy ra lúc không có mạng, rồi mai mới gửi lên. Mà đồng hồ trong điện thoại thì có khi chạy sai, có khi bị chủ nhân chỉnh cho lệch. Cách sửa khéo: ghi ba mốc giờ — lúc chuyện xảy ra, lúc gửi đi (hai mốc này theo giờ máy), và lúc máy chủ nhận (theo giờ máy chủ). So hai mốc cuối là biết đồng hồ máy lệch bao nhiêu, rồi trừ đi. Nhớ nhé: không tin được một cái đồng hồ, thì so hai cái với nhau.</p>
+          <p class="en-only" lang="en">An event may be <strong>buffered at several points</strong> before reaching the processor<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann's example is sharp: a mobile app used offline records events on the device and only reports them when connectivity returns — possibly <em>days</em> later. Worse, the device clock may be wrong, accidentally (misconfiguration, dead battery) or deliberately (a user shifting the clock to bypass an in-game limit). His correction is to log <strong>three timestamps</strong>: (1) the time the event occurred, by the device clock; (2) the time it was sent to the server, by the device clock; (3) the time the server received it, by the server clock. Subtracting (2) from (3) estimates the offset between the two clocks — assuming network delay is negligible — and applying that offset to (1) recovers the true event time.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao mẹo này đẹp</strong>Nó không đòi thiết bị phải có đồng hồ đúng — chỉ đòi đồng hồ đó <em>nhất quán với chính nó</em> trong khoảng giữa (1) và (2). Đây đúng là tinh thần của Chương 8: đừng tin giá trị tuyệt đối của một đồng hồ, hãy dùng hiệu số giữa hai lần đọc cùng một đồng hồ.</div>
+            <div class="easy-only"><strong>Vì sao khéo</strong>Không cần đồng hồ đúng giờ, chỉ cần nó sai <em>đều đều</em> là đủ để tính bù.</div>
+            <div class="en-only" lang="en"><strong>Why the trick is elegant</strong>It doesn't require the device's clock to be correct — only that it be <em>consistent with itself</em> between (1) and (2). That is exactly Chapter 8's spirit: don't trust a clock's absolute value; use the difference between two readings of the same clock.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">06</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Types of windows</div>
+          <h3><span class="vi-only">Bốn kiểu cửa sổ</span><span class="en-only" lang="en">Four kinds of window</span></h3>
+          <p class="standard-copy">Khi đã chốt được dùng đồng hồ nào, mới tới việc chọn <strong>cửa sổ</strong>. Kleppmann liệt kê bốn kiểu, và chúng khác nhau ở hai câu hỏi: độ dài có cố định không, và các cửa sổ có chồng lấn nhau không<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-17">17</a></span>. Nhầm kiểu cửa sổ là ra một con số hoàn toàn hợp lý về mặt kỹ thuật nhưng trả lời sai câu hỏi nghiệp vụ.</p>
+          <p class="easy-only">"Cửa sổ" là cách ta cắt dòng thời gian ra từng khúc để đếm. Có khúc cắt đều và không dính nhau, có khúc cắt đều nhưng chồng lên nhau, có khúc co giãn theo khoảng cách giữa các sự kiện, và có khúc tự kết thúc khi người ta ngừng hoạt động. Nhớ nhé: cắt kiểu nào thì ra con số kiểu đó — chọn sai kiểu là trả lời sai câu hỏi.</p>
+          <p class="en-only" lang="en">Once you have settled which clock, you choose a <strong>window</strong>. Kleppmann lists four kinds, differing on two questions: is the length fixed, and do windows overlap<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-17">17</a></span>? Picking the wrong kind yields a number that is technically impeccable and answers the wrong business question.</p>
+          <div class="mechanics">
+            <div class="info-block">
+              <h4><span class="vi-only">Nhảy · <span lang="en">tumbling</span></span><span class="en-only" lang="en">Tumbling</span></h4>
+              <p class="standard-copy">Độ dài cố định, <strong>không chồng lấn</strong>: mỗi sự kiện thuộc về <em>đúng một</em> cửa sổ. Ví dụ cửa sổ 1 phút: mọi sự kiện có dấu thời gian trong khoảng 10:03:00–10:03:59 rơi vào cùng một cửa sổ.</p>
+              <p class="easy-only">Cắt đều từng phút một, không dính nhau. Mỗi chuyện thuộc đúng một phút.</p>
+              <p class="en-only" lang="en">Fixed length, <strong>no overlap</strong>: every event belongs to <em>exactly one</em> window. With a 1-minute window, all events timestamped 10:03:00–10:03:59 fall in the same one.</p>
+            </div>
+            <div class="info-block">
+              <h4><span class="vi-only">Trượt-bước · <span lang="en">hopping</span></span><span class="en-only" lang="en">Hopping</span></h4>
+              <p class="standard-copy">Độ dài cố định nhưng <strong>chồng lấn</strong> theo một bước nhảy — ví dụ cửa sổ 5 phút, nhảy mỗi 1 phút, để làm mượt đường trung bình. Có thể hiện thực bằng cách tính cửa sổ nhảy 1 phút trước, rồi gộp năm cửa sổ liền kề.</p>
+              <p class="easy-only">Cửa sổ 5 phút nhưng cứ 1 phút lại trượt tới một lần, nên các khúc đè lên nhau.</p>
+              <p class="en-only" lang="en">Fixed length but <strong>overlapping</strong> by a hop size — e.g. 5-minute windows hopping every 1 minute, to smooth a moving average. It can be built by computing 1-minute tumbling windows first, then aggregating over five adjacent ones.</p>
+            </div>
+            <div class="info-block">
+              <h4><span class="vi-only">Trượt · <span lang="en">sliding</span></span><span class="en-only" lang="en">Sliding</span></h4>
+              <p class="standard-copy">Chứa mọi sự kiện nằm trong <strong>một khoảng cách thời gian với nhau</strong>, không neo vào ranh giới cố định nào. Ví dụ của Kleppmann: một cửa sổ trượt 5 phút gộp hai sự kiện lúc 10:03:39 và 10:07:35 vì chúng cách nhau chưa tới 5 phút — dù chúng không nằm trong cùng một cửa sổ nhảy 5 phút nào cả. Hiện thực bằng một bộ đệm sắp theo thời gian, loại bỏ sự kiện đã hết hạn.</p>
+              <p class="easy-only">Không cắt theo mốc cố định, mà hỏi: hai chuyện này có xảy ra gần nhau trong vòng 5 phút không?</p>
+              <p class="en-only" lang="en">Contains all events that occur <strong>within some interval of each other</strong>, anchored to no fixed boundary. Kleppmann's example: a 5-minute sliding window groups events at 10:03:39 and 10:07:35 because they are less than 5 minutes apart — even though no 5-minute tumbling window contains both. Implemented with a time-sorted buffer that drops expired events.</p>
+            </div>
+            <div class="info-block">
+              <h4><span class="vi-only">Phiên · <span lang="en">session</span></span><span class="en-only" lang="en">Session</span></h4>
+              <p class="standard-copy"><strong>Không có độ dài cố định</strong>. Gom mọi sự kiện của <em>cùng một người dùng</em> xảy ra gần nhau về thời gian, và kết thúc khi người đó im lặng đủ lâu — ví dụ 30 phút không hoạt động. Đây chính là phép <em>sessionization</em> quen thuộc trong phân tích hành vi.</p>
+              <p class="easy-only">Cửa sổ co giãn theo người: bắt đầu khi người ta vào, kết thúc khi người ta nghỉ đủ lâu.</p>
+              <p class="en-only" lang="en"><strong>No fixed duration</strong>. Groups all events for the <em>same user</em> that occur closely together, ending once that user has been inactive long enough — say 30 minutes. This is the familiar <em>sessionization</em> of behavioural analytics.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">07</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Stream joins</div>
+          <h3><span class="vi-only">Ba kiểu join, và cái bẫy thời điểm</span><span class="en-only" lang="en">Three kinds of join, and the timing trap</span></h3>
+          <p class="standard-copy">Kleppmann chia join trên luồng làm ba kiểu<span class="cite"><a href="#ref-1">1</a></span>. <strong>Luồng-luồng</strong> (join theo cửa sổ): cả hai đầu vào đều là sự kiện hoạt động; toán tử tìm những sự kiện liên quan xảy ra <em>trong một cửa sổ thời gian</em>. Ví dụ ông dùng: nối sự kiện <em>tìm kiếm</em> với sự kiện <em>nhấp chuột</em> theo mã phiên trong vòng một giờ, để đo tỉ lệ nhấp của mỗi truy vấn — bắt buộc phải có cửa sổ, vì người dùng có thể <strong>không bao giờ</strong> nhấp. <strong>Luồng-bảng</strong> (làm giàu luồng): một đầu vào là sự kiện hoạt động, đầu kia là một bảng cơ sở dữ liệu. Hỏi CSDL từ xa cho <em>từng</em> sự kiện thì chậm và dễ làm quá tải; cách tốt hơn là nạp một <strong>bản sao của bảng vào ngay trong bộ xử lý luồng</strong> và giữ nó cập nhật bằng changelog. Khác với xử lý theo lô — vốn dùng một ảnh chụp cố định tại một thời điểm — join luồng-bảng dùng một bảng <em>liên tục đổi</em>. <strong>Bảng-bảng</strong> (duy trì view vật chất hóa): cả hai đầu vào đều là changelog; mỗi thay đổi ở một bên được nối với trạng thái mới nhất của bên kia. Ví dụ: bộ đệm dòng thời gian mạng xã hội chính là kết quả join giữa bảng bài đăng và bảng theo dõi, được duy trì liên tục thay vì tính lại mỗi lần đọc.</p>
+          <p class="easy-only">"Join" là ghép hai nguồn tin lại với nhau. Kiểu một: ghép hai dòng sự kiện, nhưng phải kèm điều kiện "trong vòng một giờ" — vì có khi vế kia không bao giờ tới. Kiểu hai: ghép một dòng sự kiện với một bảng tra cứu, và bảng đó thì luôn được cập nhật. Kiểu ba: ghép hai bảng, để giữ sẵn một kết quả cho khỏi tính lại. Nhớ nhé: ghép trên dòng thì luôn phải hỏi thêm "ghép theo lúc nào".</p>
+          <p class="en-only" lang="en">Kleppmann splits stream joins into three kinds<span class="cite"><a href="#ref-1">1</a></span>. <strong>Stream-stream</strong> (window join): both inputs are activity events; the operator looks for related events occurring <em>within a time window</em>. His example: joining <em>search</em> events with <em>click</em> events by session ID within an hour, to measure each query's click-through rate — a window is unavoidable, because the user may <strong>never</strong> click. <strong>Stream-table</strong> (stream enrichment): one input is activity events, the other a database table. Querying the remote database for <em>every</em> event is slow and can overload it; better to load a <strong>copy of the table into the stream processor itself</strong> and keep it current from a changelog. Unlike batch — which uses a fixed point-in-time snapshot — a stream-table join uses a <em>continuously updated</em> table. <strong>Table-table</strong> (materialized view maintenance): both inputs are changelogs; each change on one side is joined with the latest state of the other. Example: a social timeline cache is the result of a join between the posts table and the follows table, maintained continuously rather than recomputed on every read.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Điểm chung của cả ba</strong>Cả ba đều buộc bộ xử lý <strong>giữ trạng thái</strong> dựa trên một đầu vào rồi tra nó bằng đầu vào kia. Nghĩa là <em>thứ tự sự kiện đến</em> trực tiếp quyết định kết quả — và đó chính là chỗ cái bẫy nằm.</div>
+            <div class="easy-only"><strong>Điểm chung</strong>Cả ba đều phải nhớ một bên để chờ bên kia. Nên cái nào tới trước là kết quả đổi.</div>
+            <div class="en-only" lang="en"><strong>What all three share</strong>Each forces the processor to <strong>hold state</strong> derived from one input and query it from the other. So the <em>order of arrival</em> directly decides the result — and that is where the trap lies.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Phi tất định: chạy lại ra kết quả khác</h4>
+              <p>Nếu hai sự kiện trên hai luồng xảy ra quanh cùng một thời điểm mà không có thứ tự xác định giữa chúng, join trở nên <strong>phi tất định</strong>: chạy lại <em>cùng một job</em> trên <em>cùng một dữ liệu</em> có thể ra kết quả khác. Ví dụ của Kleppmann: nối đơn hàng với thuế suất — nên dùng thuế suất <em>hiện thời</em> hay thuế suất <em>lúc bán</em>? Hai câu trả lời đều hợp lý, và chính vì thế mà "join" không phải một phép toán có nghĩa duy nhất.</p>
+            </div>
+            <div class="info-block">
+              <h4>Chiều thay đổi chậm, và cái giá của nó</h4>
+              <p>Kho dữ liệu gọi hiện tượng này là <em>slowly changing dimension</em> (SCD), và xử lý bằng cách gán một <strong>định danh riêng cho mỗi phiên bản</strong> của bản ghi được join — join theo mã phiên bản thì tất định trở lại. Nhưng cái giá đi kèm rất cụ thể: vì phải giữ <em>mọi</em> phiên bản, ta không nén nhật ký được nữa. Đúng như mọi chỗ khác trong chương, tính tất định được mua bằng dung lượng.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Còn khi có sự cố thì sao?</strong>
+      <strong class="en-only" lang="en">And what happens when it fails?</strong>
+      <span class="standard-copy">Mọi thứ tới đây đều giả định hệ chạy trơn tru. Trục cuối cùng gỡ nốt giả định đó — và đây là chỗ cụm từ bị lạm dụng nhiều nhất trong cả chương cần được đặt lại cho đúng: <em><span lang="en">exactly-once</span></em>.</span>
+      <span class="easy-only">Tất cả những điều trên đều giả sử máy không hỏng. Phần cuối nói về chuyện khi máy hỏng thật — và vì sao câu "xử lý đúng một lần" hay bị hiểu sai.</span>
+      <span class="en-only" lang="en">Everything so far assumes things run smoothly. The last axis removes that assumption — and this is where the chapter's most abused phrase needs putting straight: <em>exactly-once</em>.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="stream-fault-tolerance" aria-labelledby="stream-fault-tolerance-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · <span lang="en">Fault tolerance</span></span><span class="en-only" lang="en">Axis 4 · Fault tolerance</span></div>
+        <h2 id="stream-fault-tolerance-title"><span class="vi-only">Hiệu ứng đúng một lần, không phải xử lý đúng một lần</span><span class="en-only" lang="en">Effectively once, not literally once</span></h2>
+      </div>
+      <p class="standard-copy">Xử lý theo lô có một tiện nghi mà luồng không bao giờ có: job <em>kết thúc</em>, nên hỏng thì cứ vứt kết quả dở đi rồi chạy lại từ đầu. Với một luồng vô hạn thì không có "lúc chạy xong" để chờ. Vì thế cả trục này là câu chuyện về việc <strong>chia cái vô hạn thành từng mẩu có thể thử lại</strong> — và về việc gọi đúng tên thứ mà ta thật sự đạt được ở cuối.</p>
+      <p class="easy-only">Làm theo mẻ thì dễ: mẻ nào hỏng thì bỏ mẻ đó, làm lại. Nhưng dòng dữ liệu không bao giờ hết, làm gì có "mẻ" nào để bỏ? Nên người ta phải tự cắt dòng ra từng mẩu nhỏ, và làm sao cho có làm lại mấy lần thì kết quả cuối cùng vẫn đúng một lần. Nhớ nhé: không phải là "chỉ làm một lần", mà là "làm mấy lần cũng ra như một lần".</p>
+      <p class="en-only" lang="en">Batch processing has a comfort streaming never gets: the job <em>ends</em>, so on failure you discard the partial output and rerun. With an infinite stream there is no "when it's done" to wait for. So this whole axis is about <strong>slicing the infinite into retryable pieces</strong> — and about naming correctly what you actually achieve at the end.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Exactly-once, said carefully</div>
+        <p class="definition standard-copy">Điều thật sự đạt được <strong>không phải</strong> là mỗi sự kiện được xử lý đúng một lần theo nghĩa đen. Sự kiện vẫn có thể được thử lại nhiều lần; cái được bảo toàn là <strong>hiệu ứng cuối cùng</strong> — kết quả trông y như thể nó chỉ được xử lý một lần. Kleppmann gọi tính chất này là <em><span lang="en">exactly-once semantics</span></em>, đồng thời lưu ý <strong><span lang="en">effectively-once</span> là tên mô tả đúng hơn</strong><span class="cite"><a href="#ref-1">1</a></span>. Nó được mua bằng ba thứ cộng lại: <strong>bỏ phần việc dở của lần chạy hỏng</strong>, <strong>commit nguyên tử</strong>, và <strong>tính lũy đẳng cộng loại bỏ trùng lặp</strong>.</p>
+        <p class="definition easy-only">"Đúng một lần" nghe như là máy chỉ làm một lần duy nhất. Không phải vậy. Máy vẫn có thể làm đi làm lại — chỉ là <strong>kết quả cuối cùng</strong> trông giống như chỉ làm một lần. Giống việc bật công tắc đèn: bật mười lần thì đèn vẫn chỉ sáng, không sáng gấp mười. Nhớ nhé: mẹo ở chỗ làm sao cho lặp lại cũng vô hại.</p>
+        <p class="definition en-only" lang="en">What is actually achieved is <strong>not</strong> that each event is processed literally once. Events may still be retried many times; what is preserved is the <strong>final effect</strong> — the result looks as though it were processed once. Kleppmann calls this property <em>exactly-once semantics</em>, while noting that <strong>effectively-once is the more descriptive term</strong><span class="cite"><a href="#ref-1">1</a></span>. It is bought with three things together: <strong>discarding the partial work of a failed attempt</strong>, <strong>atomic commit</strong>, and <strong>idempotence plus deduplication</strong>.</p>
+        <p class="deep-only">Cụm <span lang="en">effectively-once</span> mà Kleppmann dẫn lại không phải của ông: danh mục tham chiếu chính thức cho Chương 11 ghi rõ nó đến từ Viktor Klang, người đề xuất năm 2016 để gọi lối "<span lang="en">at-least-once</span> cộng thao tác lũy đẳng"<span class="cite"><a href="#ref-3">3</a></span>. Nói cách khác: hệ vẫn giao <em>ít nhất một lần</em>; còn "một lần" là <strong>tính chất của kết quả</strong>, không phải của việc thực thi. Hệ quả trực tiếp cho người đọc kỹ thuật: câu "Kafka bảo đảm <span lang="en">exactly-once</span>" nói trống không là sai. Tài liệu chính thức của Kafka trình bày ba mức ngữ nghĩa giao hàng và mô tả đúng một lần như thứ đạt được nhờ producer lũy đẳng và giao dịch, trong một phạm vi và với những giả định cụ thể — chứ không phải một lời bảo đảm phổ quát cho mọi đường đi của dữ liệu<span class="cite"><a href="#ref-7">7</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về chịu lỗi trong xử lý luồng">
+        <div class="equation-row">
+          <b>Không có "chạy xong"</b>
+          <span>Luồng vô hạn nên không thể đợi job kết thúc rồi mới thử lại như xử lý theo lô.</span>
+        </div>
+        <div class="equation-row">
+          <b>Hiệu ứng một lần</b>
+          <span>Lũy đẳng cộng commit nguyên tử — chứ không phải mỗi sự kiện chạy đúng một lần.</span>
+        </div>
+        <div class="equation-row">
+          <b>Trạng thái phải dựng lại được</b>
+          <span>Bằng ảnh chụp, bằng changelog, hoặc bằng cách phát lại chính đầu vào.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về chịu lỗi trong xử lý luồng">
+        <div class="equation-row">
+          <b>Không có lúc xong</b>
+          <span>Dòng chảy mãi, nên phải tự cắt ra từng mẩu để làm lại được.</span>
+        </div>
+        <div class="equation-row">
+          <b>Làm lại vẫn đúng</b>
+          <span>Như bật công tắc đèn: bấm mấy lần thì đèn vẫn chỉ sáng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Nhớ được chỗ đang làm</b>
+          <span>Hỏng rồi bật lại thì phải biết mình làm tới đâu.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about fault tolerance in stream processing">
+        <div class="equation-row">
+          <b>No "done"</b>
+          <span>An infinite stream means you can't wait for the job to end and then retry, as batch does.</span>
+        </div>
+        <div class="equation-row">
+          <b>Effectively once</b>
+          <span>Idempotence plus atomic commit — not each event running literally once.</span>
+        </div>
+        <div class="equation-row">
+          <b>State must be rebuildable</b>
+          <span>From snapshots, from a changelog, or by replaying the input itself.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Microbatching and checkpointing</div>
+          <h3><span class="vi-only">Hai cách cắt cái vô hạn thành mẩu</span><span class="en-only" lang="en">Two ways to slice the infinite</span></h3>
+          <p class="standard-copy"><strong>Vi-lô</strong>: Spark Streaming cắt luồng thành những khối nhỏ — ví dụ một giây — rồi xử lý mỗi khối như một job theo lô tí hon<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-19">19</a></span><span class="cite"><a href="#ref-21">21</a></span>. Đánh đổi rất rõ: lô càng nhỏ thì chi phí lập lịch và phối hợp càng lớn; lô càng lớn thì độ trễ càng cao. Kleppmann còn chỉ ra một hệ quả ngầm đáng nhớ: vi-lô <em>áp sẵn</em> một cửa sổ nhảy đúng bằng kích thước lô, nên nếu bài toán cần cửa sổ khác thì phải xử lý thêm ở tầng trên. <strong>Điểm kiểm tra</strong>: Apache Flink đi lối khác — định kỳ sinh <strong>ảnh chụp cuộn</strong> của trạng thái và ghi vào lưu trữ bền, bằng cách chèn <strong>rào chắn</strong> vào luồng tin theo tinh thần thuật toán chụp ảnh phân tán của Chandy–Lamport<span class="cite"><a href="#ref-18">18</a></span><span class="cite"><a href="#ref-26">26</a></span>. Khi một toán tử sập, nó khởi động lại từ điểm kiểm tra gần nhất và <strong>bỏ</strong> mọi kết quả sinh ra giữa điểm ấy với lúc sập.</p>
+          <p class="easy-only">Không cắt được dòng thì ta tự cắt. Cách một: cứ mỗi giây gom lại thành một mẻ tí hon rồi làm như mẻ bình thường — hỏng mẻ nào làm lại mẻ đó. Cách hai: cứ một lúc lại <strong>chụp ảnh</strong> xem mình đang làm tới đâu; hỏng thì quay về tấm ảnh gần nhất rồi làm tiếp. Nhớ nhé: muốn làm lại được thì phải có chỗ để quay về.</p>
+          <p class="en-only" lang="en"><strong>Microbatching</strong>: Spark Streaming breaks the stream into small blocks — one second, say — and processes each like a miniature batch job<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-19">19</a></span><span class="cite"><a href="#ref-21">21</a></span>. The trade-off is plain: smaller batches mean more scheduling and coordination overhead; larger ones mean higher latency. Kleppmann notes an implicit consequence worth remembering: microbatching <em>imposes</em> a tumbling window equal to the batch size, so any other windowing must be built on top. <strong>Checkpointing</strong>: Apache Flink takes another route — periodically generating <strong>rolling snapshots</strong> of state written to durable storage, using <strong>barriers</strong> inserted into the message stream in the spirit of the Chandy–Lamport distributed snapshot algorithm<span class="cite"><a href="#ref-18">18</a></span><span class="cite"><a href="#ref-26">26</a></span>. When an operator crashes it restarts from the most recent checkpoint and <strong>discards</strong> any output produced between that checkpoint and the crash.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Điểm chung</strong>Cả hai đều dựng lại đúng cái tiện nghi mà xử lý theo lô có sẵn: một ranh giới để vứt phần việc dở đi và làm lại. Khác nhau ở chỗ vi-lô cắt theo <em>thời gian đến</em> còn điểm kiểm tra cắt theo <em>tiến độ của chính bộ xử lý</em>.</div>
+            <div class="easy-only"><strong>Điểm chung</strong>Cả hai đều tạo ra một chỗ để quay về khi hỏng.</div>
+            <div class="en-only" lang="en"><strong>What they share</strong>Both rebuild exactly the comfort batch had for free: a boundary at which partial work can be thrown away and redone. They differ in where the cut falls — microbatching cuts by <em>arrival time</em>, checkpointing by <em>the processor's own progress</em>.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Where checkpointing stops working</div>
+          <h3><span class="vi-only">Ra khỏi khung là hết hủy được</span><span class="en-only" lang="en">Once it leaves the framework, you can't take it back</span></h3>
+          <p class="standard-copy">Đây là chỗ nhiều người đọc lướt qua, và cũng là chỗ quyết định. Vi-lô và điểm kiểm tra chỉ cho hiệu ứng đúng một lần <strong>bên trong</strong> khung xử lý luồng<span class="cite"><a href="#ref-1">1</a></span>. Ngay khi kết quả <strong>rời khỏi</strong> bộ xử lý — ghi vào một cơ sở dữ liệu bên ngoài, gửi một email, gọi một dịch vụ thanh toán — khung không còn cách nào rút lại. Khởi động lại một tác vụ hỏng sẽ khiến tác dụng phụ ấy xảy ra <strong>hai lần</strong>: người dùng nhận hai email, tài khoản bị trừ tiền hai lượt. Riêng điểm kiểm tra <em>không đủ</em> để ngăn chuyện đó.</p>
+          <p class="easy-only">Chụp ảnh để quay lại chỉ có tác dụng với những việc còn nằm trong máy. Nhưng nếu máy đã <strong>gửi email đi rồi</strong> thì không rút email về được nữa. Làm lại lần nữa thì người ta nhận hai email. Nhớ nhé: cái gì đã ra khỏi nhà thì không gọi về được, nên phải cẩn thận ngay lúc cho nó đi.</p>
+          <p class="en-only" lang="en">This is the part readers skim, and it is the decisive one. Microbatching and checkpointing give effectively-once semantics only <strong>inside</strong> the stream framework<span class="cite"><a href="#ref-1">1</a></span>. As soon as output <strong>leaves</strong> the processor — written to an external database, an email sent, a payment service called — the framework can no longer discard it. Restarting a failed task makes that side effect happen <strong>twice</strong>: the user gets two emails, the account is charged twice. Checkpointing alone is <em>not sufficient</em> to prevent this.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao chi tiết này quan trọng</strong>Vì gần như mọi hệ có ích đều <em>phải</em> có tác dụng phụ ra bên ngoài. Nói cách khác, cái bảo đảm "đúng một lần" mà một khung quảng cáo luôn kèm theo một biên giới — và việc của người thiết kế là biết biên giới đó nằm ở đâu.</div>
+            <div class="easy-only"><strong>Vì sao quan trọng</strong>Vì hệ nào cũng phải làm gì đó ra bên ngoài, nên phải biết bảo đảm kia hết hiệu lực ở chỗ nào.</div>
+            <div class="en-only" lang="en"><strong>Why this detail matters</strong>Because nearly every useful system <em>must</em> have external side effects. In other words, any framework's "exactly-once" guarantee comes with a boundary — and a designer's job is to know where that boundary is.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Atomic commit and idempotence</div>
+          <h3><span class="vi-only">Hai mảnh ghép làm nên "hiệu ứng một lần"</span><span class="en-only" lang="en">The two pieces that make "once" happen</span></h3>
+          <p class="standard-copy">Mảnh thứ nhất là <strong>commit nguyên tử</strong>: mọi đầu ra và tác dụng phụ của việc xử lý một sự kiện phải có hiệu lực <strong>khi và chỉ khi</strong> việc xử lý thành công<span class="cite"><a href="#ref-1">1</a></span> — gồm cả tin gửi xuống toán tử kế tiếp, phép ghi vào cơ sở dữ liệu, thay đổi trạng thái của toán tử, và cả việc ghi nhận đã tiêu thụ tin đầu vào. Hoặc tất cả cùng xảy ra, hoặc không cái nào. Google Cloud Dataflow, VoltDB và giao dịch của Kafka đều theo hướng này; khác với XA ở Chương 9, các hiện thực đó giữ giao dịch <strong>nội bộ trong một khung duy nhất</strong> nên hiệu quả hơn nhiều. Mảnh thứ hai là <strong>tính lũy đẳng</strong>: một thao tác lũy đẳng có thể thực hiện nhiều lần mà hiệu ứng vẫn như làm một lần. Thao tác không tự nhiên lũy đẳng thì có thể <em>làm cho</em> lũy đẳng bằng một chút siêu dữ liệu: mỗi tin trong Kafka có một offset bền và tăng đơn điệu, nên khi ghi một giá trị ra cơ sở dữ liệu ngoài, ta kèm theo offset của tin cuối đã kích hoạt phép ghi — nhờ đó biết được cập nhật này đã áp hay chưa và bỏ qua nếu rồi<span class="cite"><a href="#ref-7">7</a></span>. Kafka Streams xử lý trạng thái đúng theo lối này<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="easy-only">Hai mẹo cộng lại mới ra "làm lại vẫn đúng". Mẹo một: <strong>xong thì xong hết, hỏng thì hỏng hết</strong> — chứ không được nửa vời. Mẹo hai: làm sao cho <strong>làm lại cũng vô hại</strong>, bằng cách ghi kèm một con số thứ tự: "việc này tôi làm tới số 57 rồi". Lần sau thấy số 57 thì biết đã làm rồi, bỏ qua. Nhớ nhé: đánh số việc là cách đơn giản nhất để khỏi làm trùng.</p>
+          <p class="en-only" lang="en">The first piece is <strong>atomic commit</strong>: all outputs and side effects of processing an event must take effect <strong>if and only if</strong> the processing succeeds<span class="cite"><a href="#ref-1">1</a></span> — including messages sent to downstream operators, database writes, changes to operator state, and the acknowledgement of the input message. Either all of it happens or none of it. Google Cloud Dataflow, VoltDB and Kafka's transactions all work this way; unlike XA in Chapter 9, these implementations keep transactions <strong>internal to a single framework</strong>, which is far more efficient. The second piece is <strong>idempotence</strong>: an idempotent operation can be performed many times with the same effect as performing it once. An operation that isn't naturally idempotent can be <em>made</em> so with a little metadata: every Kafka message has a durable, monotonically increasing offset, so when writing a value to an external database you include the offset of the last message that triggered the write — letting you tell whether the update has already been applied and skip it if so<span class="cite"><a href="#ref-7">7</a></span>. Kafka Streams handles state in exactly this style<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Ba giả định đi kèm</strong>Dựa vào lũy đẳng không miễn phí. Kleppmann nêu rõ nó đòi: khởi động lại phải <strong>phát lại đúng những tin đó theo đúng thứ tự đó</strong>; việc xử lý phải <strong>tất định</strong>; và <strong>không nút nào khác được cập nhật cùng giá trị song song</strong> — tức là phải có cơ chế rào chắn (fencing) như ở Chương 8. Phá vỡ bất kỳ giả định nào trong ba, và "một lần" tan biến trong im lặng.</div>
+            <div class="easy-only"><strong>Ba điều kiện</strong>Làm lại phải đúng thứ tự cũ, phải ra kết quả giống nhau, và không được có người thứ hai cùng sửa một chỗ.</div>
+            <div class="en-only" lang="en"><strong>Three assumptions it rides on</strong>Idempotence isn't free. Kleppmann spells out its requirements: a restart must <strong>replay the same messages in the same order</strong>; processing must be <strong>deterministic</strong>; and <strong>no other node may concurrently update the same value</strong> — meaning you need fencing, as in Chapter 8. Break any one of the three and "once" quietly evaporates.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Trident nói thẳng cái giá</h4>
+              <p>Tài liệu của Apache Storm là minh họa rất sạch cho sắc thái này. Storm gọi ngữ nghĩa của Trident là <span lang="en">exactly-once</span>, nhưng nói rõ cơ chế: mỗi lô được gán một <strong>mã giao dịch</strong> duy nhất và các cập nhật trạng thái được sắp thứ tự giữa các lô — tức là loại bỏ trùng lặp. Và tài liệu nói thẳng phần còn lại: nếu ta <em>không</em> chịu chi phí lưu mã giao dịch trong cơ sở dữ liệu thì ngữ nghĩa tụt về <strong>ít nhất một lần</strong><span class="cite"><a href="#ref-25">25</a></span>. "Đúng một lần" ở đây là một <em>tính chất mua được</em>, không phải một thuộc tính sẵn có.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao rẻ hơn XA</h4>
+              <p>Giao dịch nội bộ trong một khung không phải điều phối nhiều nhà cung cấp tài nguyên khác nhau qua giao thức hai pha. Nó tránh được phần lớn chi phí và gần như toàn bộ các chế độ hỏng khó chịu của XA — điều phối viên chết khi đang nghi vấn, giao dịch treo giữ khóa, phục hồi thủ công. Đổi lại, phạm vi bảo đảm co lại đúng bằng biên giới của khung đó.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Rebuilding state after a failure</div>
+          <h3><span class="vi-only">Dựng lại trạng thái sau sự cố</span><span class="en-only" lang="en">Rebuilding state after a failure</span></h3>
+          <p class="standard-copy">Mọi phép xử lý luồng cần trạng thái — join theo cửa sổ, bảng tra cứu, bộ đếm — đều phải bảo đảm trạng thái ấy <strong>dựng lại được</strong> sau sự cố<span class="cite"><a href="#ref-1">1</a></span>. Một lựa chọn là giữ trạng thái ở một kho từ xa và nhân bản ở đó, nhưng phải đi mạng cho từng tin nên chậm. Lựa chọn còn lại là giữ trạng thái <strong>cục bộ</strong> ngay tại bộ xử lý rồi nhân bản định kỳ, và mỗi khung làm một kiểu: Flink chụp ảnh trạng thái toán tử rồi ghi vào lưu trữ bền<span class="cite"><a href="#ref-18">18</a></span>; Samza và Kafka Streams nhân bản bằng cách gửi thay đổi trạng thái vào một topic Kafka có <strong>nén nhật ký</strong><span class="cite"><a href="#ref-24">24</a></span><span class="cite"><a href="#ref-9">9</a></span><span class="cite"><a href="#ref-6">6</a></span>; VoltDB nhân bản bằng cách xử lý dư thừa cùng một tin trên nhiều nút. Và đôi khi còn chẳng cần nhân bản: nếu trạng thái đủ nhỏ, <strong>phát lại chính đầu vào</strong> là dựng lại được — ví dụ trạng thái của một cửa sổ ngắn. Chọn cách nào phụ thuộc tương quan hiệu năng giữa mạng và đĩa, nên câu trả lời đổi theo thời gian và theo hạ tầng.</p>
+          <p class="easy-only">Bộ xử lý luồng phải <strong>nhớ</strong> nhiều thứ: đang đếm tới đâu, đang chờ ghép với cái gì. Máy hỏng là mất trí nhớ. Nên phải có cách nhớ lại: hoặc thỉnh thoảng chép trí nhớ ra một chỗ an toàn, hoặc ghi mọi thay đổi vào một cuốn sổ riêng, hoặc — nếu trí nhớ ngắn — cứ đọc lại dữ liệu cũ là nhớ ra ngay. Nhớ nhé: cái gì nhớ trong đầu máy thì phải có bản sao ở ngoài.</p>
+          <p class="en-only" lang="en">Any stream process that needs state — windowed joins, lookup tables, counters — must ensure that state can be <strong>recovered</strong> after a failure<span class="cite"><a href="#ref-1">1</a></span>. One option is to keep state in a remote datastore and replicate it there, but a network round trip per message is slow. The other is to keep state <strong>local</strong> to the processor and replicate it periodically, and each framework does it differently: Flink snapshots operator state to durable storage<span class="cite"><a href="#ref-18">18</a></span>; Samza and Kafka Streams replicate state changes by sending them to a <strong>log-compacted</strong> Kafka topic<span class="cite"><a href="#ref-24">24</a></span><span class="cite"><a href="#ref-9">9</a></span><span class="cite"><a href="#ref-6">6</a></span>; VoltDB replicates by redundantly processing each message on several nodes. And sometimes replication isn't needed at all: if the state is small enough, <strong>replaying the input</strong> rebuilds it — the state of a short window, say. Which to choose depends on the relative performance of network and disk, so the answer shifts with time and infrastructure.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao changelog thắng thế</strong>Lối "gửi thay đổi trạng thái vào một topic có nén nhật ký" đóng vòng tròn của cả chương: trạng thái cục bộ trở thành một <em>view vật chất hóa</em> của một nhật ký sự kiện, và nhật ký ấy lại chính là thứ dựng lại nó sau sự cố. Cùng một cơ chế đã giải quyết việc giữ nhiều hệ đồng bộ, nay giải quyết luôn việc chịu lỗi.</div>
+            <div class="easy-only"><strong>Điều hay</strong>Cũng lại là cuốn sổ ấy: ghi mọi thay đổi vào sổ thì lúc nào cũng dựng lại được trí nhớ.</div>
+            <div class="en-only" lang="en"><strong>Why the changelog approach wins</strong>Sending state changes to a log-compacted topic closes the chapter's circle: local state becomes a <em>materialized view</em> of an event log, and that same log is what rebuilds it after a crash. The mechanism that solved keeping systems in sync now solves fault tolerance too.</div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="surprise-lead deep-only" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Since 2017 · what the vendors changed</div>
+        <p class="definition">Chương 11 chụp ảnh hệ sinh thái ở năm 2017, và nó đã đổi khá nhiều. Khung khái niệm của Kleppmann vẫn đứng nguyên — nhưng <em>hành vi sản phẩm</em> thì phải tra tài liệu hiện thời, không tra trí nhớ.</p>
+        <p>Bốn thay đổi đáng để một người đọc hôm nay biết, và cả bốn đều nằm ở tầng hiện thực chứ không đụng tới lập luận của chương. Riêng điểm đầu tiên là chỗ rất dễ trích dẫn sai: Kafka <em>có</em> giao dịch và ngữ nghĩa đúng-một-lần, nhưng đó là một bảo đảm có phạm vi, không phải một lời hứa phổ quát.</p>
+      </div>
+      <div class="equation" aria-label="Bốn thay đổi của hệ sinh thái sau năm 2017">
+        <div class="equation-row">
+          <b>Kafka: giao dịch</b>
+          <span>Tài liệu hiện thời trình bày ba mức ngữ nghĩa giao hàng, producer lũy đẳng và giao dịch bắc qua nhiều phân mảnh<span class="cite"><a href="#ref-7">7</a></span> — thứ chưa có trong bản tài liệu Kafka 0.9 mà danh mục tham chiếu của chương trỏ tới<span class="cite"><a href="#ref-3">3</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Kafka: KRaft</b>
+          <span>Siêu dữ liệu cụm nay do chính các controller của Kafka tự quản bằng một quorum kiểu Raft. Tài liệu vận hành ghi rõ bản cầu nối cuối cùng để di trú từ ZooKeeper sang KRaft là Kafka 3.9<span class="cite"><a href="#ref-8">8</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Kafka Streams</b>
+          <span>Thư viện xử lý luồng chính thức của dự án, với bảng trạng thái và topic changelog — đúng lối mà chương mô tả, nay là một phần của bản phân phối<span class="cite"><a href="#ref-9">9</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Spark: DStream đã lùi</b>
+          <span>Tài liệu Spark nay gọi Spark Streaming (DStream) là <em>thế hệ trước</em> và không còn cập nhật, khuyến nghị dùng Structured Streaming<span class="cite"><a href="#ref-21">21</a></span><span class="cite"><a href="#ref-20">20</a></span>. Ví dụ vi-lô trong sách vẫn đúng về mặt mô hình, chỉ là không còn là công cụ được khuyên dùng.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận nguy hiểm nhất của chương này</span><span class="en-only" lang="en">The three most dangerous misreadings of this chapter</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“<span lang="en">Exactly-once</span> nghĩa là mỗi sự kiện chạy đúng một lần”</span><span class="en-only" lang="en">"Exactly-once means each event runs exactly once"</span></h4>
+          <p class="standard-copy">Sai, và sai theo hướng nguy hiểm. Sự kiện vẫn có thể được thử lại nhiều lần; cái được bảo toàn là <em>hiệu ứng</em>. Kleppmann ghi nhận <span lang="en">effectively-once</span> là tên mô tả đúng hơn<span class="cite"><a href="#ref-3">3</a></span>, và tính chất ấy chỉ có khi ba thứ cùng có mặt: bỏ phần việc dở, commit nguyên tử, lũy đẳng cộng loại trùng. Tài liệu Trident minh họa thẳng thừng: bỏ mã giao dịch đi thì ngữ nghĩa tụt về ít nhất một lần<span class="cite"><a href="#ref-25">25</a></span>.</p>
+          <p class="en-only" lang="en">Wrong, and dangerously so. Events may still be retried many times; what is preserved is the <em>effect</em>. Kleppmann notes effectively-once is the more descriptive term<span class="cite"><a href="#ref-3">3</a></span>, and the property holds only when three things are present together: discarding partial work, atomic commit, idempotence plus deduplication. Trident's documentation says it bluntly: drop the transaction id and the semantics fall back to at-least-once<span class="cite"><a href="#ref-25">25</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“CDC và event sourcing là một”</span><span class="en-only" lang="en">"CDC and event sourcing are the same thing"</span></h4>
+          <p class="standard-copy">Sai: chúng khác nhau ở <em>tầng trừu tượng</em> và ở <em>nguồn chân lý</em><span class="cite"><a href="#ref-13">13</a></span>. CDC trích changelog ở tầng kho, ứng dụng vẫn ghi đè tự do, sự kiện chứa bản ghi mới đầy đủ nên nén nhật ký được — nguồn chân lý là cái bảng. Event sourcing dựng logic tường minh trên sự kiện bất biến mô tả <em>ý định</em>, không đè nhau, cần toàn bộ lịch sử — nguồn chân lý là chính nhật ký.</p>
+          <p class="en-only" lang="en">Wrong: they differ in <em>level of abstraction</em> and in <em>source of truth</em><span class="cite"><a href="#ref-13">13</a></span>. CDC extracts a changelog at the storage layer, the application still overwrites freely, and events carry the full new record so compaction works — the table is the truth. Event sourcing builds logic explicitly on immutable events describing <em>intent</em>, which never overwrite each other and need the full history — the log is the truth.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Đồng hồ hệ thống là đủ”</span><span class="en-only" lang="en">"The system clock is good enough"</span></h4>
+          <p class="standard-copy">Sai: thời gian xử lý không phải thời gian sự kiện. Chạy lại nhật ký sau sự cố tạo ra một đỉnh lưu lượng hoàn toàn giả; một thiết bị ngoại tuyến có thể gửi sự kiện của hôm qua vào hôm nay; và đồng hồ thiết bị thì có khi sai hẳn. Ba dấu thời gian và cửa sổ theo thời gian sự kiện tồn tại chính vì lý do đó<span class="cite"><a href="#ref-17">17</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: processing time is not event time. Replaying a log after an outage creates an entirely fictitious traffic spike; an offline device may deliver yesterday's events today; and device clocks are sometimes simply wrong. Three timestamps and event-time windows exist for exactly that reason<span class="cite"><a href="#ref-17">17</a></span>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự soi hệ của mình</span><span class="en-only" lang="en">Audit your own system</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Tám câu hỏi soi đường ống luồng của bạn</span><span class="en-only" lang="en">Eight questions for your own streaming pipeline</span></h2>
+        <p class="standard-copy">Chương 11 không đưa ra một kiến trúc để sao chép — nó đưa ra một bộ từ vựng để <em>hỏi cho đúng</em>. Những câu dưới đây áp thẳng bộ từ vựng ấy vào một hệ bạn đang vận hành. Chúng không đo hệ của bạn "hiện đại" tới đâu, mà soi xem bạn đã nói được thành lời những đánh đổi mà mình đã ngầm chọn hay chưa.</p>
+        <p class="easy-only">Thử soi một hệ thật bằng mấy câu dưới. Không phải để khoe hệ xịn, mà để xem mình có thật sự hiểu nó đang đánh đổi những gì.</p>
+        <p class="en-only" lang="en">Chapter 11 offers no architecture to copy — it offers a vocabulary for <em>asking the right questions</em>. What follows applies that vocabulary to a system you actually run. These don't measure how "modern" your system is; they check whether you can state the trade-offs you have already silently made.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Đường ống của bạn là hàng đợi hay nhật ký — và bạn có phát lại được không?</strong><span class="deep-only">Đây là câu hỏi quyết định mọi thứ phía sau. Nếu tin bị xóa sau khi ack thì bạn <em>không</em> chạy lại được sau khi vá lỗi, và mọi lời bàn về "dựng lại view từ nhật ký" đều vô nghĩa với hệ của bạn.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Thời gian giữ tin của bạn là bao lâu, và consumer chậm nhất đang tụt bao xa?</strong><span class="deep-only">Hiệu số giữa hai con số này chính là khoảng thời gian bạn còn lại trước khi "chậm" biến thành "mất dữ liệu". Nếu chưa từng đặt hai con số ấy cạnh nhau, bạn đang có một hạn chót mà mình không biết.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có đang ghi song song vào nhiều kho không?</strong><span class="deep-only">Dual write sinh ra tranh đua và nửa-thành-công, và hậu quả là hai kho lệch nhau <em>vĩnh viễn</em> mà không hề có lỗi nào được ghi lại. Nếu có, hãy chỉ ra kho nào là nguồn chân lý, và những kho còn lại dẫn xuất từ nó bằng cơ chế gì.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Thứ bạn đang làm là CDC hay event sourcing — và bạn gọi tên nó đúng chưa?</strong><span class="deep-only">Nếu changelog được trích ở tầng kho và ứng dụng vẫn ghi đè tự do, đó là CDC: bạn có kết quả, không có ý định. Nếu vậy, đừng kỳ vọng về sau dẫn ra được những view cần biết <em>vì sao</em> dữ liệu đổi — thông tin đó đã mất từ lúc ghi.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Các phép tính theo thời gian của bạn dùng thời gian sự kiện hay thời gian xử lý?</strong><span class="deep-only">Thử một phép kiểm nhanh: nếu đường ống ngừng một tiếng rồi chạy lại, biểu đồ của bạn có hiện ra một đỉnh giả không? Nếu có, bạn đang dùng thời gian xử lý cho một câu hỏi nghiệp vụ.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn xử lý sự kiện đến muộn bằng cách nào, và có đo tỉ lệ bị bỏ không?</strong><span class="deep-only">Chỉ có hai lối: bỏ qua, hoặc phát bản sửa. Không chọn tức là đã chọn lối thứ nhất một cách vô thức. Và nếu không đo tỉ lệ bị bỏ, bạn không biết mình đang đánh mất bao nhiêu sự thật.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Chạy lại cùng một job trên cùng dữ liệu có ra cùng kết quả không?</strong><span class="deep-only">Nếu có join giữa hai luồng mà thứ tự đến không xác định, câu trả lời thường là không. Hãy hỏi tiếp: bạn muốn join theo giá trị <em>hiện thời</em> hay giá trị <em>tại thời điểm sự kiện</em> — và bạn có đang giữ đủ phiên bản để làm được điều mình muốn không?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bảo đảm "đúng một lần" của bạn hết hiệu lực ở đâu?</strong><span class="deep-only">Hãy chỉ tay vào đúng chỗ dữ liệu rời khỏi khung xử lý — phép ghi ra CSDL ngoài, email, lời gọi thanh toán. Ở ranh giới đó, điểm kiểm tra không còn giúp gì; chỉ còn commit nguyên tử hoặc lũy đẳng. Nếu không có cái nào, tác dụng phụ của bạn sẽ xảy ra hai lần vào một ngày nào đó.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Tin của bạn gửi xong là mất, hay vẫn còn đó để đọc lại?</strong><span>Đọc lại được thì lỡ tính sai còn tính lại được.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Cùng một thông tin bạn có đang chép tay vào nhiều chỗ không?</strong><span>Nên chọn một chỗ làm gốc, những chỗ kia chép theo.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn tính "một giờ vừa rồi" theo lúc chuyện xảy ra hay lúc máy biết?</strong><span>Hai lúc đó khác nhau, và chọn sai là ra số sai.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu máy làm lại một việc hai lần thì có sao không?</strong><span>Hệ tốt là làm lại mấy lần kết quả vẫn như một lần.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>Is your pipeline a queue or a log — and can you replay?</strong><span>This decides everything downstream. If messages vanish on ack, you cannot reprocess after a fix, and "rebuild the view from the log" is meaningless for your system.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>What is your retention, and how far behind is your slowest consumer?</strong><span>The gap between those two numbers is how long you have before "slow" becomes "lost". If you've never put them side by side, you have a deadline you don't know about.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Are you writing to several stores in parallel?</strong><span>Dual writes create races and half-successes, leaving stores <em>permanently</em> divergent with no error ever logged. If so, name the source of truth and the mechanism by which the rest derive from it.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Are you doing CDC or event sourcing — and do you name it correctly?</strong><span>If the changelog is extracted at the storage layer while the application overwrites freely, it's CDC: you have outcomes, not intent. Don't then expect to derive views that need to know <em>why</em> data changed — that was lost at write time.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Do your time-based computations use event time or processing time?</strong><span>A quick test: if the pipeline stalls for an hour and then catches up, does your chart show a fictitious spike? If so, you're using processing time for a business question.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How do you handle stragglers, and do you measure the drop rate?</strong><span>There are only two options: ignore, or publish a correction. Not choosing means you chose the first unconsciously. And without a drop-rate metric you don't know how much truth you're losing.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Does rerunning the same job on the same data give the same result?</strong><span>If you join two streams whose arrival order is undetermined, usually not. Then ask: do you want the <em>current</em> value or the value <em>as of the event</em> — and are you keeping enough versions to get what you want?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Where does your "exactly-once" guarantee stop applying?</strong><span>Point at the exact place data leaves the framework — the external database write, the email, the payment call. At that boundary checkpointing helps no more; only atomic commit or idempotence does. With neither, your side effect will happen twice one day.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Xử lý luồng là xử lý theo lô sau khi <span class="closing-accent">rút mất điểm kết thúc</span> — và mọi thứ khó khăn của chương này đều mọc ra từ đúng chỗ đó. Không còn "chạy xong" thì không còn sắp xếp toàn cục, không còn vứt kết quả dở đi làm lại, không còn cái lúc mà dữ liệu đã đủ. Đổi lại, ta nhận được một thứ mà xử lý theo lô không có: một <span class="closing-accent">nhật ký bất biến</span> mà mọi bảng, mọi chỉ mục, mọi cache đều chỉ là dẫn xuất — nên sửa lỗi là chạy lại, và thêm một cách nhìn mới là thêm một consumer. Cái giá phải trả được gọi tên rất sòng phẳng: phải chọn đồng hồ, phải chọn cửa sổ, phải chấp nhận rằng "đủ dữ liệu" là một điều không bao giờ chứng minh được, và phải hiểu rằng thứ ta gọi là <span class="closing-accent">đúng một lần</span> thật ra là <em>hiệu ứng</em> đúng một lần — mua bằng tính lũy đẳng và commit nguyên tử, chứ không phải bằng một lời hứa.</span><span class="easy-only">Xử lý luồng chỉ là làm theo mẻ, nhưng <span class="closing-accent">mẻ không bao giờ hết</span>. Vì thế không có lúc nào gọi là "đủ dữ liệu", và cũng không có lúc nào để bỏ đi làm lại từ đầu. Bù lại, ta có một <span class="closing-accent">cuốn sổ không tẩy xóa</span>: mọi bảng biểu đều dựng được từ cuốn sổ đó, sai thì tính lại, muốn xem kiểu khác thì dựng thêm. Nhớ nhé: đừng tin ai nói "máy chỉ làm đúng một lần" — cái làm được là <span class="closing-accent">làm lại mấy lần cũng ra như một lần</span>.</span><span class="en-only" lang="en">Stream processing is batch processing with the <span class="closing-accent">ending removed</span> — and every difficulty in this chapter grows from exactly that. No "done" means no global sort, no discarding partial output and rerunning, no moment at which the data is complete. In exchange you get something batch never had: an <span class="closing-accent">immutable log</span> of which every table, index and cache is merely a derivation — so fixing a bug means reprocessing, and adding a new view means adding a consumer. The price is named honestly: choose a clock, choose a window, accept that "complete" can never be proven, and understand that what we call <span class="closing-accent">exactly-once</span> is really an effectively-once <em>result</em> — bought with idempotence and atomic commit, not with a promise.</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-10-batch-processing.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 10 · Xử lý theo lô</span><span class="en-only" lang="en">Chapter 10 · Batch Processing</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="chapter-12-the-future-of-data-systems.html">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 12 · Tương lai của hệ dữ liệu</span><span class="en-only" lang="en">Chapter 12 · The Future of Data Systems</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 11 <span lang="en">“Stream Processing”</span><span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (cuốn sổ không tẩy xóa, hộp thư và bưu điện, công tắc đèn, năm quả táo…) là minh họa do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. Mọi mô tả hành vi sản phẩm hiện thời của Apache Kafka, Flink, Samza, Storm và Spark đều dẫn theo tài liệu chính thức của chính các dự án đó, và được tách riêng trong khối <em>Đầy đủ</em> vì hệ sinh thái đã đổi nhiều so với ảnh chụp năm 2017 của sách.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 11 “Stream Processing”<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (the ledger that is never erased, the post office, the light switch, the five apples…) are illustrations added by this companion, not examples from the book. All statements about the current behaviour of Apache Kafka, Flink, Samza, Storm and Spark are sourced to those projects' own official documentation, and kept in the <em>Đầy đủ</em> depth layer because the ecosystem has changed considerably since the book's 2017 snapshot.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 11 <span lang="en">“Stream Processing”</span>.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách (mục lục, định danh chương, bản in)</a></li>
+        <li id="ref-3"><a href="https://github.com/ept/ddia-references/blob/master/chapter-11-refs.md" target="_blank" rel="noopener noreferrer">Martin Kleppmann, <em>ddia-references</em> — danh mục tham chiếu chính thức của Chương 11 (Viktor Klang về “effectively-once”, Kafka 0.9 documentation, Event Store, Chronicle, Jay Kreps về việc xóa dữ liệu)</a> <em>(github.com giới hạn tần suất theo User-Agent: link trả 429 với UA trình duyệt nhưng 200 với <span lang="en">curl</span> trần và mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-4"><a href="https://kafka.apache.org/documentation/#design" target="_blank" rel="noopener noreferrer">Apache Kafka — Design (nhật ký nối đuôi, phân mảnh, mô hình kéo)</a></li>
+        <li id="ref-5"><a href="https://kafka.apache.org/documentation/#intro_concepts" target="_blank" rel="noopener noreferrer">Apache Kafka — Introduction &amp; key concepts (topic, partition, offset, consumer group)</a></li>
+        <li id="ref-6"><a href="https://kafka.apache.org/documentation/#compaction" target="_blank" rel="noopener noreferrer">Apache Kafka — Log compaction (giữ giá trị mới nhất cho mỗi khóa, tombstone)</a></li>
+        <li id="ref-7"><a href="https://kafka.apache.org/documentation/#semantics" target="_blank" rel="noopener noreferrer">Apache Kafka — Message delivery semantics (at-most-once / at-least-once / exactly-once, producer lũy đẳng, giao dịch)</a></li>
+        <li id="ref-8"><a href="https://kafka.apache.org/documentation/#kraft" target="_blank" rel="noopener noreferrer">Apache Kafka — KRaft (quorum siêu dữ liệu; bản cầu nối cuối cùng để di trú từ ZooKeeper là Kafka 3.9)</a></li>
+        <li id="ref-9"><a href="https://kafka.apache.org/documentation/streams/" target="_blank" rel="noopener noreferrer">Apache Kafka Streams — tài liệu chính thức (bảng trạng thái, topic changelog, xử lý trạng thái)</a></li>
+        <li id="ref-10"><a href="https://www.rabbitmq.com/tutorials/amqp-concepts" target="_blank" rel="noopener noreferrer">RabbitMQ — AMQP 0-9-1 Concepts (exchange, queue, ack, phân phối tới nhiều consumer)</a></li>
+        <li id="ref-11"><a href="https://jakarta.ee/specifications/messaging/" target="_blank" rel="noopener noreferrer">Jakarta Messaging (JMS) — đặc tả chính thức</a></li>
+        <li id="ref-12"><a href="https://debezium.io/documentation/reference/stable/index.html" target="_blank" rel="noopener noreferrer">Debezium — tài liệu tham chiếu (bắt thay đổi dữ liệu từ nhật ký ghi của CSDL)</a></li>
+        <li id="ref-13"><a href="https://martinfowler.com/eaaDev/EventSourcing.html" target="_blank" rel="noopener noreferrer">Martin Fowler, “Event Sourcing” — martinfowler.com</a></li>
+        <li id="ref-14"><a href="https://martinfowler.com/bliki/CQRS.html" target="_blank" rel="noopener noreferrer">Martin Fowler, “CQRS” — martinfowler.com</a></li>
+        <li id="ref-15"><a href="https://martin.kleppmann.com/2015/11/05/database-inside-out-at-oredev.html" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “Turning the database inside-out with Apache Samza” — martin.kleppmann.com</a></li>
+        <li id="ref-16"><a href="https://martin.kleppmann.com/2011/03/07/accounting-for-computer-scientists.html" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “Accounting for Computer Scientists” — sổ cái chỉ-nối-đuôi và bút toán bù</a></li>
+        <li id="ref-17"><a href="https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf" target="_blank" rel="noopener noreferrer">Tyler Akidau và cộng sự, “The Dataflow Model”, VLDB 2015 — thời gian sự kiện, cửa sổ, và việc chỉnh sửa kết quả đã phát</a></li>
+        <li id="ref-18"><a href="https://arxiv.org/abs/1506.08603" target="_blank" rel="noopener noreferrer">Paris Carbone và cộng sự, “Lightweight Asynchronous Snapshots for Distributed Dataflows”, arXiv:1506.08603 — rào chắn và ảnh chụp cuộn của Flink</a></li>
+        <li id="ref-19"><a href="https://www.usenix.org/system/files/conference/hotcloud12/hotcloud12-final28.pdf" target="_blank" rel="noopener noreferrer">Matei Zaharia và cộng sự, “Discretized Streams”, HotCloud 2012 — mô hình vi-lô</a></li>
+        <li id="ref-20"><a href="https://spark.apache.org/docs/latest/streaming/index.html" target="_blank" rel="noopener noreferrer">Apache Spark — Structured Streaming Programming Guide (công cụ luồng được khuyến nghị hiện nay)</a></li>
+        <li id="ref-21"><a href="https://spark.apache.org/docs/latest/streaming-programming-guide.html" target="_blank" rel="noopener noreferrer">Apache Spark — Spark Streaming (DStream) Programming Guide; tài liệu ghi rõ đây là thế hệ trước và không còn cập nhật</a></li>
+        <li id="ref-22"><a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-percolate-query.html" target="_blank" rel="noopener noreferrer">Elasticsearch — Percolate query (lưu truy vấn, cho tài liệu chạy qua)</a></li>
+        <li id="ref-23"><a href="https://www.espertech.com/esper/" target="_blank" rel="noopener noreferrer">EsperTech — Esper (xử lý sự kiện phức hợp với truy vấn thường trú)</a></li>
+        <li id="ref-24"><a href="https://samza.apache.org/learn/documentation/latest/" target="_blank" rel="noopener noreferrer">Apache Samza — tài liệu chính thức (trạng thái cục bộ và nhân bản qua changelog)</a></li>
+        <li id="ref-25"><a href="https://storm.apache.org/releases/current/Trident-tutorial.html" target="_blank" rel="noopener noreferrer">Apache Storm — Trident tutorial (mã giao dịch cho mỗi lô; bỏ mã đi thì ngữ nghĩa tụt về at-least-once)</a></li>
+        <li id="ref-26"><a href="https://flink.apache.org/what-is-flink/flink-architecture/" target="_blank" rel="noopener noreferrer">Apache Flink — Flink Architecture (bộ xử lý luồng có trạng thái, điểm kiểm tra)</a></li>
+        <li id="ref-27"><a href="https://cidrdb.org/cidr2015/Papers/CIDR15_Paper16.pdf" target="_blank" rel="noopener noreferrer">Pat Helland, “Immutability Changes Everything”, CIDR 2015 — lập luận về dữ liệu bất biến</a></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-10-batch-processing.html">Chương 10 — Xử lý theo lô</a> · <a href="chapter-12-the-future-of-data-systems.html">Chương 12 — Tương lai của hệ dữ liệu</a>.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-10-batch-processing.html">Chapter 10 — Batch Processing</a> · <a href="chapter-12-the-future-of-data-systems.html">Chapter 12 — The Future of Data Systems</a>.</p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

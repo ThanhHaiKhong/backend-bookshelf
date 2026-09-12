@@ -1,0 +1,2057 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 10 &quot;Batch Processing&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: triết lý Unix, MapReduce &amp; HDFS, join phía reduce và phía map, và các engine dòng dữ liệu sau MapReduce.">
+<title>Batch Processing — DDIA Chương 10</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 10";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 10</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 10</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 10</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 10 · Xử lý theo lô</span><span class="easy-only">DDIA · Chương 10 · Xử lý theo lô</span><span class="en-only" lang="en">DDIA · Chapter 10 · Batch Processing</span></div>
+      <h1 id="page-title"><span class="standard-copy">Khi thước đo không còn là độ trễ mà là <span class="hero-title-accent">thông lượng</span></span><span class="easy-only">Gom lại làm một mẻ thật lớn</span><span class="en-only" lang="en">When the measure is no longer latency but <span class="hero-title-accent">throughput</span></span></h1>
+      <p class="standard-copy">Mở Phần III của cuốn sách, Kleppmann chia thế giới hệ thống thành ba loại<span class="cite"><a href="#ref-1">1</a></span>: <strong>dịch vụ trực tuyến</strong> chờ yêu cầu rồi trả lời càng nhanh càng tốt, nên thước đo là <em lang="en">response time</em>; <strong>hệ theo lô</strong> (<span lang="en">batch</span>) nhận một khối dữ liệu lớn đã nằm sẵn, chạy một mạch có thể hàng giờ, nên thước đo là <strong>thông lượng</strong> — bao nhiêu dữ liệu đi qua trong một đơn vị thời gian; và <strong>hệ gần thời gian thực</strong> (xử lý luồng) nằm giữa hai loại kia. Chương 10 dành trọn cho loại thứ hai, và bắt đầu từ một nơi ít ai ngờ: dòng lệnh Unix<span class="cite"><a href="#ref-2">2</a></span>.</p>
+      <p class="easy-only">Có ba kiểu hệ thống. Một: <strong>trả lời ngay</strong> — bạn bấm, nó đáp, càng nhanh càng tốt. Hai: <strong>làm cả mẻ</strong> — gom một đống dữ liệu thật lớn rồi chạy một lèo, có khi mất mấy tiếng; ở đây điều quan trọng không phải "nhanh mấy giây" mà là "xong được bao nhiêu". Ba: kiểu ở giữa, dữ liệu chảy tới đâu làm tới đó. Chương này nói về kiểu thứ hai. Nhớ nhé: hỏi đúng thước đo trước đã — nhanh mấy giây, hay xong bao nhiêu?</p>
+      <p class="en-only" lang="en">Opening Part III of the book, Kleppmann splits systems into three kinds<span class="cite"><a href="#ref-1">1</a></span>: <strong>online services</strong> wait for requests and answer as fast as they can, so the measure is <em>response time</em>; <strong>batch systems</strong> take a large body of data that is already sitting there, run for minutes or hours, and are measured by <strong>throughput</strong> — how much data passes through per unit of time; and <strong>near-real-time systems</strong> (stream processing) sit between the two. Chapter 10 is devoted to the second kind, and it starts somewhere unexpected: the Unix command line<span class="cite"><a href="#ref-2">2</a></span>.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Xử lý theo lô đứng vững nhờ <strong>một kỷ luật rất cũ</strong>: đầu vào bất biến, đầu ra là một tập dữ liệu hoàn toàn mới, không tác dụng phụ<span class="cite"><a href="#ref-1">1</a></span>. Chính kỷ luật ấy — được Kleppmann truy nguyên về triết lý Unix<span class="cite"><a href="#ref-5">5</a></span> rồi phóng đại lên hàng nghìn máy bằng MapReduce<span class="cite"><a href="#ref-8">8</a></span> — cho phép chạy lại một job bao nhiêu lần cũng được, và biến sai sót của con người thành thứ có thể sửa. Khung tư duy này sống lâu hơn chính công cụ đã sinh ra nó.</p>
+          <p class="easy-only">Bí quyết của "làm cả mẻ" là: <strong>không sửa dữ liệu gốc</strong>. Đọc vào, tính toán, rồi ghi kết quả ra chỗ mới. Làm sai thì xóa kết quả, chạy lại, dữ liệu gốc vẫn còn nguyên. Nhớ nhé: giữ nguyên bản gốc thì bao giờ cũng làm lại được.</p>
+          <p class="en-only" lang="en">Batch processing rests on <strong>a very old discipline</strong>: inputs are immutable, the output is an entirely new dataset, and there are no side effects<span class="cite"><a href="#ref-1">1</a></span>. That discipline — which Kleppmann traces back to the Unix philosophy<span class="cite"><a href="#ref-5">5</a></span> and then blows up across thousands of machines with MapReduce<span class="cite"><a href="#ref-8">8</a></span> — is what lets you re-run a job as often as you like, and turns human mistakes into something recoverable. The frame outlives the tool that produced it.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Ba loại hệ thống theo Chương 10: dịch vụ trực tuyến đo bằng thời gian phản hồi, hệ theo lô đo bằng thông lượng, hệ gần thời gian thực nằm giữa / Three kinds of system in Chapter 10: online services measured by response time, batch systems measured by throughput, near-real-time systems in between">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">BA LOẠI<br>HỆ THỐNG</span><span class="en-only" lang="en">THREE KINDS<br>OF SYSTEM</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Dịch vụ trực tuyến</span><span class="en-only" lang="en">Online services</span></b>
+        <small class="standard-copy">Chờ yêu cầu, đo bằng thời gian phản hồi</small>
+        <small class="easy-only">Bấm là đáp, càng nhanh càng tốt.</small>
+        <small class="en-only" lang="en">Wait for requests; measured by response time</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Hệ theo lô</span><span class="en-only" lang="en">Batch systems</span></b>
+        <small class="standard-copy">Dữ liệu lớn nằm sẵn, đo bằng thông lượng</small>
+        <small class="easy-only">Làm cả mẻ một lèo, xong bao nhiêu mới quan trọng.</small>
+        <small class="en-only" lang="en">Large data at rest; measured by throughput</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Gần thời gian thực</span><span class="en-only" lang="en">Near-real-time</span></b>
+        <small class="standard-copy">Xử lý luồng, nằm giữa hai loại kia</small>
+        <small class="easy-only">Dữ liệu chảy tới đâu làm tới đó.</small>
+        <small class="en-only" lang="en">Stream processing, between the two</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#unix-philosophy"><span><span class="vi-only">Trục 1</span><span class="en-only" lang="en">Axis 1</span></span><b class="standard-copy">Triết lý Unix và đường ống phân tích log</b><b class="easy-only">Công cụ nhỏ nối vào nhau</b><b class="en-only" lang="en">The Unix philosophy and the log-analysis pipeline</b></a>
+    <a href="#mapreduce"><span><span class="vi-only">Trục 2</span><span class="en-only" lang="en">Axis 2</span></span><b class="standard-copy">MapReduce, HDFS và cách một job chạy</b><b class="easy-only">Unix trải ra nghìn máy</b><b class="en-only" lang="en">MapReduce, HDFS and how a job runs</b></a>
+    <a href="#joins-and-grouping"><span><span class="vi-only">Trục 3</span><span class="en-only" lang="en">Axis 3</span></span><b class="standard-copy">Join phía reduce, phía map và chuyện lệch tải</b><b class="easy-only">Ghép dữ liệu về cùng chỗ</b><b class="en-only" lang="en">Reduce-side joins, map-side joins and skew</b></a>
+    <a href="#beyond-mapreduce"><span><span class="vi-only">Trục 4</span><span class="en-only" lang="en">Axis 4</span></span><b class="standard-copy">Engine dòng dữ liệu, đồ thị và API mức cao</b><b class="easy-only">Thế hệ sau của MapReduce</b><b class="en-only" lang="en">Dataflow engines, graphs and high-level APIs</b></a>
+    <a href="#diagnostic"><span><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></span><b class="standard-copy">Soi quy trình theo lô của chính bạn</b><b class="easy-only">Câu hỏi tự hỏi mình</b><b class="en-only" lang="en">Audit your own batch pipeline</b></a>
+  </nav>
+
+  <section class="section" id="unix-philosophy" aria-labelledby="unix-philosophy-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">Unix philosophy</span></span><span class="en-only" lang="en">Axis 1 · The Unix philosophy</span></div>
+        <h2 id="unix-philosophy-title"><span class="vi-only">Công cụ nhỏ, nối bằng một giao diện duy nhất</span><span class="en-only" lang="en">Small tools, joined by a single interface</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann không mở chương bằng Hadoop mà bằng một đường ống dòng lệnh phân tích log máy chủ web<span class="cite"><a href="#ref-1">1</a></span>. Lựa chọn ấy có chủ ý: theo ông, những công cụ Unix ra đời từ thập niên 1970 đã mang sẵn <strong>toàn bộ logic của xử lý theo lô hiện đại</strong> — đọc đầu vào, biến đổi, ghi đầu ra, không đụng vào dữ liệu gốc. Chỉ có quy mô là khác. Vì thế hiểu vì sao <code>awk</code> nối được với <code>sort</code> là đã hiểu quá nửa vì sao MapReduce nối được job này với job kia.</p>
+      <p class="easy-only">Chương này không bắt đầu bằng công nghệ to đùng, mà bằng <strong>mấy câu lệnh nhỏ trên máy tính</strong>. Mỗi câu lệnh làm đúng một việc: cái này lọc, cái kia sắp xếp, cái nọ đếm. Nối chúng lại là ra kết quả. Ý tưởng đó y hệt ý tưởng của những hệ thống khổng lồ sau này — chỉ khác là chạy trên nghìn máy thay vì một máy. Nhớ nhé: việc lớn thường chỉ là việc nhỏ ghép lại cho khéo.</p>
+      <p class="en-only" lang="en">Kleppmann opens the chapter not with Hadoop but with a command-line pipeline that analyses a web-server log<span class="cite"><a href="#ref-1">1</a></span>. The choice is deliberate: for him the Unix tools of the 1970s already carry <strong>the whole logic of modern batch processing</strong> — read input, transform, write output, never touch the original. Only the scale differs. So understanding why <code>awk</code> composes with <code>sort</code> is already understanding most of why MapReduce composes one job with the next.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">The Unix philosophy, in the authors' own words</div>
+        <p class="definition standard-copy">Cái Kleppmann gọi là "triết lý Unix" được phát biểu thành văn năm 1978, trong lời mở đầu số đặc biệt của <em lang="en">The Bell System Technical Journal</em> do McIlroy, Pinson và Tague viết. Nguyên văn hai châm ngôn đầu: <em lang="en">“Make each program do one thing well. To do a new job, build afresh rather than complicate old programs by adding new ‘features.’”</em> và <em lang="en">“Expect the output of every program to become the input to another, as yet unknown, program.”</em><span class="cite"><a href="#ref-5">5</a></span> Kleppmann lấy đúng bộ châm ngôn này làm khung cho cả chương<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <p class="definition easy-only">Năm 1978, những người làm ra Unix viết xuống nguyên tắc của họ: <strong>mỗi chương trình chỉ làm một việc, và làm thật tốt</strong>; và <strong>kết quả của chương trình này phải dùng được làm đầu vào cho chương trình khác</strong> — kể cả chương trình chưa ai viết. Nhớ nhé: làm ít việc nhưng làm giỏi, rồi ghép lại với nhau.</p>
+        <p class="definition en-only" lang="en">What Kleppmann calls "the Unix philosophy" was written down in 1978, in the foreword to a special issue of <em>The Bell System Technical Journal</em> by McIlroy, Pinson and Tague. The first two maxims, verbatim: <em>“Make each program do one thing well. To do a new job, build afresh rather than complicate old programs by adding new ‘features.’”</em> and <em>“Expect the output of every program to become the input to another, as yet unknown, program.”</em><span class="cite"><a href="#ref-5">5</a></span> Kleppmann takes exactly this set of maxims as the frame for the whole chapter<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <p class="deep-only">Đáng chú ý là bản gốc 1978 không hề dùng chữ "triết lý" — các tác giả chỉ nói đó là <em lang="en">“a number of maxims [that] have gained currency among the builders and users of the UNIX system”</em><span class="cite"><a href="#ref-5">5</a></span>, tức những câu cửa miệng đã thành nếp, chứ không phải một tuyên ngôn được ban hành. Chi tiết này quan trọng khi đọc Chương 10: Kleppmann không viện dẫn một thẩm quyền, ông chỉ ra một <em>tập quán kỹ thuật</em> đã chứng minh được giá trị qua bốn thập kỷ và rồi được lặp lại gần như nguyên vẹn ở tầng hệ phân tán. Danh mục tham chiếu công khai của chính ông cho Chương 10 dẫn thẳng về bài BSTJ này<span class="cite"><a href="#ref-4">4</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba trụ cột của triết lý Unix theo cách đọc của Chương 10">
+        <div class="equation-row">
+          <b>Một việc, làm tốt</b>
+          <span>Cần việc mới thì viết công cụ mới, đừng nhồi thêm "tính năng" vào công cụ cũ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Giao diện thống nhất</b>
+          <span>Mọi chương trình đọc/ghi cùng một thứ: luồng byte, thường là văn bản phân tách theo dòng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Tách logic khỏi nối dây</b>
+          <span>Chương trình không biết nó đọc từ đâu, ghi đi đâu; <code>stdin</code>/<code>stdout</code> để người dùng quyết định.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về triết lý Unix">
+        <div class="equation-row">
+          <b>Làm một việc thôi</b>
+          <span>Mỗi công cụ một nhiệm vụ, gọn và giỏi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Nói chung một ngôn ngữ</b>
+          <span>Ai cũng đọc và viết cùng một kiểu dữ liệu nên ghép được với nhau.</span>
+        </div>
+        <div class="equation-row">
+          <b>Ai nối là việc của bạn</b>
+          <span>Công cụ không tự chọn bạn của nó; bạn mới là người nối chúng lại.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three pillars of the Unix philosophy as Chapter 10 reads it">
+        <div class="equation-row">
+          <b>Do one thing well</b>
+          <span>For a new job, build afresh rather than bolt "features" onto an old program.</span>
+        </div>
+        <div class="equation-row">
+          <b>A uniform interface</b>
+          <span>Every program reads and writes the same thing: a byte stream, usually line-separated text.</span>
+        </div>
+        <div class="equation-row">
+          <b>Logic separate from wiring</b>
+          <span>A program doesn't know where it reads from or writes to; <code>stdin</code>/<code>stdout</code> leave that to the user.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The log-analysis pipeline</div>
+          <h3><span class="vi-only">Năm câu lệnh thay cho một chương trình</span><span class="en-only" lang="en">Five commands instead of a program</span></h3>
+          <p class="standard-copy">Ví dụ mở màn của Kleppmann là tìm năm địa chỉ URL được yêu cầu nhiều nhất trong log của một máy chủ web, bằng một đường ống nối <code>awk</code> (lấy ra trường URL), <code>sort</code> (gom các dòng giống nhau lại cạnh nhau), <code>uniq -c</code> (đếm), rồi <code>sort -rn</code> và <code>head</code><span class="cite"><a href="#ref-1">1</a></span>. Ông đối chiếu nó với một chương trình tương đương viết bằng ngôn ngữ kịch bản, dùng bảng băm đếm trong bộ nhớ — cùng ra một kết quả, nhưng khác nhau ở chỗ chịu tải.</p>
+          <p class="easy-only">Muốn biết trang nào được xem nhiều nhất, bạn không cần viết phần mềm. Chỉ cần nối vài câu lệnh có sẵn: một cái <strong>cắt ra tên trang</strong>, một cái <strong>xếp các tên giống nhau nằm cạnh nhau</strong>, một cái <strong>đếm</strong>, rồi lấy năm cái nhiều nhất. Nhớ nhé: nhiều việc lớn chỉ là mấy việc nhỏ ghép lại.</p>
+          <p class="en-only" lang="en">Kleppmann's opening example finds the five most-requested URLs in a web-server log with a pipeline of <code>awk</code> (extract the URL field), <code>sort</code> (bring identical lines together), <code>uniq -c</code> (count), then <code>sort -rn</code> and <code>head</code><span class="cite"><a href="#ref-1">1</a></span>. He contrasts it with an equivalent script that counts in an in-memory hash table — same answer, different behaviour under load.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mỗi lần bạn nối lệnh bằng dấu <code>|</code> để lọc rồi đếm một tệp log, bạn đang chạy một job theo lô thu nhỏ — có đúng cấu trúc map/shuffle/reduce.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Bất cứ khi nào bạn nối lệnh này sang lệnh kia để lọc và đếm, bạn đang làm y hệt cách hệ lớn làm.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every time you chain commands with <code>|</code> to filter and count a log file, you are running a miniature batch job — with exactly a map/shuffle/reduce shape.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao <code>sort</code> mới là mấu chốt</h4>
+              <p>Kleppmann nhấn rằng khác biệt thật giữa hai cách nằm ở giới hạn bộ nhớ: bảng băm trong bộ nhớ vỡ khi tập khóa lớn hơn RAM, còn <code>sort</code> của GNU coreutils thì không — trang man chính thức của nó ghi rõ có tệp tạm trên đĩa (tùy chọn <code>-T</code>), giới hạn bộ đệm bằng <code>-S</code>, và chạy song song nhiều luồng qua <code>--parallel</code><span class="cite"><a href="#ref-6">6</a></span>. Nghĩa là công cụ đã tự làm sẵn phần "tràn ra đĩa và trộn nhiều lượt" — đúng thứ mà tầng shuffle của MapReduce phải làm ở quy mô cụm.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khi một máy thắng cả cụm</h4>
+              <p>Danh mục tham chiếu của Kleppmann cho chương này dẫn bài viết của Adam Drake, trong đó một đường ống dòng lệnh xử lý xong bộ dữ liệu cờ vua nhanh hơn khoảng 235 lần so với một job Hadoop trên cùng bài toán<span class="cite"><a href="#ref-7">7</a></span><span class="cite"><a href="#ref-4">4</a></span>. Bài học không phải "cụm là vô dụng", mà là chi phí điều phối của một hệ phân tán chỉ đáng trả khi dữ liệu thật sự vượt khỏi một máy.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">A uniform interface: the byte stream</div>
+          <h3><span class="vi-only">Ghép được vì ai cũng nói một thứ tiếng</span><span class="en-only" lang="en">They compose because they speak one language</span></h3>
+          <p class="standard-copy">Điều khiến các công cụ Unix ghép được với nhau, theo Kleppmann, là một <strong>giao diện thống nhất</strong>: mọi chương trình đều đọc và ghi cùng một thứ — một luồng byte, theo quy ước là văn bản ASCII phân tách bằng ký tự xuống dòng<span class="cite"><a href="#ref-1">1</a></span>. Giao diện ấy nghèo nàn và lắm chỗ vụng (tách trường bằng khoảng trắng hay tab là nguồn lỗi kinh niên), nhưng chính sự nghèo nàn ấy khiến bất kỳ công cụ nào cũng cắm được vào bất kỳ công cụ nào.</p>
+          <p class="easy-only">Vì sao mấy câu lệnh khác nhau lại nối được vào nhau? Vì chúng <strong>nói chung một thứ tiếng</strong>: cái nào cũng nhận chữ và trả ra chữ, mỗi việc một dòng. Giống như mọi đồ chơi xếp hình dùng chung một kiểu khớp nối. Nhớ nhé: chung một kiểu khớp thì ghép kiểu gì cũng được.</p>
+          <p class="en-only" lang="en">What makes Unix tools compose, for Kleppmann, is a <strong>uniform interface</strong>: every program reads and writes the same thing — a byte stream, by convention ASCII text separated by newlines<span class="cite"><a href="#ref-1">1</a></span>. The interface is poor and often clumsy (splitting fields on whitespace or tabs is a perennial source of bugs), but that poverty is exactly what lets any tool plug into any other.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mỗi định dạng trao đổi chung trong hệ của bạn — CSV, JSON theo dòng, Avro trong một thư mục HDFS — đều là một bản sao của ý tưởng này ở tầng khác.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Mọi "định dạng chung" mà cả nhóm thống nhất dùng đều là cùng một ý tưởng.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every shared interchange format in your system — CSV, newline-delimited JSON, Avro in an HDFS directory — is the same idea at another layer.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Separation of logic and wiring</div>
+          <h3><span class="vi-only">Chương trình không tự chọn bạn của nó</span><span class="en-only" lang="en">A program doesn't choose its neighbours</span></h3>
+          <p class="standard-copy">Công cụ Unix mặc định đọc từ <code>stdin</code> và ghi ra <code>stdout</code>; nó không biết — và không cần biết — dữ liệu tới từ tệp, từ ống dẫn hay từ bàn phím<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann gọi đó là <strong>tách logic khỏi việc nối dây</strong>: việc nối dây thuộc về người dùng, nên cùng một công cụ dùng lại được trong vô số ngữ cảnh mà tác giả nó chưa từng nghĩ tới. Ông cũng chỉ ra giới hạn: mô hình này chỉ có một luồng vào và một luồng ra, nên những chương trình có nhiều đầu vào hoặc nhiều đầu ra thì rất khó ghép theo kiểu ống dẫn.</p>
+          <p class="easy-only">Mỗi công cụ chỉ biết "có chữ đi vào" và "có chữ đi ra" — nó không quan tâm chữ đó từ đâu tới hay sẽ đi đâu. <strong>Người dùng mới là người quyết định nối cái nào với cái nào.</strong> Nhờ vậy một công cụ dùng được cho trăm việc khác nhau. Nhớ nhé: đừng dính chặt vào một chỗ thì mới dùng lại được nhiều nơi.</p>
+          <p class="en-only" lang="en">A Unix tool reads from <code>stdin</code> and writes to <code>stdout</code> by default; it does not know — and need not know — whether the data comes from a file, a pipe or a keyboard<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann calls this <strong>separating the logic from the wiring</strong>: wiring belongs to the user, so one tool is reusable in countless contexts its author never imagined. He also names the limit: the model has one input and one output, so programs with several inputs or outputs are hard to compose as pipes.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Một job đọc đường dẫn đầu vào/đầu ra từ tham số thay vì ghi cứng trong mã là đang dùng đúng nguyên tắc này — và vì thế mới kiểm thử được.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Chương trình nào cho bạn tự chọn tệp vào và tệp ra thì dễ dùng lại hơn hẳn.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>A job that takes its input and output paths as arguments instead of hard-coding them is applying this principle — and that is what makes it testable.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Transparency and experimentation</div>
+          <h3><span class="vi-only">Đầu vào bất biến nên thử thoải mái</span><span class="en-only" lang="en">Immutable inputs make experiments free</span></h3>
+          <p class="standard-copy">Kleppmann nêu một phẩm chất ít được nói tới của công cụ Unix: chúng <strong>minh bạch và khuyến khích thử nghiệm</strong><span class="cite"><a href="#ref-1">1</a></span>. Tệp đầu vào thường được coi là bất biến, nên chạy lệnh bao nhiêu lần cũng vô hại; bạn có thể chặn đường ống ở bất kỳ khâu nào để xem kết quả trung gian, đưa nó vào <code>less</code>, hay ghi ra tệp rồi tiếp tục từ đó. Chính ba tính chất ấy — bất biến, quan sát được, nối lại được — là cái sẽ được nâng lên quy mô cụm ở nửa sau chương.</p>
+          <p class="easy-only">Chạy một câu lệnh <strong>không làm hỏng tệp gốc</strong>, nên bạn cứ thử thoải mái. Muốn xem giữa chừng ra cái gì thì dừng lại nhìn, rồi chạy tiếp. Nhớ nhé: khi bản gốc luôn còn nguyên, sai cũng không sao — cứ thử lại.</p>
+          <p class="en-only" lang="en">Kleppmann names a rarely-praised quality of Unix tools: they are <strong>transparent and invite experimentation</strong><span class="cite"><a href="#ref-1">1</a></span>. Input files are normally treated as immutable, so running a command again is harmless; you can stop the pipeline at any stage to inspect intermediate results, pipe them into <code>less</code>, or write them to a file and resume from there. Those three properties — immutable, observable, resumable — are exactly what the second half of the chapter scales up to a cluster.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Quy trình nào cho phép bạn xóa kết quả và chạy lại từ dữ liệu gốc mà không sợ hỏng gì, quy trình đó đã thừa hưởng phẩm chất này.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Việc nào làm lại được từ đầu mà không mất gì thì việc đó an toàn.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Any pipeline where you can delete the output and re-run from the original data without fear has inherited this property.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Tại sao điều này là nền của cả chương</h4>
+              <p>Bất biến không chỉ là tiện lợi khi gỡ lỗi. Nó là điều kiện để một job có thể được <em>chạy lại</em> — mà chạy lại được thì mới có chuyện tự động thử lại khi máy hỏng, và mới có chuyện sửa sai của con người bằng cách chạy lại với mã đã vá. Toàn bộ mô hình chịu lỗi của MapReduce dựa trên giả định này.</p>
+            </div>
+            <div class="info-block">
+              <h4>Giới hạn của mô hình một máy</h4>
+              <p>Kleppmann cũng nói thẳng vì sao câu chuyện không dừng ở đây: đường ống Unix chỉ chạy trên <strong>một máy</strong>. Khi dữ liệu vượt quá một đĩa hoặc thời gian chạy vượt quá một đêm, ta cần cùng những nguyên tắc ấy nhưng trải ra nhiều máy — và đó chính là điều MapReduce làm.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ một máy lên hàng nghìn máy</strong>
+      <strong class="en-only" lang="en">From one machine to thousands</strong>
+      <span class="standard-copy">Nếu giữ nguyên ba nguyên tắc — một việc làm tốt, giao diện thống nhất, đầu vào bất biến — mà thay "tệp trên một đĩa" bằng "tệp trải trên hàng nghìn đĩa", ta được MapReduce. Kleppmann mô tả nó gần như đúng nghĩa đen là "Unix của hệ phân tán": HDFS đóng vai hệ tệp, còn job đóng vai công cụ.</span>
+      <span class="easy-only">Giữ nguyên cách làm, chỉ đổi chỗ chứa dữ liệu từ một cái đĩa thành hàng nghìn cái đĩa — thế là ra công nghệ tiếp theo. Phần sau nói về nó.</span>
+      <span class="en-only" lang="en">Keep the three principles — do one thing well, a uniform interface, immutable inputs — but replace "a file on one disk" with "a file spread over thousands of disks," and you get MapReduce. Kleppmann describes it almost literally as "Unix for distributed systems": HDFS plays the filesystem, jobs play the tools.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="mapreduce" aria-labelledby="mapreduce-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · <span lang="en">MapReduce &amp; HDFS</span></span><span class="en-only" lang="en">Axis 2 · MapReduce &amp; HDFS</span></div>
+        <h2 id="mapreduce-title"><span class="vi-only">Unix trải trên hàng nghìn máy</span><span class="en-only" lang="en">Unix, spread across thousands of machines</span></h2>
+      </div>
+      <p class="standard-copy">MapReduce là một khung lập trình do Google công bố năm 2004: người dùng chỉ viết hai hàm — <em lang="en">map</em> và <em lang="en">reduce</em> — còn khung lo phần phân tán, cân bằng tải và chịu lỗi<span class="cite"><a href="#ref-8">8</a></span>. Kleppmann đọc nó như một bản dịch của đường ống Unix sang tầng cụm máy<span class="cite"><a href="#ref-1">1</a></span>: chỗ của tệp là <strong>hệ tệp phân tán</strong>, chỗ của công cụ là <strong>job</strong>, chỗ của dấu <code>|</code> là một thư mục đầu ra dùng làm thư mục đầu vào cho job kế tiếp.</p>
+      <p class="easy-only">Ở đây có một cách chia việc rất đơn giản. Bạn chỉ cần nói hai điều: <strong>với mỗi dòng dữ liệu thì rút ra cái gì</strong>, và <strong>gom những cái giống nhau lại thì tính ra sao</strong>. Phần còn lại — chia việc cho nghìn máy, máy nào hỏng thì làm lại — có hệ thống lo. Nhớ nhé: bạn lo phần "tính cái gì", máy lo phần "chia việc thế nào".</p>
+      <p class="en-only" lang="en">MapReduce is a programming framework Google published in 2004: the user writes just two functions — <em>map</em> and <em>reduce</em> — and the framework handles distribution, load balancing and fault tolerance<span class="cite"><a href="#ref-8">8</a></span>. Kleppmann reads it as a translation of the Unix pipeline into the cluster<span class="cite"><a href="#ref-1">1</a></span>: files become a <strong>distributed filesystem</strong>, tools become <strong>jobs</strong>, and the <code>|</code> becomes one job's output directory serving as the next job's input directory.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">A MapReduce job, in one breath</div>
+        <p class="definition standard-copy">Một job đọc các tệp đầu vào, tách thành bản ghi, chạy <em lang="en">mapper</em> trên từng bản ghi để sinh ra các cặp khóa–giá trị, <strong>sắp xếp mọi cặp theo khóa</strong>, rồi giao mỗi nhóm khóa giống nhau cho một <em lang="en">reducer</em><span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-8">8</a></span>. Kleppmann chỉ ra rằng bước sắp xếp chính là chỗ <code>sort</code> trong đường ống Unix xuất hiện trở lại — chỉ có điều lần này việc sắp xếp bị cắt thành từng mảnh và trải ra khắp cụm.</p>
+        <p class="definition easy-only">Một "mẻ việc" chạy như sau: đọc từng dòng, <strong>gắn cho mỗi dòng một cái nhãn</strong>, rồi <strong>xếp tất cả dòng cùng nhãn về một chỗ</strong> để tính gộp. Nhớ nhé: gắn nhãn — gom lại — tính.</p>
+        <p class="definition en-only" lang="en">A job reads its input files, breaks them into records, runs a <em>mapper</em> over each record to emit key–value pairs, <strong>sorts every pair by key</strong>, then hands each group of identical keys to a <em>reducer</em><span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-8">8</a></span>. Kleppmann points out that the sorting step is where the Unix pipeline's <code>sort</code> reappears — except this time the sort is cut into pieces and spread over the cluster.</p>
+        <p class="deep-only">Bài báo gốc cho thấy quy mô thật của ý tưởng này ngay từ 2004: hệ thống lập chỉ mục tìm kiếm của Google lấy đầu vào là hơn 20 terabyte tài liệu thô và chạy như một chuỗi năm đến mười thao tác MapReduce; một pha của quá trình rút từ khoảng 3.800 dòng C++ xuống còn khoảng 700 dòng khi viết lại bằng MapReduce, và vào thời điểm ấy hơn một nghìn job MapReduce được chạy mỗi ngày trên các cụm của Google<span class="cite"><a href="#ref-8">8</a></span>. Đó là những con số của năm 2004, không phải của hôm nay — nhưng chúng giải thích vì sao mô hình này định hình cả một thập kỷ hạ tầng dữ liệu.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Bốn bước của một job MapReduce">
+        <div class="equation-row">
+          <b>Đọc &amp; tách</b>
+          <span>Khung chia tệp đầu vào thành các mảnh, mỗi mảnh thành các bản ghi độc lập.</span>
+        </div>
+        <div class="equation-row">
+          <b>Map</b>
+          <span>Với mỗi bản ghi, sinh ra không, một hoặc nhiều cặp khóa–giá trị. Không giữ trạng thái giữa các bản ghi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Shuffle &amp; sort</b>
+          <span>Băm khóa để chọn phân vùng, sắp xếp theo khóa, chuyển mọi giá trị cùng khóa về cùng một reducer.</span>
+        </div>
+        <div class="equation-row">
+          <b>Reduce</b>
+          <span>Duyệt qua từng khóa cùng danh sách giá trị của nó, ghi kết quả ra một thư mục đầu ra mới.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Bốn bước cần nhớ">
+        <div class="equation-row">
+          <b>Đọc</b>
+          <span>Chia đống dữ liệu lớn thành nhiều phần nhỏ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Gắn nhãn</b>
+          <span>Mỗi dòng được gắn một cái nhãn để biết nó thuộc nhóm nào.</span>
+        </div>
+        <div class="equation-row">
+          <b>Gom lại</b>
+          <span>Mọi dòng cùng nhãn được xếp về cùng một chỗ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Tính</b>
+          <span>Với mỗi nhóm, tính ra một kết quả rồi ghi sang chỗ mới.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="The four steps of a MapReduce job">
+        <div class="equation-row">
+          <b>Read &amp; split</b>
+          <span>The framework splits input files into chunks, and each chunk into independent records.</span>
+        </div>
+        <div class="equation-row">
+          <b>Map</b>
+          <span>For each record, emit zero, one or many key–value pairs. No state carried between records.</span>
+        </div>
+        <div class="equation-row">
+          <b>Shuffle &amp; sort</b>
+          <span>Hash the key to pick a partition, sort by key, route all values for a key to one reducer.</span>
+        </div>
+        <div class="equation-row">
+          <b>Reduce</b>
+          <span>Iterate over each key with its list of values, write results into a fresh output directory.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The distributed filesystem underneath</div>
+          <h3><span class="vi-only">HDFS: một đĩa khổng lồ ghép từ nghìn đĩa thường</span><span class="en-only" lang="en">HDFS: one huge disk made of ordinary ones</span></h3>
+          <p class="standard-copy">MapReduce không đứng một mình: nó cần một hệ tệp phân tán bên dưới, mà trong thế giới Hadoop là HDFS — bản hiện thực mã nguồn mở theo kiến trúc <em lang="en">Google File System</em><span class="cite"><a href="#ref-9">9</a></span><span class="cite"><a href="#ref-1">1</a></span>. Tài liệu chính thức mô tả nó là hệ <em lang="en">shared-nothing</em>: mỗi tệp được cắt thành các khối, khối được nhân bản sang nhiều máy với hệ số nhân bản đặt riêng cho từng tệp, và một tiến trình <em lang="en">NameNode</em> giữ toàn bộ siêu dữ liệu về việc khối nào nằm ở đâu<span class="cite"><a href="#ref-10">10</a></span>.</p>
+          <p class="easy-only">Muốn chứa lượng dữ liệu quá lớn cho một máy, người ta <strong>cắt tệp thành từng khúc</strong> rồi rải ra nhiều máy, mỗi khúc chép thành vài bản để lỡ một máy hỏng vẫn còn bản khác. Có một "người quản lý" ghi nhớ khúc nào đang nằm ở máy nào. Nhớ nhé: chia nhỏ, chép thành nhiều bản, và có sổ ghi chỗ để.</p>
+          <p class="en-only" lang="en">MapReduce does not stand alone: it needs a distributed filesystem beneath it, which in the Hadoop world is HDFS — an open-source implementation of the <em>Google File System</em> architecture<span class="cite"><a href="#ref-9">9</a></span><span class="cite"><a href="#ref-1">1</a></span>. The official documentation describes it as <em>shared-nothing</em>: each file is cut into blocks, blocks are replicated across machines with a per-file replication factor, and a <em>NameNode</em> process holds all the metadata about which block lives where<span class="cite"><a href="#ref-10">10</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Bất kỳ kho đối tượng nào bạn đang dùng làm nơi đổ dữ liệu thô đều đóng đúng vai trò này: một không gian tên chung, ghi một lần, đọc nhiều lần.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Mọi "kho chứa chung" mà cả hệ cùng đọc đều làm việc y như vậy.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Any object store you use as a raw-data landing zone plays exactly this role: one shared namespace, write once, read many.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Đưa việc tới chỗ dữ liệu</h4>
+              <p>Tài liệu HDFS nêu thẳng một nguyên tắc thiết kế mà Kleppmann cũng nhấn mạnh: <em lang="en">“Moving Computation is Cheaper than Moving Data”</em><span class="cite"><a href="#ref-10">10</a></span>. Khi tập dữ liệu lớn, chuyển mã nguồn vài trăm kilobyte tới máy đang giữ khối dữ liệu rẻ hơn nhiều so với kéo hàng gigabyte qua mạng. Bộ lập lịch MapReduce vì thế ưu tiên đặt tác vụ map lên đúng máy có bản sao của khối cần đọc<span class="cite"><a href="#ref-8">8</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao là <span lang="en">shared-nothing</span></h4>
+              <p>Kleppmann đối lập kiến trúc này với các hệ dùng thiết bị lưu trữ chuyên dụng dùng chung: HDFS chỉ cần máy chủ thường với đĩa thường và mạng thường, nên mở rộng bằng cách mua thêm máy chứ không phải thay bằng máy to hơn. Cái giá phải trả là phần mềm phải tự lo nhân bản, phát hiện máy chết và cân bằng lại dữ liệu — đúng những việc mà tài liệu HDFS liệt kê trong phần độ bền vững<span class="cite"><a href="#ref-10">10</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Mapper, reducer, and the callback contract</div>
+          <h3><span class="vi-only">Hai hàm nhỏ, phần còn lại là của khung</span><span class="en-only" lang="en">Two small functions; the rest belongs to the framework</span></h3>
+          <p class="standard-copy">Hợp đồng rất hẹp: <em lang="en">mapper</em> được gọi một lần cho mỗi bản ghi đầu vào và không giữ trạng thái giữa các lần gọi; <em lang="en">reducer</em> được gọi một lần cho mỗi khóa, kèm theo một bộ lặp đi qua toàn bộ giá trị của khóa đó<span class="cite"><a href="#ref-1">1</a></span>. Tài liệu Hadoop mô tả đúng khung ấy: người dùng cài đặt hai giao diện, còn khung lo việc lập lịch, giám sát và chạy lại các tác vụ hỏng<span class="cite"><a href="#ref-11">11</a></span>. Sự hẹp ấy không phải thiếu sót — nó chính là thứ cho phép khung tự do chia nhỏ và chạy lại công việc.</p>
+          <p class="easy-only">Bạn chỉ viết hai việc nhỏ: <strong>"với mỗi dòng, ghi ra nhãn và số"</strong>, và <strong>"với mỗi nhãn, cộng các số lại"</strong>. Bạn không được nhớ gì giữa các dòng — nghe có vẻ bất tiện, nhưng chính vì thế mà máy có thể chia việc ra cho nghìn máy khác nhau. Nhớ nhé: chịu ràng buộc một chút thì được chia việc thoải mái.</p>
+          <p class="en-only" lang="en">The contract is deliberately narrow: the <em>mapper</em> is called once per input record and keeps no state between calls; the <em>reducer</em> is called once per key, with an iterator over all values for that key<span class="cite"><a href="#ref-1">1</a></span>. Hadoop's documentation describes exactly this shape: the user implements two interfaces, and the framework handles scheduling, monitoring and re-executing failed tasks<span class="cite"><a href="#ref-11">11</a></span>. The narrowness is not a shortcoming — it is precisely what lets the framework split and retry the work freely.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mọi API "cho tôi một hàm thuần túy, tôi lo phần chạy" — từ <code lang="en">map</code>/<code lang="en">reduce</code> trong ngôn ngữ tới hàm serverless — đều đang mua sự tự do điều phối bằng một hợp đồng hẹp.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Bất cứ chỗ nào bạn chỉ cần đưa một "công thức nhỏ" còn hệ thống lo chạy, đó là cùng một kiểu thỏa thuận.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every API that says "give me a pure function and I'll run it" — from language-level <code>map</code>/<code>reduce</code> to serverless functions — buys scheduling freedom with a narrow contract.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Chịu lỗi ở mức tác vụ</h4>
+              <p>Vì mapper và reducer là những hàm không tác dụng phụ trên đầu vào bất biến, khung chỉ cần chạy lại tác vụ hỏng trên một máy khác là xong<span class="cite"><a href="#ref-8">8</a></span>. Bài báo gốc kể trường hợp cả tám mươi máy bị mất liên lạc vài phút và hệ thống đơn giản là chạy lại phần việc dở dang<span class="cite"><a href="#ref-8">8</a></span>. Không có trạng thái nào phải khôi phục vì không có trạng thái nào bị sửa.</p>
+            </div>
+            <div class="info-block">
+              <h4>Kẻ chậm chân và tác vụ dự phòng</h4>
+              <p>Một tác vụ chạy chậm bất thường — vì đĩa lỗi, vì máy bị chia sẻ — có thể kéo dài cả job. Bài báo mô tả cơ chế <em lang="en">backup tasks</em>: khi job gần xong, khung khởi chạy bản sao dự phòng cho những tác vụ còn dở, và lấy kết quả của bản nào xong trước<span class="cite"><a href="#ref-8">8</a></span>. Đây là một minh họa đẹp cho việc tính bất biến biến "chạy trùng" từ nguy hiểm thành vô hại.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The shuffle, and chaining jobs into workflows</div>
+          <h3><span class="vi-only">Shuffle: chỗ tốn kém nhất, và cũng là chỗ quyết định</span><span class="en-only" lang="en">The shuffle: the costliest step, and the decisive one</span></h3>
+          <p class="standard-copy">Giữa map và reduce có một bước mà Kleppmann gọi thẳng là "shuffle": mỗi mapper băm khóa để chọn phân vùng, ghi kết quả đã sắp xếp ra đĩa cục bộ, rồi các reducer kéo về những phân vùng thuộc phần của mình và trộn các luồng đã sắp xếp lại<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-11">11</a></span>. Đây là nơi dữ liệu thật sự đi qua mạng, nên cũng là nơi hầu hết chi phí và hầu hết vấn đề hiệu năng nằm ở đó.</p>
+          <p class="easy-only">Giữa hai bước có một khâu ít ai để ý nhưng nặng nhất: <strong>chuyển tất cả những dòng cùng nhãn về cùng một máy</strong>. Dữ liệu phải chạy qua đường truyền giữa các máy, nên khâu này tốn thời gian nhất. Nhớ nhé: chỗ tốn nhất thường là chỗ phải chuyển đồ, không phải chỗ tính toán.</p>
+          <p class="en-only" lang="en">Between map and reduce sits a step Kleppmann simply calls "the shuffle": each mapper hashes the key to pick a partition, writes its sorted output to local disk, and each reducer pulls the partitions belonging to it and merges those sorted streams<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-11">11</a></span>. This is where data actually crosses the network, so it is where most of the cost and most of the performance trouble live.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Bất kỳ phép <code lang="en">GROUP BY</code> hay <code lang="en">JOIN</code> phân tán nào cũng có một bước shuffle núp bên dưới — và đó là chỗ đầu tiên nên nhìn khi job chạy chậm.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Mỗi khi phải "gom nhóm" trên nhiều máy, khâu chuyển dữ liệu này lại xuất hiện.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every distributed <code>GROUP BY</code> or <code>JOIN</code> hides a shuffle underneath — and it is the first place to look when a job runs slowly.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Từ job đơn lẻ tới quy trình</h4>
+              <p>Một job MapReduce hiếm khi đủ. Kleppmann mô tả cách thực tế là nối nhiều job thành <em lang="en">workflow</em>: thư mục đầu ra của job này là thư mục đầu vào của job sau, và một bộ lập lịch chịu trách nhiệm chỉ khởi chạy job sau khi job trước đã hoàn tất. Đây là chỗ tương tự Unix bị hụt: dấu <code>|</code> cho phép hai lệnh chạy đồng thời và truyền dữ liệu ngay, còn MapReduce buộc phải <em>vật chất hóa</em> toàn bộ kết quả trung gian trước khi đi tiếp.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao phải sắp xếp</h4>
+              <p>Sắp xếp không phải trang trí: nó là cách rẻ nhất để đảm bảo mọi giá trị của một khóa nằm liền nhau, nhờ đó reducer chỉ cần quét tuần tự qua một luồng đã trộn thay vì giữ cả tập khóa trong bộ nhớ. Đó cũng chính là lý do <code>sort</code> đứng giữa <code>awk</code> và <code>uniq</code> trong ví dụ dòng lệnh ở phần trước<span class="cite"><a href="#ref-6">6</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Outputs: search indexes and key-value stores</div>
+          <h3><span class="vi-only">Một quy trình theo lô kết thúc bằng cái gì?</span><span class="en-only" lang="en">What does a batch pipeline end with?</span></h3>
+          <p class="standard-copy">Kleppmann nêu hai kiểu đầu ra tiêu biểu<span class="cite"><a href="#ref-1">1</a></span>. Thứ nhất là <strong>chỉ mục tìm kiếm</strong> — đúng công dụng đầu tiên của MapReduce tại Google, nơi chuỗi job dựng lại chỉ mục cho máy tìm kiếm<span class="cite"><a href="#ref-8">8</a></span>. Thứ hai là <strong>kho khóa–giá trị</strong> để phục vụ trực tuyến: job theo lô ghi ra các tệp cơ sở dữ liệu hoàn chỉnh, rồi hệ phục vụ nạp nguyên khối các tệp đó. LinkedIn mô tả đúng kiến trúc này trong bài về Project Voldemort<span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <p class="easy-only">Chạy xong một mẻ thì được cái gì? Thường là <strong>một cuốn "mục lục" để tra cứu cho nhanh</strong>, hoặc <strong>một bảng tra sẵn</strong> để app dùng ngay. Điểm quan trọng: kết quả được ghi ra <strong>chỗ mới hoàn toàn</strong>, xong xuôi rồi mới đem ra dùng. Nhớ nhé: nấu xong cả nồi rồi mới dọn lên bàn.</p>
+          <p class="en-only" lang="en">Kleppmann names two characteristic outputs<span class="cite"><a href="#ref-1">1</a></span>. The first is a <strong>search index</strong> — MapReduce's original use at Google, where a chain of jobs rebuilt the index for the search engine<span class="cite"><a href="#ref-8">8</a></span>. The second is a <strong>key-value store</strong> for online serving: the batch job writes complete database files, and the serving system loads those files wholesale. LinkedIn describes exactly this architecture in its Project Voldemort paper<span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mọi bảng tổng hợp, mô hình gợi ý hay chỉ mục tìm kiếm được "dựng lại hằng đêm" trong hệ của bạn đều là đầu ra của một quy trình theo lô.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Những thứ được "làm mới mỗi đêm" trong hệ của bạn chính là kết quả của một mẻ như thế.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every summary table, recommendation model or search index "rebuilt nightly" in your system is the output of a batch pipeline.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao không ghi thẳng vào cơ sở dữ liệu</h4>
+              <p>Kleppmann cảnh báo rằng để job theo lô ghi trực tiếp từng bản ghi vào cơ sở dữ liệu đang phục vụ là một ý tồi: mỗi bản ghi một lần gọi mạng thì cực chậm, job chạy song song có thể nhấn chìm cơ sở dữ liệu, và tệ nhất là kết quả nửa vời sẽ lộ ra ngoài nếu job hỏng giữa chừng. Ghi ra tệp mới rồi chuyển đổi nguyên khối giữ được tính "tất cả hoặc không gì cả".</p>
+            </div>
+            <div class="info-block">
+              <h4>Bất biến sinh ra khả năng lùi lại</h4>
+              <p>Vì đầu vào không bị sửa và đầu ra nằm ở một chỗ mới, bản cũ vẫn còn nguyên — nên khi mã có lỗi, ta chỉ cần vá rồi chạy lại, hoặc quay về bản đầu ra trước đó. Kleppmann gọi đây là khả năng <em>dung thứ lỗi của con người</em>, và coi nó là một lợi thế thiết kế chứ không phải may mắn. Kiến trúc nạp nguyên khối của Voldemort cũng vì lý do ấy mà giữ lại bản trước để quay lui<span class="cite"><a href="#ref-13">13</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Hadoop versus distributed databases</div>
+          <h3><span class="vi-only">Cùng ý tưởng cũ, khác nhau ở ba chỗ</span><span class="en-only" lang="en">The same old idea, differing in three places</span></h3>
+          <p class="standard-copy">Xử lý song song trên nhiều máy không mới: các cơ sở dữ liệu song song quy mô lớn đã làm điều đó từ lâu, và một bài phê bình nổi tiếng năm 2008 của DeWitt và Stonebraker thậm chí gọi MapReduce là "một bước lùi lớn"<span class="cite"><a href="#ref-14">14</a></span>. Kleppmann đọc lại cuộc tranh luận ấy và rút ra ba khác biệt thật sự<span class="cite"><a href="#ref-1">1</a></span>: <strong>mô hình lưu trữ</strong> (Hadoop cho phép đổ dữ liệu thô vào trước, diễn giải sau, thay vì bắt định nghĩa lược đồ khi ghi), <strong>mô hình xử lý</strong> (chạy mã tùy ý chứ không chỉ SQL), và <strong>giả định về lỗi</strong>.</p>
+          <p class="easy-only">Trước Hadoop, người ta đã có những "cơ sở dữ liệu chạy trên nhiều máy" rồi. Khác nhau ở ba chỗ: Hadoop cho phép <strong>cứ đổ dữ liệu vào trước, sắp xếp ý nghĩa sau</strong>; cho phép <strong>chạy chương trình tùy ý</strong> chứ không chỉ các câu truy vấn; và nó <strong>coi máy hỏng là chuyện thường ngày</strong>. Nhớ nhé: mỗi lựa chọn đều đổi một tiện lợi lấy một tiện lợi khác.</p>
+          <p class="en-only" lang="en">Parallel processing across machines was not new: massively parallel databases had done it for years, and a famous 2008 critique by DeWitt and Stonebraker even called MapReduce "a major step backwards"<span class="cite"><a href="#ref-14">14</a></span>. Kleppmann revisits that argument and draws out three real differences<span class="cite"><a href="#ref-1">1</a></span>: the <strong>storage model</strong> (Hadoop lets you dump raw data first and interpret it later, rather than forcing a schema at write time), the <strong>processing model</strong> (arbitrary code, not only SQL), and the <strong>assumptions about failure</strong>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Cuộc tranh luận "hồ dữ liệu hay kho dữ liệu" trong tổ chức của bạn chính là cuộc tranh luận này, chỉ đổi tên.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Tranh cãi "đổ hết vào rồi tính sau" hay "sắp xếp gọn từ đầu" chính là chuyện này.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>The "data lake or data warehouse" argument in your organisation is this same debate under another name.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Thiết kế cho lỗi xảy ra thường xuyên</h4>
+              <p>Đây là khác biệt mà Kleppmann coi là sâu nhất. MapReduce chấp nhận ghi trạng thái trung gian xuống đĩa và chạy lại ở mức từng tác vụ, vì nó được thiết kế cho môi trường nơi tác vụ bị giết giữa chừng là chuyện bình thường — cụm dùng chung, tác vụ ưu tiên thấp bị thu hồi tài nguyên. Bài báo gốc mô tả đúng giả định ấy: với cụm hàng trăm đến hàng nghìn máy, hỏng hóc là điều thường gặp<span class="cite"><a href="#ref-8">8</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cái giá của sự thận trọng</h4>
+              <p>Chính giả định "hay bị giết" khiến MapReduce ghi nhiều xuống đĩa và dùng bộ nhớ dè dặt. Với job ngắn trên cụm ít tranh chấp, sự thận trọng đó thành lãng phí thuần túy — và đó chính là kẽ hở mà các engine dòng dữ liệu ở phần sau sẽ khai thác<span class="cite"><a href="#ref-15">15</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Có khung rồi, còn phép toán khó nhất thì sao?</strong>
+      <strong class="en-only" lang="en">The frame is in place — but what about the hardest operation?</strong>
+      <span class="standard-copy">Khung map–shuffle–reduce mới chỉ cho ta cách gom nhóm. Nhưng phần lớn công việc thực tế cần <strong>ghép hai tập dữ liệu</strong> với nhau — sự kiện với hồ sơ người dùng, giao dịch với danh mục sản phẩm. Trên một cơ sở dữ liệu đó là một dòng SQL; trên cụm máy, đó là bài toán trung tâm của cả chương.</span>
+      <span class="easy-only">Biết cách gom nhóm rồi, nhưng việc khó nhất vẫn còn: <strong>ghép hai bảng dữ liệu với nhau</strong> — ví dụ ghép "ai đã bấm vào gì" với "người đó là ai". Phần sau nói về chuyện đó.</span>
+      <span class="en-only" lang="en">The map–shuffle–reduce frame only tells us how to group. But most real work needs to <strong>join two datasets</strong> — events with user profiles, transactions with a product catalogue. In a database that is one line of SQL; on a cluster it is the central problem of the chapter.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="joins-and-grouping" aria-labelledby="joins-and-grouping-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Joins &amp; grouping</span></span><span class="en-only" lang="en">Axis 3 · Joins &amp; grouping</span></div>
+        <h2 id="joins-and-grouping-title"><span class="vi-only">Đưa dữ liệu liên quan về cùng một chỗ</span><span class="en-only" lang="en">Bringing related data to the same place</span></h2>
+      </div>
+      <p class="standard-copy">Trong một cơ sở dữ liệu có chỉ mục, join là chuyện tra cứu từng dòng. Trong một job theo lô đọc toàn bộ tập dữ liệu, tra cứu từng dòng qua mạng là thảm họa về thông lượng<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann vì thế đóng khung join theo lô bằng một ý duy nhất: thay vì đi tìm dữ liệu, hãy <strong>sắp xếp để dữ liệu liên quan tự về cùng một chỗ</strong>. Toàn bộ các thuật toán join trong chương chỉ là những cách khác nhau để đạt được điều đó.</p>
+      <p class="easy-only">Muốn ghép "ai bấm vào gì" với "người đó là ai", cách ngây thơ là mỗi lần lại chạy đi hỏi một lần — làm thế với hàng tỉ dòng thì không xong nổi. Cách của xử lý theo lô là: <strong>xếp mọi thứ liên quan tới cùng một người nằm cạnh nhau</strong>, rồi đọc một lượt. Nhớ nhé: sắp xếp trước, rồi đọc một lần cho hết.</p>
+      <p class="en-only" lang="en">In an indexed database, a join is a per-row lookup. In a batch job that scans the whole dataset, per-row lookups over the network are a throughput disaster<span class="cite"><a href="#ref-1">1</a></span>. So Kleppmann frames batch joins around a single idea: instead of going out to find the data, <strong>sort so that related data arrives in the same place by itself</strong>. Every join algorithm in the chapter is a different way of achieving that.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Sort-merge join: the shuffle doing the work</div>
+        <p class="definition standard-copy">Trong <strong>join phía reduce</strong>, hai tập dữ liệu được cho qua mapper riêng, cùng phát ra khóa join; tầng shuffle sắp xếp và dồn mọi bản ghi cùng khóa — bất kể chúng đến từ tập nào — về cùng một reducer, nơi chúng nằm liền nhau và được ghép bằng một lượt quét<span class="cite"><a href="#ref-1">1</a></span>. Ưu điểm lớn nhất: mã ứng dụng không cần biết gì về cách dữ liệu được tổ chức, nên đây là cách join tổng quát nhất.</p>
+        <p class="definition easy-only">Cách ghép phổ biến nhất: cho cả hai bảng cùng <strong>gắn nhãn theo mã người dùng</strong>, rồi để hệ thống xếp mọi dòng cùng mã về một chỗ. Khi chúng đã nằm cạnh nhau thì ghép rất dễ. Nhớ nhé: xếp cạnh nhau rồi ghép, đừng chạy đi tìm từng cái.</p>
+        <p class="definition en-only" lang="en">In a <strong>reduce-side join</strong>, both datasets pass through their own mappers, each emitting the join key; the shuffle sorts and routes every record with the same key — whichever dataset it came from — to the same reducer, where they sit adjacent and are merged in a single scan<span class="cite"><a href="#ref-1">1</a></span>. Its great advantage: the application code need assume nothing about how the data is laid out, which makes it the most general join.</p>
+        <p class="deep-only">Có một chi tiết kỹ thuật mà Kleppmann nêu và rất dễ bỏ qua: reducer cần thấy <em>trước</em> bản ghi hồ sơ người dùng rồi mới tới các sự kiện, để nó giữ hồ sơ trong bộ nhớ và chỉ việc quét qua danh sách sự kiện. Điều đó đạt được bằng <em lang="en">secondary sort</em>: khóa sắp xếp không chỉ là mã người dùng mà là một cặp (mã người dùng, mã loại bản ghi). Cùng một ý tưởng ấy — nhét thêm một thành phần vào khóa sắp xếp để điều khiển thứ tự bên trong nhóm — xuất hiện lại trong hầu hết engine theo lô về sau.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba họ thuật toán join theo lô">
+        <div class="equation-row">
+          <b>Phía reduce</b>
+          <span>Sort-merge join. Tổng quát, không giả định gì về dữ liệu, nhưng phải trả giá bằng một lần shuffle đầy đủ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Phía map</b>
+          <span>Broadcast hash join, partitioned hash join, map-side merge join. Nhanh hơn nhiều, nhưng đòi hỏi dữ liệu đã ở đúng hình dạng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Khi khóa lệch</b>
+          <span>Hot key làm một reducer gánh cả job; phải lấy mẫu, băm nhỏ khóa nóng rồi gộp lại ở job sau.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba cách ghép dữ liệu">
+        <div class="equation-row">
+          <b>Gom về một chỗ rồi ghép</b>
+          <span>Cách chắc ăn nhất, nhưng phải chuyển nhiều dữ liệu qua mạng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Mang bảng nhỏ theo người</b>
+          <span>Nếu một bảng đủ nhỏ, phát cho mọi máy một bản rồi ghép tại chỗ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Coi chừng "ngôi sao"</b>
+          <span>Một vài khóa quá đông sẽ dồn hết việc vào một máy; phải chia nhỏ chúng ra.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three families of batch join algorithm">
+        <div class="equation-row">
+          <b>Reduce-side</b>
+          <span>Sort-merge join. General, assumes nothing about the data, paid for with a full shuffle.</span>
+        </div>
+        <div class="equation-row">
+          <b>Map-side</b>
+          <span>Broadcast hash join, partitioned hash join, map-side merge join. Much faster, but the data must already be in shape.</span>
+        </div>
+        <div class="equation-row">
+          <b>When keys skew</b>
+          <span>A hot key makes one reducer carry the job; sample, split the hot key, then recombine in a later job.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Reduce-side join &amp; the grouping identity</div>
+          <h3><span class="vi-only">Join và gom nhóm là cùng một cỗ máy</span><span class="en-only" lang="en">Joins and grouping are the same machine</span></h3>
+          <p class="standard-copy">Kleppmann chỉ ra rằng <em lang="en">GROUP BY</em> và join dùng chung một cơ chế, chỉ khác ở chỗ chọn khóa<span class="cite"><a href="#ref-1">1</a></span>. Muốn gom nhóm thì cho mapper phát ra khóa nhóm; muốn join thì cho cả hai tập cùng phát ra khóa join. Trong cả hai trường hợp, tầng shuffle làm đúng một việc: đưa mọi bản ghi có cùng khóa tới cùng một reducer. Nhận ra sự đồng nhất đó giúp ta đọc mọi quy trình theo lô bằng một bộ từ vựng duy nhất.</p>
+          <p class="easy-only">"Gom nhóm" và "ghép bảng" tưởng là hai việc khác nhau, nhưng máy làm y hệt nhau: <strong>chọn một cái nhãn, rồi dồn mọi dòng cùng nhãn về một chỗ</strong>. Khác nhau chỉ ở chỗ bạn chọn nhãn là gì. Nhớ nhé: một cỗ máy, hai cách dùng.</p>
+          <p class="en-only" lang="en">Kleppmann points out that <em>GROUP BY</em> and joins share one mechanism and differ only in the choice of key<span class="cite"><a href="#ref-1">1</a></span>. To group, have the mapper emit the grouping key; to join, have both datasets emit the join key. In both cases the shuffle does exactly one thing: send every record with the same key to the same reducer. Seeing that identity lets you read any batch pipeline with a single vocabulary.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Phân tích phiên truy cập, gom sự kiện theo người dùng, tính tổng theo ngày — tất cả đều là cùng một phép "chọn khóa rồi gom".</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Đếm theo ngày, gom theo người dùng, ghép hai bảng — cùng một cách làm.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Sessionization, grouping events by user, summing by day — all of them are the same "pick a key and gather" operation.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Skew: when one key carries the job</div>
+          <h3><span class="vi-only">Khóa nóng và chiếc reducer gánh cả cụm</span><span class="en-only" lang="en">Hot keys and the reducer that carries everything</span></h3>
+          <p class="standard-copy">Mô hình "một khóa, một reducer" sụp đổ khi một khóa có lượng bản ghi lớn bất thường — Kleppmann gọi những thực thể ấy là <em lang="en">linchpin objects</em>, chẳng hạn một người nổi tiếng có hàng triệu người theo dõi<span class="cite"><a href="#ref-1">1</a></span>. Cả job khi ấy phải chờ một reducer duy nhất. Tài liệu Apache Pig mô tả đúng vấn đề và cách chữa: <em lang="en">skewed join</em> lấy mẫu đầu vào để dựng một biểu đồ tần suất của không gian khóa, rồi dựa vào đó phân bổ nhiều reducer cho một khóa quá nặng<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <p class="easy-only">Nếu chia việc theo tên người, mà có một người <strong>đông gấp triệu lần</strong> mọi người khác, thì máy nào nhận người đó sẽ è cổ ra làm còn các máy khác ngồi chơi. Cách chữa: đếm trước xem ai đông bất thường, rồi <strong>chia phần của người đó ra cho nhiều máy</strong>, xong mới cộng lại. Nhớ nhé: chia đều theo số việc, đừng chia đều theo số nhãn.</p>
+          <p class="en-only" lang="en">The "one key, one reducer" model collapses when a key has an unusual mass of records — Kleppmann calls such entities <em>linchpin objects</em>, for instance a celebrity with millions of followers<span class="cite"><a href="#ref-1">1</a></span>. The whole job then waits on a single reducer. Apache Pig's documentation describes the problem and the cure precisely: a <em>skewed join</em> samples the input to build a histogram of the key space and uses it to allocate several reducers to an over-heavy key<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Job nào có 99% tác vụ xong trong mười phút còn một tác vụ chạy ba tiếng thì gần như chắc chắn đang gặp khóa lệch.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi gần hết việc đã xong mà còn một phần lê thê mãi, thường là do một nhãn quá đông.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>A job where 99% of tasks finish in ten minutes and one runs for three hours is almost certainly hitting key skew.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Lấy mẫu trước, chia sau</h4>
+              <p>Điểm chung của mọi cách chữa là phải <em>biết trước</em> khóa nào nóng — mà muốn biết thì phải chạy một lượt lấy mẫu. Pig mô tả cụ thể: đầu vào bên trái được lấy mẫu để dựng biểu đồ, sau đó khóa nặng được tách ra nhiều reducer còn đầu vào bên phải được phát dòng sang các reducer tương ứng<span class="cite"><a href="#ref-12">12</a></span>. Kleppmann ghi nhận rằng các công cụ khác trong hệ sinh thái giải bài toán này theo những cách hơi khác nhau, từ khai báo thủ công tới suy diễn tự động.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cái giá của việc băm nhỏ</h4>
+              <p>Chia một khóa nóng ra nhiều reducer đồng nghĩa với việc phía bên kia của join phải được <strong>nhân bản</strong> sang từng reducer ấy, và kết quả cần một bước gộp ở job sau. Nói cách khác, ta đổi thời gian chờ lấy thêm lưu lượng mạng — một đánh đổi chỉ đáng khi độ lệch thật sự lớn.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Broadcast hash join</div>
+          <h3><span class="vi-only">Khi một bên đủ nhỏ để mang theo</span><span class="en-only" lang="en">When one side is small enough to carry</span></h3>
+          <p class="standard-copy">Nếu một trong hai tập dữ liệu đủ nhỏ để nằm gọn trong bộ nhớ, ta không cần shuffle chút nào: mỗi mapper nạp toàn bộ tập nhỏ vào một bảng băm rồi quét tập lớn, tra cứu tại chỗ<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann gọi đây là <em lang="en">broadcast hash join</em> — "phát sóng" vì tập nhỏ được gửi tới mọi mapper. Pig hiện thực đúng ý tưởng này dưới tên <em lang="en">replicated join</em>, và tài liệu nói rõ toàn bộ công việc khi ấy diễn ra ở phía map<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <p class="easy-only">Nếu một bảng <strong>nhỏ xíu</strong> — ví dụ danh sách 300 tỉnh thành — thì cứ <strong>đưa cho mỗi máy một bản</strong>, khỏi phải chuyển gì qua lại. Mỗi máy tự tra bảng nhỏ trong lúc đọc bảng lớn. Nhớ nhé: bảng nhỏ thì mang theo, đừng bắt cả hệ chạy qua chạy lại.</p>
+          <p class="en-only" lang="en">If one of the two datasets fits in memory, no shuffle is needed at all: each mapper loads the small dataset into a hash table and scans the large one, looking up as it goes<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann calls this a <em>broadcast hash join</em> — "broadcast" because the small side is sent to every mapper. Pig implements exactly this under the name <em>replicated join</em>, and its documentation states plainly that all the work then happens on the map side<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mọi bảng tra cứu nhỏ — danh mục, bảng ánh xạ mã, danh sách cấu hình — đều là ứng viên của kiểu join này, và chuyển sang nó thường là tối ưu rẻ nhất.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Danh mục sản phẩm, bảng mã vùng, danh sách nhỏ nào cũng hợp với cách này.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every small lookup table — a catalogue, a code mapping, a config list — is a candidate, and switching to it is often the cheapest optimisation available.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Ranh giới "đủ nhỏ"</h4>
+              <p>"Đủ nhỏ" là một ngưỡng thật, không phải cách nói. Tài liệu Pig cảnh báo thẳng rằng nếu các quan hệ nhỏ không nằm vừa bộ nhớ chính thì tiến trình sẽ thất bại và báo lỗi<span class="cite"><a href="#ref-12">12</a></span>. Kleppmann cũng nhắc rằng thay vì bảng băm trong bộ nhớ, ta có thể để tập nhỏ dưới dạng một chỉ mục chỉ-đọc trên đĩa cục bộ và dựa vào bộ đệm của hệ điều hành.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Partitioned hash join &amp; map-side merge join</div>
+          <h3><span class="vi-only">Khi dữ liệu đã được sắp sẵn từ trước</span><span class="en-only" lang="en">When the data was laid out in advance</span></h3>
+          <p class="standard-copy">Nếu cả hai tập đã được phân vùng theo cùng một khóa và cùng số phân vùng, mapper thứ <em>n</em> chỉ cần đọc phân vùng thứ <em>n</em> của cả hai bên — bài toán lớn vỡ thành nhiều bài toán nhỏ độc lập, mỗi cái đủ nhỏ để dùng bảng băm<span class="cite"><a href="#ref-1">1</a></span>. Nếu các phân vùng ấy còn được <strong>sắp xếp sẵn theo khóa</strong>, ta thậm chí không cần nạp gì vào bộ nhớ: chỉ việc trộn hai luồng đã sắp xếp. Tài liệu Pig mô tả đúng trường hợp đó và nói rõ lợi ích là bỏ qua được các pha sort và shuffle không cần thiết<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <p class="easy-only">Nếu hai bảng đã được <strong>chia cùng kiểu và xếp cùng thứ tự</strong> từ trước, thì việc ghép trở nên nhẹ tênh: máy số 3 chỉ cần đọc phần số 3 của cả hai bảng, đọc song song một lượt là xong. Nhớ nhé: chịu khó sắp xếp từ trước thì về sau đỡ rất nhiều.</p>
+          <p class="en-only" lang="en">If both datasets are already partitioned by the same key into the same number of partitions, mapper <em>n</em> only needs partition <em>n</em> of each side — the big problem shatters into independent small ones, each small enough for a hash table<span class="cite"><a href="#ref-1">1</a></span>. And if those partitions are also <strong>sorted by key</strong>, nothing need be loaded into memory at all: just merge two sorted streams. Pig's documentation describes exactly this case and states the benefit as skipping unneeded sort and shuffle phases<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Các bảng được "bucket" theo cùng một cột trong kho dữ liệu của bạn tồn tại chính là để mở khóa kiểu join này.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi hai bảng được chia sẵn theo cùng một cột, ghép chúng nhanh hơn hẳn.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Tables bucketed on the same column in your warehouse exist precisely to unlock this join.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Hình dạng đầu ra kế thừa hình dạng đầu vào</h4>
+              <p>Kleppmann nêu một hệ quả thực dụng: khi dùng join phía map, cách phân vùng và sắp xếp của đầu ra bị quy định bởi đầu vào, vì không có tầng reduce nào để tổ chức lại. Điều đó biến cách bố trí dữ liệu thành một quyết định kiến trúc: bạn chọn khóa phân vùng một lần, và mọi job phía sau sống với lựa chọn đó.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ai quyết định dùng thuật toán nào</h4>
+              <p>Trong thực tế, người viết truy vấn hiếm khi chọn tay. Bài báo về Pig mô tả hệ thống này như một tầng dòng dữ liệu mức cao dựng trên MapReduce, nơi các phép toán quan hệ được biên dịch xuống thành job<span class="cite"><a href="#ref-21">21</a></span>; còn Hive được giới thiệu như một kho dữ liệu quy mô petabyte với trình biên dịch riêng<span class="cite"><a href="#ref-22">22</a></span>. Kleppmann ghi nhận rằng khi đã có lược đồ và thống kê, trình tối ưu có thể tự chọn thuật toán join — đó là lúc xử lý theo lô bắt đầu giống cơ sở dữ liệu trở lại.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Nếu đã sắp xếp giỏi thế, vì sao vẫn chậm?</strong>
+      <strong class="en-only" lang="en">If sorting is so clever, why is it still slow?</strong>
+      <span class="standard-copy">Mọi thuật toán ở trên đều nằm trong một khuôn bắt buộc: mỗi job phải ghi trọn kết quả xuống hệ tệp phân tán rồi job sau mới bắt đầu. Với một quy trình mười job, đó là mười lần vật chất hóa và mười lần nhân bản dữ liệu trung gian. Thế hệ engine tiếp theo ra đời để phá đúng cái khuôn đó<span class="cite"><a href="#ref-15">15</a></span>.</span>
+      <span class="easy-only">Có một chỗ lãng phí lớn: mỗi bước đều phải <strong>ghi hết ra đĩa</strong> rồi bước sau mới được chạy. Mười bước là mười lần ghi. Phần sau nói về cách làm gọn hơn.</span>
+      <span class="en-only" lang="en">All of the algorithms above live inside one rigid frame: each job must write its full output to the distributed filesystem before the next job may start. For a ten-job pipeline that is ten materialisations and ten replications of intermediate data. The next generation of engines exists to break exactly that frame<span class="cite"><a href="#ref-15">15</a></span>.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="beyond-mapreduce" aria-labelledby="beyond-mapreduce-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · <span lang="en">Beyond MapReduce</span></span><span class="en-only" lang="en">Axis 4 · Beyond MapReduce</span></div>
+        <h2 id="beyond-mapreduce-title"><span class="vi-only">Vượt khỏi MapReduce: engine dòng dữ liệu</span><span class="en-only" lang="en">Beyond MapReduce: dataflow engines</span></h2>
+      </div>
+      <p class="standard-copy">Phần cuối chương là một sự tự phê bình có kiểm soát. Kleppmann giữ nguyên các nguyên tắc — đầu vào bất biến, đầu ra mới, chạy lại được — nhưng chỉ ra rằng <strong>cách hiện thực của MapReduce không phải cách duy nhất</strong><span class="cite"><a href="#ref-1">1</a></span>. Một lớp engine mới, mà ông gọi là <em lang="en">dataflow engines</em>, coi cả quy trình là <strong>một job duy nhất gồm nhiều toán tử</strong> thay vì một chuỗi job độc lập: Spark<span class="cite"><a href="#ref-15">15</a></span>, Tez<span class="cite"><a href="#ref-16">16</a></span> và Flink<span class="cite"><a href="#ref-17">17</a></span> là ba đại diện ông nêu tên.</p>
+      <p class="easy-only">Phần cuối chương thừa nhận: cách làm cũ có chỗ dở. Thay vì <strong>chia quy trình thành nhiều mẻ tách rời</strong>, mỗi mẻ phải ghi hết ra đĩa rồi mới tới mẻ sau, thế hệ sau coi <strong>cả quy trình là một việc liền mạch</strong>. Kết quả giữa chừng không cần đổ ra đĩa nữa, nên nhanh hơn nhiều. Nhớ nhé: bớt được bước dọn dẹp giữa chừng là bớt được rất nhiều thời gian.</p>
+      <p class="en-only" lang="en">The last part of the chapter is a controlled self-critique. Kleppmann keeps the principles — immutable inputs, fresh outputs, re-runnability — but shows that <strong>MapReduce's implementation is not the only one possible</strong><span class="cite"><a href="#ref-1">1</a></span>. A newer class of engines, which he calls <em>dataflow engines</em>, treats the whole pipeline as <strong>one job made of several operators</strong> rather than a chain of independent jobs: Spark<span class="cite"><a href="#ref-15">15</a></span>, Tez<span class="cite"><a href="#ref-16">16</a></span> and Flink<span class="cite"><a href="#ref-17">17</a></span> are the three he names.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Materialisation of intermediate state — the cost nobody counted</div>
+        <p class="definition standard-copy">Kleppmann gọi tên chính xác chỗ lãng phí: MapReduce <strong>vật chất hóa</strong> mọi trạng thái trung gian — ghi trọn đầu ra của mỗi job vào hệ tệp phân tán, nhân bản nó, rồi job sau mới đọc lên<span class="cite"><a href="#ref-1">1</a></span>. Hệ quả là job sau không thể bắt đầu trước khi job trước kết thúc hoàn toàn, nhiều mapper chỉ làm mỗi việc đọc lại thứ reducer vừa ghi, và dữ liệu tạm bị nhân bản như thể nó quý giá bằng dữ liệu gốc.</p>
+        <p class="definition easy-only">Chỗ tốn kém nhất là: mỗi bước xong đều phải <strong>chép kết quả ra đĩa, chép thành mấy bản cho chắc</strong>, rồi bước sau mới được đọc. Nhưng kết quả giữa chừng thì cần gì phải giữ kỹ đến thế — làm lại là có ngay. Nhớ nhé: đồ dùng tạm thì đừng cất kỹ như đồ quý.</p>
+        <p class="definition en-only" lang="en">Kleppmann names the waste precisely: MapReduce <strong>materialises</strong> all intermediate state — writing each job's full output to the distributed filesystem, replicating it, and only then letting the next job read it<span class="cite"><a href="#ref-1">1</a></span>. So the next job cannot start before the previous one fully ends, many mappers do nothing but read back what a reducer just wrote, and temporary data is replicated as though it were as precious as the source.</p>
+        <p class="deep-only">Engine dòng dữ liệu thay chuỗi job bằng một đồ thị có hướng không chu trình gồm các toán tử, và cho phép chọn cách nối giữa hai toán tử: phân vùng lại kèm sắp xếp (đúng bằng shuffle cũ), phân vùng lại mà không sắp xếp, hoặc phát sóng. Trang chủ Tez mô tả đúng mô hình ấy: xây một đồ thị tác vụ phức tạp với API định nghĩa dòng dữ liệu và mô hình <span lang="en">Input–Processor–Output</span> linh hoạt, chạy trên YARN<span class="cite"><a href="#ref-16">16</a></span>. Nhờ vậy engine bỏ được những lần sắp xếp không cần thiết, giữ trạng thái trung gian trong bộ nhớ hoặc đĩa cục bộ, và khởi động toán tử ngay khi đầu vào của nó sẵn sàng — ba khoản tiết kiệm mà Kleppmann liệt kê rõ.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba thứ engine dòng dữ liệu bỏ được so với MapReduce">
+        <div class="equation-row">
+          <b>Bỏ sắp xếp thừa</b>
+          <span>MapReduce luôn sắp xếp giữa map và reduce; engine dòng dữ liệu chỉ sắp xếp khi toán tử thật sự cần.</span>
+        </div>
+        <div class="equation-row">
+          <b>Bỏ vật chất hóa thừa</b>
+          <span>Trạng thái trung gian nằm trong bộ nhớ hoặc đĩa cục bộ, không phải nhân bản qua hệ tệp phân tán.</span>
+        </div>
+        <div class="equation-row">
+          <b>Bỏ chờ đợi thừa</b>
+          <span>Toán tử khởi động ngay khi đầu vào sẵn sàng, thay vì chờ cả pha trước kết thúc.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba thứ thế hệ sau bỏ bớt được">
+        <div class="equation-row">
+          <b>Bớt xếp lại</b>
+          <span>Chỉ xếp khi thật sự cần, không xếp theo thói quen.</span>
+        </div>
+        <div class="equation-row">
+          <b>Bớt ghi ra đĩa</b>
+          <span>Kết quả giữa chừng giữ tạm trong bộ nhớ là đủ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Bớt chờ</b>
+          <span>Xong phần nào làm tiếp phần đó, không đợi cả mẻ xong mới đi tiếp.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three costs dataflow engines remove compared to MapReduce">
+        <div class="equation-row">
+          <b>No needless sorting</b>
+          <span>MapReduce always sorts between map and reduce; dataflow engines sort only where an operator needs it.</span>
+        </div>
+        <div class="equation-row">
+          <b>No needless materialisation</b>
+          <span>Intermediate state lives in memory or on local disk, not replicated through the distributed filesystem.</span>
+        </div>
+        <div class="equation-row">
+          <b>No needless waiting</b>
+          <span>An operator starts as soon as its input is ready, rather than waiting for the previous stage to finish.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Fault tolerance by recomputation</div>
+          <h3><span class="vi-only">Không cất giữ thì lấy gì khôi phục?</span><span class="en-only" lang="en">If nothing is stored, what is there to recover?</span></h3>
+          <p class="standard-copy">Bỏ vật chất hóa thì mất luôn chỗ dựa để chạy lại — đó là cái giá phải trả, và lời giải là <strong>tính lại từ đầu nguồn</strong><span class="cite"><a href="#ref-1">1</a></span>. Spark ghi lại phả hệ của mỗi tập dữ liệu: nó được sinh ra từ tập nào, qua những phép biến đổi nào; mất một mảnh thì dựng lại đúng mảnh ấy. Tài liệu chính thức của Spark phát biểu tính chất này gọn lỏn — RDD là tập dữ liệu phân tán có khả năng phục hồi, và chúng <em lang="en">tự động khôi phục sau khi một nút hỏng</em><span class="cite"><a href="#ref-27">27</a></span>.</p>
+          <p class="easy-only">Nếu không cất kết quả giữa chừng, lỡ một máy hỏng thì sao? Trả lời: <strong>làm lại đúng phần đó</strong>. Hệ thống ghi nhớ "phần này được làm ra từ đâu, bằng cách nào", nên dựng lại được. Nhớ nhé: nhớ công thức thì không cần cất sẵn món ăn.</p>
+          <p class="en-only" lang="en">Dropping materialisation also drops the thing you would restart from — that is the price, and the answer is <strong>recomputation from the source</strong><span class="cite"><a href="#ref-1">1</a></span>. Spark records each dataset's lineage: which dataset it came from and through which transformations; lose a piece and it rebuilds exactly that piece. Spark's own documentation states the property tersely — RDDs are resilient distributed datasets, and they <em>automatically recover from node failures</em><span class="cite"><a href="#ref-27">27</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mỗi khi bạn thấy một engine "tự chạy lại phần hỏng" mà không cần bạn can thiệp, cơ chế bên dưới hoặc là phả hệ, hoặc là điểm kiểm tra định kỳ.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi hệ tự làm lại phần hỏng mà bạn không phải làm gì, đó là cơ chế này.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Whenever an engine "just re-runs the broken piece" without your help, the mechanism underneath is either lineage or periodic checkpointing.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Tính tất định là điều kiện ngầm</h4>
+              <p>Kleppmann cảnh báo một điều kiện mà người ta hay quên: tính lại chỉ đúng nếu toán tử <strong>tất định</strong>. Nếu hàm của bạn dùng số ngẫu nhiên, đọc đồng hồ hệ thống, hay duyệt một cấu trúc theo thứ tự địa chỉ bộ nhớ, thì lần chạy lại sẽ cho kết quả khác — và những tác vụ phía sau đã nhận kết quả cũ sẽ trở nên mâu thuẫn. Cách chữa là loại bỏ nguồn bất định, chẳng hạn gieo hạt ngẫu nhiên cố định theo phân vùng.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khi tính lại đắt hơn cất giữ</h4>
+              <p>Bài báo gốc về RDD đặt nền cho mô hình phả hệ và cho thấy vì sao việc giữ dữ liệu trong bộ nhớ giữa các bước lại cải thiện mạnh các khối lượng công việc lặp<span class="cite"><a href="#ref-15">15</a></span>. Nhưng Kleppmann lưu ý phần còn lại của đánh đổi: nếu chuỗi biến đổi quá dài hoặc quá tốn kém, vật chất hóa một điểm ở giữa lại rẻ hơn là dựng lại từ đầu. Không phải "đừng bao giờ ghi ra đĩa", mà là "đừng ghi ra đĩa theo mặc định".</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Graph processing and the Pregel model</div>
+          <h3><span class="vi-only">Đồ thị: khi kết quả phải quay lại làm đầu vào</span><span class="en-only" lang="en">Graphs: when the output must feed back in</span></h3>
+          <p class="standard-copy">Nhiều thuật toán đồ thị — tìm đường, xếp hạng trang — phải lặp đi lặp lại cho tới khi ổn định, điều mà chuỗi job MapReduce làm rất vụng vì mỗi vòng lặp là một job đọc lại toàn bộ đồ thị<span class="cite"><a href="#ref-1">1</a></span>. Mô hình Pregel của Google đảo ngược góc nhìn: <strong>lập trình theo quan điểm của một đỉnh</strong>, mỗi đỉnh gửi thông điệp dọc theo các cạnh, và một vòng lặp là một "siêu bước" đồng bộ<span class="cite"><a href="#ref-18">18</a></span>. Kleppmann chỉ rõ gốc gác của mô hình đồng bộ khối này là mô hình <em lang="en">bulk synchronous parallel</em> mà Valiant đề xuất năm 1990<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <p class="easy-only">Có những bài toán phải <strong>làm đi làm lại nhiều vòng</strong> mới ra, ví dụ tìm đường đi trong một mạng lưới bạn bè. Cách hay là: coi mỗi điểm trong mạng như một người, <strong>mỗi vòng thì mỗi người nhắn tin cho hàng xóm</strong>, rồi cả lớp cùng chờ nhau xong vòng đó mới sang vòng sau. Nhớ nhé: đi từng vòng, cả nhóm cùng nhịp.</p>
+          <p class="en-only" lang="en">Many graph algorithms — shortest paths, page ranking — must iterate until they settle, which a chain of MapReduce jobs handles clumsily because each iteration is a job that re-reads the entire graph<span class="cite"><a href="#ref-1">1</a></span>. Google's Pregel model inverts the viewpoint: <strong>program from the perspective of one vertex</strong>, each vertex sending messages along its edges, with one iteration being a synchronous "superstep"<span class="cite"><a href="#ref-18">18</a></span>. Kleppmann traces this bulk-synchronous scheme to the <em>bulk synchronous parallel</em> model Valiant proposed in 1990<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mọi thuật toán "lan truyền dần ra hàng xóm rồi lặp lại" — từ gợi ý bạn bè tới phát hiện cộng đồng — đều hợp với khuôn này.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Gợi ý "người bạn có thể biết" chạy theo đúng kiểu lan dần từng vòng như vậy.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every algorithm that "spreads to neighbours and repeats" — friend suggestions, community detection — fits this shape.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Chịu lỗi theo siêu bước</h4>
+              <p>Vì mọi đỉnh cùng bước qua từng vòng một cách đồng bộ, khung chỉ cần lưu điểm kiểm tra ở cuối mỗi siêu bước; hỏng thì quay lại siêu bước gần nhất và chạy lại<span class="cite"><a href="#ref-18">18</a></span>. Đây là một biến thể khác của cùng ý tưởng chạy-lại-được: ranh giới đồng bộ tạo ra những điểm nhất quán để lùi về.</p>
+            </div>
+            <div class="info-block">
+              <h4>Đừng vội cho rằng phân tán là thắng</h4>
+              <p>Kleppmann dẫn một phản biện thẳng thắn với xử lý đồ thị phân tán: bài <em lang="en">“Scalability! But at What COST?”</em> đề xuất đo một nền tảng bằng lượng phần cứng cần có để nó vượt được <strong>một hiện thực đơn luồng viết tử tế</strong>, và cho thấy nhiều hệ thống được công bố có chi phí ấy lên tới hàng trăm lõi — hoặc không bao giờ vượt nổi một luồng ở mọi cấu hình đã báo cáo<span class="cite"><a href="#ref-20">20</a></span>. Phân vùng một đồ thị là bài toán khó, nên với đồ thị vừa phải, một máy thường thắng.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">High-level APIs and declarative queries</div>
+          <h3><span class="vi-only">Viết ít đi để máy tối ưu được nhiều hơn</span><span class="en-only" lang="en">Write less so the machine can optimise more</span></h3>
+          <p class="standard-copy">Viết tay mapper và reducer là việc tốn công và dễ sai, nên quanh MapReduce mọc lên một tầng API mức cao mà Kleppmann liệt kê: Hive, Pig, Cascading và Crunch<span class="cite"><a href="#ref-1">1</a></span>. Bài báo giới thiệu Pig mô tả nó như một hệ dòng dữ liệu mức cao dựng trên MapReduce<span class="cite"><a href="#ref-21">21</a></span>; bài về Hive giới thiệu một kho dữ liệu quy mô petabyte chạy trên Hadoop<span class="cite"><a href="#ref-22">22</a></span>; còn Crunch tự mô tả là thư viện Java để viết và chạy các quy trình dữ liệu<span class="cite"><a href="#ref-23">23</a></span>. Điểm chung: càng khai báo <em>cái gì</em> thay vì <em>làm thế nào</em>, engine càng có chỗ để tự chọn thuật toán join và thứ tự thực thi.</p>
+          <p class="easy-only">Viết tay từng bước rất mệt, nên người ta làm ra những cách viết <strong>ngắn gọn hơn</strong> — gần giống viết câu hỏi cho máy tính thay vì viết chương trình. Bạn nói <strong>muốn gì</strong>, máy tự nghĩ cách làm nhanh nhất. Nhớ nhé: nói rõ mong muốn thì máy mới giúp bạn tối ưu được.</p>
+          <p class="en-only" lang="en">Writing mappers and reducers by hand is laborious and error-prone, so a layer of high-level APIs grew around MapReduce, which Kleppmann lists: Hive, Pig, Cascading and Crunch<span class="cite"><a href="#ref-1">1</a></span>. The paper introducing Pig describes it as a high-level dataflow system built on MapReduce<span class="cite"><a href="#ref-21">21</a></span>; the Hive paper presents a petabyte-scale data warehouse on Hadoop<span class="cite"><a href="#ref-22">22</a></span>; and Crunch describes itself as a Java library for writing and running data pipelines<span class="cite"><a href="#ref-23">23</a></span>. The common thread: the more you declare <em>what</em> instead of <em>how</em>, the more room the engine has to pick join algorithms and execution order itself.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Mỗi lần bạn viết SQL trên một engine phân tán thay vì viết mã xử lý tay, bạn đang đứng đúng ở tầng này.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Viết câu truy vấn thay vì viết chương trình chính là ý tưởng này.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every time you write SQL on a distributed engine instead of hand-rolling the processing code, you are standing exactly at this layer.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Khai báo một phần, không phải hoàn toàn</h4>
+              <p>Kleppmann nêu một sắc thái quan trọng: các hệ này <em>không</em> thuần khai báo như SQL. Chúng vẫn cho phép nhúng hàm tùy ý vào giữa luồng — thứ mà cơ sở dữ liệu quan hệ thuần túy không làm được — nên vẫn giữ được ưu thế "chạy mã bất kỳ" của Hadoop, trong khi nhường phần join và gom nhóm cho trình tối ưu. Đó là một thỏa hiệp có chủ đích, không phải nửa vời.</p>
+            </div>
+            <div class="info-block">
+              <h4>Chuyên biệt hóa dần</h4>
+              <p>Ngoài các phép toán quan hệ, Kleppmann ghi nhận xu hướng đóng gói sẵn những họ thuật toán hay lặp lại — học máy thống kê, phân loại, thuật toán không gian, tìm kiếm gần đúng — thành thư viện dùng lại được trên cùng hạ tầng theo lô. Xử lý theo lô vì thế dần trở thành một nền chung, chứ không còn là một kỹ thuật riêng lẻ.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">The batch/stream boundary begins to blur</div>
+          <h3><span class="vi-only">Theo lô chỉ là dòng dữ liệu có điểm dừng</span><span class="en-only" lang="en">Batch is just a stream with an end</span></h3>
+          <p class="standard-copy">Ranh giới giữa theo lô và theo luồng mỏng hơn vẻ ngoài. Kleppmann đặt Flink cạnh Spark và Tez trong cùng một họ engine dòng dữ liệu<span class="cite"><a href="#ref-1">1</a></span>, và tài liệu chính thức của Flink mô tả nó là khung xử lý phân tán cho <strong>các phép tính có trạng thái trên cả luồng dữ liệu vô hạn lẫn hữu hạn</strong><span class="cite"><a href="#ref-17">17</a></span>. Nói cách khác, một tập dữ liệu theo lô chỉ là một luồng tình cờ có điểm kết thúc — và đó chính là cây cầu bắc sang Chương 11.</p>
+          <p class="easy-only">"Làm cả mẻ" và "làm liên tục" thật ra rất giống nhau: một mẻ chỉ là <strong>dòng dữ liệu có điểm dừng</strong>. Cùng một cỗ máy có thể làm cả hai, chỉ khác chỗ dữ liệu có kết thúc hay không. Nhớ nhé: hữu hạn hay vô hạn, cách nghĩ vẫn thế.</p>
+          <p class="en-only" lang="en">The boundary between batch and stream is thinner than it looks. Kleppmann places Flink alongside Spark and Tez in the same family of dataflow engines<span class="cite"><a href="#ref-1">1</a></span>, and Flink's own documentation describes it as a distributed processing framework for <strong>stateful computations over both unbounded and bounded data streams</strong><span class="cite"><a href="#ref-17">17</a></span>. Put another way, a batch dataset is simply a stream that happens to end — and that is the bridge into Chapter 11.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Khi một engine cho bạn chạy cùng một đoạn mã trên dữ liệu lịch sử và trên dữ liệu đang tới, bạn đang thấy chính sự hợp nhất này.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Cùng một đoạn mã chạy được cho dữ liệu cũ lẫn dữ liệu mới về — đó là điều này.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>When one engine lets you run the same code over historical data and over arriving data, you are seeing this unification.</div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection deep-only">
+      <strong>Đọc chương này từ hôm nay: cái gì đã đổi kể từ 2017</strong>
+      <span>Chương 10 được viết khi Hadoop MapReduce vẫn là điểm quy chiếu mặc định, và trang này giữ nguyên khung ấy vì đó là khung của sách. Nhưng có vài chỉ dấu công khai cho thấy trọng tâm công cụ đã dịch chuyển, và người đọc năm nay nên biết. Tài liệu chính thức của Apache Hive ghi rằng engine thực thi <code lang="en">mr</code> tuy vẫn là mặc định vì lý do lịch sử nhưng <em lang="en">“is itself a historical engine and is deprecated in the Hive 2 line”</em>, và <em lang="en">“may be removed without further warning”</em><span class="cite"><a href="#ref-24">24</a></span>. Apache Crunch — một trong bốn API mức cao mà chương nêu tên — đã ngừng hoạt động từ tháng 6 năm 2020 và chuyển vào Apache Attic tháng 4 năm 2021<span class="cite"><a href="#ref-25">25</a></span>; Apache Giraph, hiện thực mã nguồn mở của mô hình Pregel, ngừng hoạt động tháng 9 năm 2023 và vào Attic tháng 2 năm 2024<span class="cite"><a href="#ref-26">26</a></span>. Trong khi đó Spark vẫn phát hành và vẫn lấy RDD làm trừu tượng nền<span class="cite"><a href="#ref-27">27</a></span>, còn Flink tự định vị quanh xử lý có trạng thái trên cả luồng vô hạn lẫn hữu hạn<span class="cite"><a href="#ref-17">17</a></span>, và Tez vẫn là engine đồ thị tác vụ chạy trên YARN<span class="cite"><a href="#ref-16">16</a></span>. Nói cách khác: những gì đã thay đổi là <strong>công cụ</strong>, không phải luận đề. Kết luận công bằng chỉ có thể đi xa đến thế — các tuyên bố kiểu "MapReduce đã chết" hay "Hadoop vẫn là mặc định" đều là ngoại suy vượt quá thứ các nguồn công khai ở trên thật sự nói.</span>
+    </aside>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận thường gặp về xử lý theo lô</span><span class="en-only" lang="en">Three common misreadings of batch processing</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Theo lô nghĩa là chậm”</span><span class="en-only" lang="en">"Batch means slow"</span></h4>
+          <p class="standard-copy">Sai ở chỗ nhầm thước đo. Hệ theo lô không tối ưu thời gian phản hồi của một yêu cầu mà tối ưu <strong>thông lượng</strong> — lượng dữ liệu đi qua trong một đơn vị thời gian<span class="cite"><a href="#ref-1">1</a></span>. Một job chạy hai giờ để xử lý mười terabyte không "chậm"; nó đang được đo bằng một cây thước khác.</p>
+          <p class="en-only" lang="en">This confuses the metric. A batch system does not optimise one request's response time but <strong>throughput</strong> — data processed per unit of time<span class="cite"><a href="#ref-1">1</a></span>. A job that takes two hours to chew through ten terabytes is not "slow"; it is being measured with a different ruler.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Cứ dữ liệu lớn là phải dùng cụm”</span><span class="en-only" lang="en">"Big data always needs a cluster"</span></h4>
+          <p class="standard-copy">Sai: chi phí điều phối của hệ phân tán chỉ đáng trả khi dữ liệu thật sự vượt một máy. Một đường ống dòng lệnh từng xử lý xong một bộ dữ liệu nhanh hơn khoảng 235 lần so với job Hadoop tương ứng<span class="cite"><a href="#ref-7">7</a></span>, và với đồ thị vừa phải, một hiện thực đơn luồng viết tử tế thường thắng cả nền tảng phân tán<span class="cite"><a href="#ref-20">20</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: a distributed system's coordination cost is only worth paying when the data genuinely exceeds one machine. A command-line pipeline once beat the equivalent Hadoop job by roughly 235×<span class="cite"><a href="#ref-7">7</a></span>, and for moderate graphs a competent single-threaded implementation often beats the distributed platform outright<span class="cite"><a href="#ref-20">20</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“MapReduce lỗi thời nên chương này vô dụng”</span><span class="en-only" lang="en">"MapReduce is obsolete, so this chapter is useless"</span></h4>
+          <p class="standard-copy">Nhầm công cụ với nguyên tắc. Thứ chương này dạy là kỷ luật đầu vào bất biến, đầu ra mới và khả năng chạy lại — và chính các engine thế hệ sau cũng dựng trên đúng kỷ luật ấy, chỉ đổi cách hiện thực<span class="cite"><a href="#ref-15">15</a></span><span class="cite"><a href="#ref-27">27</a></span>.</p>
+          <p class="en-only" lang="en">This confuses the tool with the principle. What the chapter teaches is the discipline of immutable inputs, fresh outputs and re-runnability — and the later engines are built on exactly that discipline, changing only the implementation<span class="cite"><a href="#ref-15">15</a></span><span class="cite"><a href="#ref-27">27</a></span>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi quy trình theo lô của chính bạn</span><span class="en-only" lang="en">Audit your own batch pipeline</span></h2>
+        <p class="standard-copy">Chương 10 cho bạn một bộ từ vựng để nhìn lại bất kỳ quy trình nào chạy theo lịch — báo cáo hằng đêm, bảng tổng hợp, mô hình huấn luyện lại hằng tuần. Những câu hỏi dưới đây không đo quy trình của bạn "lớn" tới đâu, mà soi xem nó có giữ được ba kỷ luật cốt lõi: bất biến, chạy lại được, và biết mình đang tối ưu cho cái gì.</p>
+        <p class="easy-only">Thử soi một việc chạy đều đặn trong hệ của bạn — ví dụ báo cáo mỗi đêm — bằng mấy câu dưới. Không phải để khoe nó to, mà để xem nó có <strong>làm lại được</strong> khi sai hay không.</p>
+        <p class="en-only" lang="en">Chapter 10 gives you a vocabulary for re-reading any scheduled pipeline — a nightly report, a summary table, a weekly retrained model. The questions below don't measure how "big" your pipeline is; they check whether it keeps the three core disciplines: immutability, re-runnability, and knowing what it is optimising for.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Quy trình của bạn đang tối ưu thông lượng hay thời gian phản hồi?</strong><span class="deep-only">Đây là câu hỏi phân loại đầu tiên của chương. Nếu bạn đang đặt cảnh báo khi một job theo lô "chạy lâu quá", hãy kiểm tra xem cái bạn thật sự quan tâm là độ trễ tới người dùng hay là khối lượng dữ liệu kịp xử lý trước giờ mở cửa — hai thứ đó dẫn tới hai quyết định kỹ thuật khác hẳn nhau.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Đầu vào của job có thật sự bất biến không?</strong><span class="deep-only">Hãy kiểm tra thật: job có ghi đè lên chính thư mục nó đọc không? Có xóa dữ liệu nguồn sau khi xử lý không? Có cập nhật tại chỗ một bảng mà job khác cũng đang đọc không? Mỗi câu "có" là một chỗ mà bạn đã đánh mất khả năng chạy lại.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Chạy lại job hai lần có cho ra cùng một kết quả không?</strong><span class="deep-only">Tính tất định là điều kiện ngầm của mọi cơ chế chịu lỗi bằng tính lại. Hãy đi tìm những nguồn bất định quen thuộc: đồng hồ hệ thống, số ngẫu nhiên không gieo hạt, thứ tự duyệt phụ thuộc bộ nhớ, hay một lời gọi tới dịch vụ ngoài đang thay đổi.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Khi job hỏng giữa chừng, hệ đang phục vụ có nhìn thấy kết quả nửa vời không?</strong><span class="deep-only">Nếu job ghi trực tiếp từng bản ghi vào cơ sở dữ liệu đang phục vụ thì câu trả lời gần như chắc chắn là có. Cách chữa theo tinh thần của chương là ghi ra một tập dữ liệu mới rồi chuyển đổi nguyên khối, giữ nguyên tính "tất cả hoặc không gì cả".</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có thể quay về bản đầu ra của ngày hôm qua trong bao lâu?</strong><span class="deep-only">Đây là phép thử của khả năng dung thứ lỗi con người. Nếu mã có một lỗi tính toán được phát hiện sau ba ngày, bạn cần bao nhiêu thao tác để quay lui, và bạn còn giữ đủ dữ liệu nguồn để chạy lại không?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Job nào của bạn đang bị một khóa nóng làm nghẽn?</strong><span class="deep-only">Dấu hiệu kinh điển là phân bố thời gian tác vụ lệch hẳn: gần hết xong nhanh, một vài cái chạy rất lâu. Hãy lấy mẫu khóa và xem phân bố tần suất của nó trước khi tăng số máy — tăng máy không chữa được lệch tải.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có phép join nào trong quy trình đang shuffle dữ liệu mà lẽ ra không cần?</strong><span class="deep-only">Nếu một bên của phép join đủ nhỏ để nằm trong bộ nhớ, hoặc hai bên đã được phân vùng theo cùng một khóa, bạn đang trả tiền cho một lần shuffle vô ích. Đây thường là tối ưu rẻ nhất trong toàn bộ quy trình.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Quy trình của bạn thật sự cần một cụm, hay một máy là đủ?</strong><span class="deep-only">Hãy ước lượng trung thực kích thước dữ liệu ở bước nặng nhất. Nếu nó nằm vừa trên một máy hiện đại, chi phí điều phối, gỡ lỗi và vận hành của một cụm có thể lớn hơn toàn bộ phần lợi thu được — và những phép đo công khai về chủ đề này thường bất ngờ hơn người ta tưởng.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Việc chạy đều đặn trong hệ của bạn có làm hỏng dữ liệu gốc không?</strong><span>Nếu dữ liệu gốc vẫn còn nguyên thì sai cũng làm lại được.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Chạy lại hai lần có ra kết quả giống nhau không?</strong><span>Nếu mỗi lần một khác thì không thể tin cậy được.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Lỡ hỏng giữa chừng, người dùng có thấy kết quả dở dang không?</strong><span>Nấu xong cả nồi rồi mới dọn lên bàn thì không ai thấy món dở.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có phần việc nào lúc nào cũng lê thê hơn hẳn phần còn lại không?</strong><span>Thường là do một nhãn quá đông; phải chia nhỏ nó ra.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>Is your pipeline optimising throughput or response time?</strong><span>This is the chapter's first classifying question. If you alert when a batch job "takes too long," check whether you actually care about user-facing latency or about how much data clears before opening hours — they lead to opposite engineering decisions.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Are your job's inputs genuinely immutable?</strong><span>Check for real: does the job overwrite the directory it reads? delete its source after processing? update in place a table another job reads? Each "yes" is a place where you gave up re-runnability.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Does running the job twice produce the same result?</strong><span>Determinism is the unstated precondition of every recompute-based fault tolerance scheme. Hunt the usual sources: system clocks, unseeded randomness, memory-dependent iteration order, a call to a changing external service.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>When a job fails midway, can the serving system see half-written results?</strong><span>If the job writes record-by-record into the live database, the answer is almost certainly yes. The chapter's cure is to write a new dataset and switch over wholesale, preserving all-or-nothing.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How quickly could you roll back to yesterday's output?</strong><span>This is the test of human fault tolerance. If a computation bug is found three days late, how many steps does rollback take, and do you still hold enough source data to re-run?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Which of your jobs is being throttled by a hot key?</strong><span>The classic sign is a lopsided task-duration distribution: nearly all fast, a couple extremely slow. Sample the keys and look at their frequency distribution before adding machines — more machines don't fix skew.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is any join in your pipeline shuffling data it needn't?</strong><span>If one side fits in memory, or both sides are already partitioned by the same key, you are paying for a pointless shuffle. This is often the cheapest optimisation in the whole pipeline.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Does your pipeline really need a cluster, or would one machine do?</strong><span>Estimate honestly the data size at the heaviest step. If it fits on one modern machine, the coordination, debugging and operational cost of a cluster may exceed everything you gain — and the published measurements on this are more surprising than people expect.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Xử lý theo lô không phải một công nghệ mà là một <span class="closing-accent">kỷ luật</span>: đọc dữ liệu không được phép sửa, viết kết quả sang một chỗ hoàn toàn mới, và nhờ thế <span class="closing-accent">chạy lại bao nhiêu lần cũng được</span>. Triết lý Unix đã phát biểu kỷ luật ấy trên một máy; MapReduce phóng nó lên hàng nghìn máy; các engine dòng dữ liệu bỏ đi những lần ghi thừa mà vẫn giữ nguyên nó. Công cụ đến rồi đi, nhưng lời hứa còn lại thì không đổi: khi <span class="closing-accent">đầu vào vẫn còn nguyên vẹn</span>, mọi sai lầm đều có thể sửa bằng cách làm lại.</span><span class="easy-only">"Làm cả mẻ" không phải một cái máy, mà là một <span class="closing-accent">thói quen tốt</span>: <span class="closing-accent">không sửa bản gốc</span>, ghi kết quả sang chỗ mới, nên <span class="closing-accent">sai thì làm lại được</span>. Từ mấy câu lệnh trên một máy cho tới hệ thống nghìn máy, cách nghĩ vẫn y như vậy. Nhớ nhé: giữ nguyên bản gốc thì không có lỗi nào là không sửa được.</span><span class="en-only" lang="en">Batch processing is not a technology but a <span class="closing-accent">discipline</span>: read data you may not modify, write results somewhere entirely new, and therefore <span class="closing-accent">re-run as often as you like</span>. The Unix philosophy stated that discipline on one machine; MapReduce blew it up to thousands; dataflow engines stripped the redundant writes while keeping it intact. Tools come and go, but the remaining promise does not change: while <span class="closing-accent">the input is still untouched</span>, every mistake is fixable by doing it again.</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-9-consistency-and-consensus.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 9 · Nhất quán &amp; đồng thuận</span><span class="en-only" lang="en">Chapter 9 · Consistency &amp; Consensus</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="chapter-11-stream-processing.html">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 11 · Xử lý luồng</span><span class="en-only" lang="en">Chapter 11 · Stream Processing</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 10 <span lang="en">“Batch Processing”</span><span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (nấu cả nồi rồi mới dọn lên bàn, đồ chơi xếp hình chung khớp nối, cả lớp cùng nhắn tin theo vòng…) là minh họa do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. Các con số về hệ lập chỉ mục của Google (hơn 20 TB tài liệu thô, 5–10 thao tác MapReduce, khoảng 3.800 xuống khoảng 700 dòng, hơn một nghìn job mỗi ngày) là số liệu công bố năm 2004 trong bài báo gốc<span class="cite"><a href="#ref-8">8</a></span>, không phải số liệu vận hành hiện thời.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 10 “Batch Processing”<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (cooking the whole pot before serving, building blocks sharing one connector, a class messaging in rounds…) are illustrations added by this companion, not examples from the book. The Google indexing figures (20+ TB of raw documents, 5–10 MapReduce operations, ~3,800 down to ~700 lines, 1,000+ jobs a day) are numbers published in the 2004 paper<span class="cite"><a href="#ref-8">8</a></span>, not current operational figures.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 10 <span lang="en">“Batch Processing”</span>.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách (mục lục, phạm vi Phần III · Derived Data)</a></li>
+        <li id="ref-3"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O'Reilly — trang sách chính thức (định danh ấn bản &amp; chương)</a> <em>(oreilly.com chặn truy cập tự động: trả 403 cho fetcher và chặn cả trình duyệt headless (Akamai “Access Denied”); nguồn có thật và được định danh đầy đủ ở trên)</em></li>
+        <li id="ref-4"><a href="https://github.com/ept/ddia-references/blob/master/chapter-10-refs.md" target="_blank" rel="noopener noreferrer">Martin Kleppmann — danh mục tham chiếu công khai của Chương 10 (<span lang="en">ept/ddia-references</span>)</a></li>
+        <li id="ref-5"><a href="https://archive.org/details/bstj57-6-1899" target="_blank" rel="noopener noreferrer">M. D. McIlroy, E. N. Pinson &amp; B. A. Tague, “UNIX Time-Sharing System: Foreword”, <span lang="en">The Bell System Technical Journal</span> 57(6), 1899–1904, 1978 — nguyên văn các châm ngôn Unix</a></li>
+        <li id="ref-6"><a href="https://man7.org/linux/man-pages/man1/sort.1.html" target="_blank" rel="noopener noreferrer">GNU Coreutils — trang man của <code>sort(1)</code> (tệp tạm trên đĩa qua <code>-T</code>, bộ đệm <code>-S</code>, sắp xếp song song <code>--parallel</code>)</a> <em>(bản dựng trên man7.org: toàn bộ host www.gnu.org không truy cập được tại thời điểm kiểm tra — ERR_CONNECTION_TIMED_OUT từ cả curl trần, UA Chrome lẫn trình duyệt thật)</em></li>
+        <li id="ref-7"><a href="https://adamdrake.com/command-line-tools-can-be-235x-faster-than-your-hadoop-cluster.html" target="_blank" rel="noopener noreferrer">Adam Drake, “Command-Line Tools Can Be 235x Faster than Your Hadoop Cluster”, 2014 — nguồn được chính Kleppmann dẫn trong danh mục Chương 10</a></li>
+        <li id="ref-8"><a href="https://research.google/pubs/mapreduce-simplified-data-processing-on-large-clusters/" target="_blank" rel="noopener noreferrer">Jeffrey Dean &amp; Sanjay Ghemawat, “MapReduce: Simplified Data Processing on Large Clusters”, OSDI 2004</a></li>
+        <li id="ref-9"><a href="https://research.google/pubs/the-google-file-system/" target="_blank" rel="noopener noreferrer">Sanjay Ghemawat, Howard Gobioff &amp; Shun-Tak Leung, “The Google File System”, SOSP 2003</a></li>
+        <li id="ref-10"><a href="https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-hdfs/HdfsDesign.html" target="_blank" rel="noopener noreferrer">Apache Hadoop — HDFS Architecture (khối, hệ số nhân bản, NameNode/DataNode, “Moving Computation is Cheaper than Moving Data”)</a></li>
+        <li id="ref-11"><a href="https://hadoop.apache.org/docs/stable/hadoop-mapreduce-client/hadoop-mapreduce-client-core/MapReduceTutorial.html" target="_blank" rel="noopener noreferrer">Apache Hadoop — MapReduce Tutorial (giao diện Mapper/Reducer, phân vùng, sắp xếp, chạy lại tác vụ hỏng)</a></li>
+        <li id="ref-12"><a href="https://pig.apache.org/docs/latest/perf.html" target="_blank" rel="noopener noreferrer">Apache Pig — Performance and Efficiency (skewed join lấy mẫu dựng biểu đồ tần suất; replicated join phía map; merge join trên dữ liệu đã sắp xếp)</a></li>
+        <li id="ref-13"><a href="https://static.usenix.org/events/fast12/tech/full_papers/Sumbaly.pdf" target="_blank" rel="noopener noreferrer">Roshan Sumbaly, Jay Kreps, Lei Gao, Alex Feinberg, Chinmay Soman &amp; Sam Shah, “Serving Large-Scale Batch Computed Data with Project Voldemort”, USENIX FAST 2012</a></li>
+        <li id="ref-14"><a href="https://homes.cs.washington.edu/~billhowe/mapreduce_a_major_step_backwards.html" target="_blank" rel="noopener noreferrer">David J. DeWitt &amp; Michael Stonebraker, “MapReduce: A Major Step Backwards”, 2008 (bản lưu tại UW)</a></li>
+        <li id="ref-15"><a href="https://www.usenix.org/system/files/conference/nsdi12/nsdi12-final138.pdf" target="_blank" rel="noopener noreferrer">Matei Zaharia và cộng sự, “Resilient Distributed Datasets: A Fault-Tolerant Abstraction for In-Memory Cluster Computing”, USENIX NSDI 2012</a></li>
+        <li id="ref-16"><a href="https://tez.apache.org/" target="_blank" rel="noopener noreferrer">Apache Tez — trang chính thức (đồ thị tác vụ có hướng không chu trình, mô hình Input–Processor–Output, chạy trên YARN)</a></li>
+        <li id="ref-17"><a href="https://flink.apache.org/what-is-flink/flink-architecture/" target="_blank" rel="noopener noreferrer">Apache Flink — What is Apache Flink? Architecture (xử lý có trạng thái trên luồng vô hạn và hữu hạn)</a></li>
+        <li id="ref-18"><a href="https://research.google/pubs/pregel-a-system-for-large-scale-graph-processing/" target="_blank" rel="noopener noreferrer">Grzegorz Malewicz và cộng sự, “Pregel: A System for Large-Scale Graph Processing”, ACM SIGMOD 2010</a></li>
+        <li id="ref-19"><a href="https://web.mit.edu/6.976/www/handout/valiant2.pdf" target="_blank" rel="noopener noreferrer">Leslie G. Valiant, “A Bridging Model for Parallel Computation”, <span lang="en">Communications of the ACM</span> 33(8), 1990 — mô hình <span lang="en">bulk-synchronous parallel</span> (bản PDF lưu tại MIT)</a></li>
+        <li id="ref-20"><a href="https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf" target="_blank" rel="noopener noreferrer">Frank McSherry, Michael Isard &amp; Derek G. Murray, “Scalability! But at What COST?”, USENIX HotOS 2015</a></li>
+        <li id="ref-21"><a href="http://www.vldb.org/pvldb/vol2/vldb09-1074.pdf" target="_blank" rel="noopener noreferrer">Alan F. Gates và cộng sự, “Building a High-Level Dataflow System on Top of Map-Reduce: The Pig Experience”, VLDB 2009</a></li>
+        <li id="ref-22"><a href="http://i.stanford.edu/~ragho/hive-icde2010.pdf" target="_blank" rel="noopener noreferrer">Ashish Thusoo và cộng sự, “Hive – A Petabyte Scale Data Warehouse Using Hadoop”, IEEE ICDE 2010</a></li>
+        <li id="ref-23"><a href="https://crunch.apache.org/user-guide.html" target="_blank" rel="noopener noreferrer">Apache Crunch — User Guide (thư viện Java để viết và chạy quy trình dữ liệu)</a></li>
+        <li id="ref-24"><a href="https://hive.apache.org/docs/latest/user/configuration-properties/" target="_blank" rel="noopener noreferrer">Apache Hive — Configuration Properties: <code>hive.execution.engine</code> (“<span lang="en">mr</span>… is itself a historical engine and is deprecated in the Hive 2 line… It may be removed without further warning”)</a></li>
+        <li id="ref-25"><a href="https://attic.apache.org/projects/crunch.html" target="_blank" rel="noopener noreferrer">Apache Attic — Apache Crunch (ngừng hoạt động tháng 6/2020, chuyển vào Attic tháng 4/2021)</a></li>
+        <li id="ref-26"><a href="https://attic.apache.org/projects/giraph.html" target="_blank" rel="noopener noreferrer">Apache Attic — Apache Giraph (ngừng hoạt động tháng 9/2023, chuyển vào Attic tháng 2/2024)</a></li>
+        <li id="ref-27"><a href="https://spark.apache.org/docs/latest/rdd-programming-guide.html" target="_blank" rel="noopener noreferrer">Apache Spark — RDD Programming Guide (“RDDs automatically recover from node failures”)</a></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-9-consistency-and-consensus.html">Chương 9 — Nhất quán &amp; đồng thuận</a> · <a href="chapter-11-stream-processing.html">Chương 11 — Xử lý luồng</a>.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-9-consistency-and-consensus.html">Chapter 9 — Consistency &amp; Consensus</a> · <a href="chapter-11-stream-processing.html">Chapter 11 — Stream Processing</a>.</p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

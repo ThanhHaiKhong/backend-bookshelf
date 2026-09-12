@@ -75,15 +75,23 @@ Scaffold phải được copy **nguyên văn**, không cắt gọt. Những th�
 - **NAV fence**: mọi sửa đổi điều hướng chỉ được nằm trong
   `<!-- NAV:START … NAV:END -->`. Author link neighbour một cách lạc quan; curator là
   bên duy nhất được demote về `<span>` disabled "sắp có".
-- **Ghi chú bot-blocked**: ref trả 403/405 vì host chặn fetcher (w3.org, oreilly.com,
-  cacm.acm.org, infoq.com) vẫn được cite bình thường — chúng có thật, chỉ chặn bot.
-  Kèm một `<em>` anh em **ngoài** thẻ `<a>` ghi rõ host nào chặn và mã trả về, để
-  trang tự đứng được mà không cần người đọc lục file này.
+- **Ghi chú bot-blocked**: ref trả 403/405 vì host chặn fetcher vẫn được cite bình
+  thường — chúng có thật, chỉ chặn bot. Kèm một `<em>` anh em **ngoài** thẻ `<a>`.
+  Ghi chú phải nói **đúng thứ đã đo**, không chép câu mẫu của chương khác: ba nhóm
+  hành vi khác hẳn nhau — mở được thật (`dev.mysql.com`, `haslab.wordpress.com`,
+  `vldb.org`) · qua được sau xác minh Cloudflare (`w3.org`, `dl.acm.org`) · chặn cả
+  trình duyệt headless (`oreilly.com`, `cacm.acm.org`, `queue.acm.org`, `infoq.com`).
+  Với nhóm cuối, đừng hứa theo chiều nào: không nói "mở bình thường" (đo thấy bị
+  chặn), cũng không nói "không mở được" (headless vốn bị nhận diện). **Cùng một host
+  phải có cùng một lời khai trên mọi trang** — mâu thuẫn giữa hai chương là lỗi chặn
+  gate.
 - **Trích dẫn phải trỏ đúng nguồn**: `ref-1` là **cuốn sách**, `ref-2` là **trang web**
   của sách. Mọi phát biểu quy cho tác giả ("Kleppmann nói…", cách ông đóng khung vấn
   đề, ví dụ ông dùng) phải cite `ref-1`, không phải `ref-2`. Đây là lỗi đã xảy ra ở
-  **4/5 agent** trong một wave và `book-qa` không bắt được. Mật độ tham chiếu: 33–62
-  cite `ref-1` mỗi chương.
+  **4/5 agent** trong một wave và `book-qa` không bắt được. Mật độ quan sát được là
+  33–78 cite `ref-1` mỗi chương — đó là **chỉ dấu, không phải ngưỡng**. Chương nào
+  phần lớn là lập luận của tác giả (ví dụ chương đạo đức) thì mật độ cao hơn là đúng;
+  ép nó xuống dải đồng nghĩa với gỡ cite khỏi khẳng định quy cho tác giả.
 - **0 ref thừa, 0 cite treo**: mọi mục trong ref-list phải được cite ít nhất một lần,
   và mọi cite phải trỏ tới một mục có thật. Ref chỉ dùng để định danh ấn bản thì cite
   vào dòng nguồn-chính ở footer.
@@ -119,6 +127,25 @@ nav đều vẫn xanh, vì đó là lỗi *nội dung* chứ không phải *cấ
 Luật: mỗi agent trong một đợt fan-out dùng thư mục con riêng — `scratchpad/ch5/`,
 `scratchpad/ch6/`… — hoặc tiền tố tên file theo chương.
 
+## Vá toàn site: quét theo luật, đừng quét theo hình dạng mình đoán
+
+Hai lần gate trả FAIL trong dự án này đều cùng một gốc: lượt sửa dựa trên một khuôn
+hẹp rồi tưởng đã xong.
+
+- Regex vá ghi chú đòi tên host đứng **ngay đầu** `<em>(` → bỏ sót 5 ghi chú có hình
+  dạng khác (`<em>` nằm trong `<a>`; thông tin ấn bản chèn trước tên host). Hậu quả:
+  hai chương nói ngược nhau về cùng một host.
+- Danh sách từ chuẩn hoá chính tả soạn **bằng tay** → sót `thoả`. Quét lại bằng luật
+  (âm tiết mở kết thúc bằng nguyên âm mang dấu) thì thấy ngay.
+
+Nên: rút tập cần sửa **từ luật**, rồi kiểm lại bằng cách **gom theo thuộc tính** (mỗi
+host một lời khai, mỗi họ từ một kiểu) thay vì đếm số chỗ đã sửa. Phép sửa cục bộ
+không tự thấy được mâu thuẫn giữa các trang.
+
+Cẩn thận với cảnh báo giả khi quét bằng luật: `quả`/`quá`/`quý` trông như kiểu cũ
+nhưng `u` trong `qu` là phụ âm kép chứ không phải âm đệm; `toàn`/`hoàn`/`loại` có phụ
+âm cuối nên dấu vốn đã đúng chỗ. Luôn khớp theo **ranh giới từ**, không thay chuỗi con.
+
 Sau mỗi wave song song, kiểm nhiễm chéo trước khi tin vào gate: định danh chương
 (`<title>`, `content: "DDIA / 0N"`, `.book-label`, tập `section[id]`), và các thuật
 ngữ **chỉ thuộc về một chương** (đếm từ khoá chung như "quorum" sẽ báo động giả).
@@ -148,6 +175,6 @@ DDIA dùng tông giấy cũ: `--teal: #b5502f` (đất nung), `--blue: #2b7c73`,
 
 | Cuốn | Chương | Ghi chú |
 |---|---|---|
-| `designing-data-intensive-applications` | **9 / 12** | Kleppmann, O'Reilly 2017. Phần I **4/4** và Phần II **5/5** trọn vẹn; Phần III 0/3. Mind-map: CSS `.mindmap-banner` đã có, chưa có element trong body. Mục mở: chính tả `hoá`/`hóa` trộn lẫn toàn cuốn (436 vs 60), chưa chuẩn hoá. |
+| `designing-data-intensive-applications` | **12 / 12 — trọn cuốn** | Kleppmann, O'Reilly 2017. Cả ba phần đủ. Chính tả đã chuẩn hoá toàn site (dấu trên nguyên âm đầu). Mục mở: `ref-1` thiếu link ngoài ở hầu hết chương; **trang mind-map chưa có** (CSS `.mindmap-banner` đã nằm sẵn trong bìa, chưa có element trong body). |
 
-Việc kế tiếp của DDIA: Chương 10–12 (Phần III · Derived Data).
+Việc kế tiếp của DDIA: trang mind-map tổng hợp cả 12 chương.

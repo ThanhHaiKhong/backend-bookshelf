@@ -205,3 +205,80 @@ blog **được giữ** kèm ghi chú outage, hai khẳng định **được kh�
 bản blog mà agent đã fetch và đọc thành công sớm hơn trong phiên, trước khi outage xảy
 ra — không phải khôi phục theo trí nhớ), và `ref-28` được **bổ sung** chứ không thay thế.
 File trên đĩa khớp commit; chỉ phần mô tả là sai. Bảng ở trên đã sửa.
+
+---
+
+# Wave Phần III — Chương 10–12 · TRỌN CUỐN (2026-09-12)
+
+Tác giả: ba `book-chapter-author` chạy song song, **mỗi agent một thư mục scratchpad riêng**.
+Tích hợp: `book-cover-curator`. Thẩm định: `book-fidelity-auditor` (read-only). Gate: `book-qa`.
+
+| Trang | book-qa | Scaffold | Faithfulness | Nav |
+|---|---|---|---|---|
+| index.html (bìa) | ✅ PASS | bìa, **12/12 live**, không còn "sắp có" | n/a — không cite | OK |
+| chapter-1 | ✅ PASS | 56 cite `ref-1` / 79 tổng | spot-check trước đó (caveat Twitter lịch sử) | OK |
+| chapter-2 | ✅ PASS | 59 cite `ref-1` | ghi chú w3.org nay đúng vị trí `<em>` ngoài `</a>` | OK |
+| chapter-3 | ✅ PASS | 33 cite `ref-1` | — | OK |
+| chapter-4 | ✅ PASS | 35 cite `ref-1` | w3.org wording chuẩn | OK |
+| chapter-5 | ✅ PASS | 62 cite `ref-1` | dev.mysql.com / haslab thuộc nhóm "mở được" | OK |
+| chapter-6 | ✅ PASS | 35 cite `ref-1` | dl.acm.org chuẩn; ghi chú outage elastic.co **đã gỡ** (link về 200) | OK |
+| chapter-7 | ✅ PASS | 60 cite `ref-1` | vldb.org / dev.mysql / dl.acm.org chuẩn | OK |
+| chapter-8 | ✅ PASS | 53 cite `ref-1` | dl.acm.org + queue.acm.org chuẩn | OK |
+| chapter-9 | ✅ PASS | 33 cite `ref-1` | queue.acm.org + oreilly chuẩn | OK |
+| chapter-10-batch-processing.html | ✅ PASS | 27 ref · 58 cite `ref-1` | trích triết lý Unix **nguyên văn** khớp nguồn; số "235 lần" có link sống; caveat Hadoop/MapReduce cân bằng — tránh cả "đã chết" lẫn "vẫn mặc định" | prev → Ch9; next → Ch11 |
+| chapter-11-stream-processing.html | ✅ PASS | 27 ref · 60 cite `ref-1` | "exactly-once" đóng khung đúng là **hiệu ứng** đúng một lần nhờ luỹ đẳng + commit nguyên tử; nói thẳng câu "Kafka bảo đảm exactly-once" trống không là sai; CDC ≠ event sourcing tách bạch | prev → Ch10; next → Ch12 |
+| chapter-12-the-future-of-data-systems.html | ✅ PASS | 19 ref · 78 cite `ref-1` (ngoài dải, đã review — hợp lý, **không padding**) | mục đạo đức có disclaimer tường minh "mọi phát biểu quy chuẩn là của Kleppmann"; kiến trúc lambda giữ đúng giọng **phê phán** của tác giả | prev → Ch11; next → Bìa ("Hết cuốn") |
+
+**Site-level**
+
+- `book-qa`: **13/13 PASS**. Link/anchor/cite: 0 href nội bộ chết, 0 anchor treo, 0 cite treo, **0 ref thừa**.
+- External refs: **246 URL duy nhất** toàn site → 230×200, còn lại là các host bot-block đã biết. 0 link chết thật.
+- Bilingual: **0/1146** phần tử `en-only` thiếu `lang="en"`; không còn `.quick-only`; storage key nhất quán 13/13.
+- Curator-region: 0 dòng đổi rơi ra ngoài NAV fence / vùng bìa.
+- Faithfulness caveat: **spot-check, không phải audit toàn bộ** — 13 trang × ~100–170 cite/trang không soát từng cái.
+
+**Verdict: ✅ PASS** — cuốn DDIA **12/12 chương** đủ điều kiện đánh ✅.
+
+## Hai lượt sửa toàn site trong wave này
+
+### 1. Ghi chú bot-blocked nói đúng thứ đo được (20 chỗ)
+
+`ddia-ch12` mở `oreilly.com` bằng trình duyệt thật và phát hiện câu mẫu dùng từ wave trước — *"link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt"* — **không đúng với mọi host**. Chính ghi chú sinh ra để chống bịa lại đang chứa một khẳng định chưa ai kiểm.
+
+Đo lại từng host bằng Chrome thật (`document.title`), chia ba nhóm:
+
+| Nhóm | Host | Trình duyệt thật thấy |
+|---|---|---|
+| Mở được | `dev.mysql.com`, `haslab.wordpress.com`, `vldb.org` | nội dung đúng |
+| Qua được sau xác minh | `w3.org`, `dl.acm.org` | "Just a moment…" (Cloudflare) |
+| Chặn cả headless | `oreilly.com`, `cacm.acm.org`, `queue.acm.org`, `infoq.com` | "Access Denied" (Akamai) · "Attention Required" · "Human Verification" |
+
+**Auditor FAIL lượt đầu vì lượt vá bỏ sót 5 chỗ.** Nguyên nhân: regex đòi tên host đứng **ngay đầu** `<em>(`. Năm ghi chú có hình dạng khác — Ch2 đặt `<em>` **bên trong** thẻ `<a>` không có ngoặc mở; Ch6/Ch8 chèn thông tin ấn bản (doi, số tạp chí) trước tên host. Hậu quả: cùng một host mà hai chương nói ngược nhau — Ch8 bảo `queue.acm.org` "mở bình thường" trong khi Ch9 bảo "chặn cả headless". Đã vá đủ; **mỗi host nay đúng một lời khai trên toàn site**.
+
+Nhóm "chặn cả headless" cố ý **không** khẳng định theo cả hai chiều: không hứa "mở được" (đo thấy bị chặn), cũng không tuyên bố "không mở được trên trình duyệt thường" (headless vốn bị nhận diện, trình duyệt thật của người đọc có thể qua). Ghi chú chỉ nói đúng thứ đã đo và chỉ ra rằng trích dẫn đủ thông tin để tìm nguồn bằng đường khác.
+
+Tiện thể: `<em>` của Ch2 chuyển ra ngoài `</a>` (đóng mục mở từ wave Phần I), và gỡ ghi chú outage `elastic.co` vì link đã 200 trở lại.
+
+### 2. Chuẩn hoá quy ước đặt dấu (715 chỗ)
+
+Toàn site đổi từ kiểu đặt dấu trên nguyên âm cuối sang kiểu đặt trên nguyên âm đầu: `hoá→hóa`, `khoá→khóa`, `xoá→xóa`, `huỷ→hủy`, `tuỳ→tùy`, `luỹ→lũy`, `thoả→thỏa`… — 13 nhóm từ.
+
+Phạm vi thật rộng gấp rưỡi con số ban đầu: `khoá` (331) nhiều hơn cả `hoá` (171), nên sửa mỗi `hóa` thì site vẫn lệch.
+
+**Hai cái bẫy đã phòng:**
+- Từ có **phụ âm cuối** (`toàn` 249, `quyết` 154, `thuật` 123, `khoảng`, `loại`, `chuyển`, `hoàn`, `hoạt`) **không** mập mờ — dấu vốn đã ở âm chính. Thay chuỗi thô sẽ tạo `tòan`/`hòan`/`lọai`. Đã khớp theo **ranh giới từ**; xác minh 0 lỗi phát sinh.
+- `quả`/`quá`/`quý`/`quà` **trông giống** kiểu cũ nhưng không phải: trong `qu`, chữ `u` thuộc phụ âm kép chứ không phải âm đệm. Quét bằng luật ban đầu báo động giả 383 chỗ; loại `qu-` rồi mới đúng.
+
+**Auditor FAIL lượt đầu vì sót `thoả` (11 chỗ / 6 file)** — hậu quả của việc liệt kê danh sách từ **bằng tay** thay vì rút từ luật. Lượt sau quét bằng luật, sạch.
+
+## Bài học wave này
+
+**Vá theo mẫu thì phải quét theo mẫu tổng quát, không theo hình dạng mình đoán.** Cả hai lỗi FAIL đều cùng một gốc: lượt sửa dựa trên một khuôn hẹp (regex đòi host ở đầu; danh sách từ soạn tay) rồi tưởng đã xong. Gate bắt được cả hai vì nó kiểm **tính nhất quán giữa các trang**, thứ mà phép sửa cục bộ không tự thấy.
+
+**Scratchpad riêng cho mỗi agent fan-out đã chứng minh hiệu quả** — wave này ba agent song song, 0 nhiễm chéo, so với wave trước phải phát hiện bằng tay sau khi một chương ráp nhầm nội dung của hai chương khác.
+
+## Mục mở còn lại
+
+**`ref-1` thiếu link ngoài** ở hầu hết chương (chỉ Ch2 link tới Open Library). Không vi phạm "không bịa" — trích dẫn sách in đủ tên/nhà xuất bản/năm/chương. Để lượt polish sau.
+
+**Trang mind-map chưa có.** CSS `.mindmap-banner` đã nằm sẵn trong `<style>` của bìa nhưng không có element trong body. Giờ cuốn sách đã đủ 12 chương, đây là ứng viên hợp lý cho wave tiếp theo.
