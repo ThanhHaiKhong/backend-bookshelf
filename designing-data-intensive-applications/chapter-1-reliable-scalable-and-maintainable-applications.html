@@ -900,6 +900,114 @@
     html { scroll-behavior: auto; }
     .pulse { animation: none; }
   }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
 </style>
 </head>
 <body>
@@ -1494,6 +1602,73 @@
     langButtons.forEach(function (button) {
       button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
     });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
   })();
 </script>
 </body>

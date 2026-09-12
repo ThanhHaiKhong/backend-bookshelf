@@ -42,3 +42,36 @@ Cả hai phải in `ALL CHECKS PASS`.
 8. <https://sre.google/sre-book/service-level-objectives/> — Google SRE Book, SLI/SLO/SLA.
 
 **Caveat trung thực:** số Twitter (~4.6k/12k/300k req/s) là số Kleppmann trích từ bài nói 2012 của Krikorian (ref-4), **không** phải số vận hành hiện thời — footer chương ghi rõ điều này. Ví von chế độ Dễ hiểu (bánh xe dự phòng, con ốc lỏng…) là minh hoạ bổ sung, không phải ví dụ nguyên văn trong sách.
+
+---
+
+## Bản vá 2026-09-12 — section rail
+
+`book-qa` được cập nhật sau wave genesis và thêm ràng buộc **section-index rail**
+(scroll-spy), làm fail ngược cả hai trang vốn đã ghi PASS ở trên:
+
+```
+- section-index rail CSS missing (no /* SECTION-RAIL:START */ sentinel)
+- section-index rail JS missing (no section-rail__list builder)
+```
+
+**Đã vá.** Khối CSS (`SECTION-RAIL:START … END`, trước `</style>`) và IIFE
+(`section-rail__list`, trước `</script>` cuối) được trích **byte-identical** từ
+scaffold canonical `~/Documents/secrets-of-a-super-memory` — bản cover và bản chapter
+ở đó giống hệt nhau nên chỉ có một khối duy nhất. Không sửa prose, style khác, hay
+nav fence.
+
+| Kiểm chứng | Kết quả |
+|---|---|
+| `book-qa --kind cover` + `--kind chapter` | ✅ `ALL CHECKS PASS`, exit 0 (cả hai) |
+| Khối chèn so với canonical | ✅ identical (diff rỗng, CSS + JS, cả hai trang) |
+| Cân bằng tag | ✅ `<style>` 1/1, `<script>` 2/2 mỗi trang |
+| Rail render (Chrome 1440×900) | ✅ Ch1: 4 mục → `#reliability`/`#scalability`/`#maintainability`/`#diagnostic`; bìa: 2 mục → `#parts`/`#how-to-read` |
+| Scroll-spy | ✅ 4/4 section map đúng chỉ số active |
+| Ẩn ở viewport hẹp | ✅ `display: none` tại 1100px (ngưỡng 1280px) |
+| Chín biến CSS rail phụ thuộc | ✅ đủ trong cả light lẫn dark |
+
+**Phạm vi:** đây là lần chạy lại **gate `book-qa` + kiểm chứng render**, *không* phải
+một vòng `book-fidelity-auditor` mới. Các dòng ✅ ở bảng đầu (link sweep, external
+refs, faithfulness) vẫn dựa trên lần audit genesis — nội dung trang không đổi nên
+chúng không bị bản vá này làm mất hiệu lực.
