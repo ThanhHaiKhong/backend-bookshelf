@@ -282,3 +282,70 @@ Phạm vi thật rộng gấp rưỡi con số ban đầu: `khoá` (331) nhiều
 **`ref-1` thiếu link ngoài** ở hầu hết chương (chỉ Ch2 link tới Open Library). Không vi phạm "không bịa" — trích dẫn sách in đủ tên/nhà xuất bản/năm/chương. Để lượt polish sau.
 
 **Trang mind-map chưa có.** CSS `.mindmap-banner` đã nằm sẵn trong `<style>` của bìa nhưng không có element trong body. Giờ cuốn sách đã đủ 12 chương, đây là ứng viên hợp lý cho wave tiếp theo.
+
+---
+
+# Trang mind-map — bản đồ toàn cuốn (2026-09-12)
+
+Dựng bởi **main session** (theo `CLAUDE.md`: trang không-phải-chương chưa được `book-chapter-author`
+tổng quát hoá). Banner trên bìa: `book-cover-curator`. Thẩm định: `book-fidelity-auditor`.
+
+| Trang | book-qa | Ghi chú | Faithfulness | Nav |
+|---|---|---|---|---|
+| index.html | ✅ PASS | banner `.mindmap-banner` trỏ `mind-map.html`, không mang class `soon` | không đổi nội dung khác | live |
+| chapter-1 … chapter-12 | ✅ PASS (12/12) | không trang nào bị đụng trong lượt này | đã PASS từ các lượt trước | live, không đổi |
+| **mind-map.html** | ✅ PASS (`--kind synthesis`) | 5 section, 12 thẻ chương × **47 link sâu** (đối chiếu đúng tiêu đề đích, không chỉ kiểm anchor tồn tại), 8 thẻ through-line, 4 ref, 46 cite | 8/8 sợi chỉ khớp nội dung đã audit ở các trang chương; một mệnh đề thiếu nguồn đã bị gỡ | prev → Bìa; next → Chương 1 |
+
+**Site-level:** 0 link/anchor/cite hỏng trên cả 14 trang (kiểm độc lập, không chỉ dựa `book-qa`);
+bốn lớp song ngữ cân bằng (`standard-copy` 45 / `easy-only` 45), mọi `en-only` có `lang="en"`;
+storage key nhất quán; curator-region sạch (`index.html` chỉ +11 dòng).
+
+**Verdict: ✅ PASS**
+
+## Trang này làm gì
+
+Không lặp lại mục lục của bìa. Giá trị riêng của nó là mục **`#through-lines`**: tám khái niệm
+quay lại ở nhiều chương dưới nhiều tên khác nhau — nhật ký nối đuôi (Ch3 → 5 → 11 → 12), dữ liệu
+phái sinh, đa số phán xử, đồng hồ và thứ tự, hai chiều tương thích, luỹ đẳng, phân mảnh vọng lại,
+và **"cái nhãn không phải bảo đảm"** (Ch7 tên mức cô lập → Ch9 CAP → Ch11 exactly-once). Cộng 47
+link sâu mở thẳng vào từng mục của từng chương.
+
+## Ba lỗi, và cái nào bắt được bằng gì
+
+**`book-qa` PASS ngay lần đầu, nhưng trang hỏng thật.** Ảnh chụp lộ ra nhãn link hiện **cả hai
+ngôn ngữ dính liền**: *"Đáng tin không phải là không bao giờ hỏng**Reliable doesn't mean never
+breaking**"*. Nguyên nhân không phải CSS mà là dữ liệu — hàm trích tìm `standard-copy` trong
+`<h2>`, nhưng **cả 59 `<h2>` section đều dùng `vi-only`/`en-only`**, nên rơi vào nhánh dự phòng
+`layer(...) or strip(h2)` và nối cả hai lớp. Nhánh dự phòng đó biến một lỗi lẽ ra phải ồn ào
+thành một giá trị sai im lặng. Đã bỏ fallback, thêm cảnh báo khi thiếu lớp.
+
+**Lỗi thứ hai cũng chỉ thấy bằng mắt:** 47 link hiện chữ hoa font mono vì container mang kèm class
+`chapter-path`, mà `.chapter-path span` ghi đè font đã định cho `.map-links`. Hợp với nhãn ngắn,
+không hợp 47 dòng câu dài. Đã gỡ class thừa.
+
+**Lỗi thứ ba do auditor bắt, và không phép kiểm tự động nào bắt nổi.** Thẻ "Hai chiều tương thích"
+khẳng định *"Chương 11 gặp lại khi lược đồ tiến hóa giữa dòng sự kiện đang chảy"*, cite `ref-1`.
+Auditor đọc hết 2.145 dòng của Chương 11, thử mọi biến thể từ khoá, và **không tìm thấy nội dung
+nào hỗ trợ mệnh đề đó**. Nó phân biệt rõ "chứng minh được là sai" với "không chứng minh được là
+đúng", và coi vế thứ hai là đủ để chặn — đúng tinh thần "không bịa".
+
+Chọn **cắt vế Chương 11** thay vì thêm nội dung vào Chương 11 để hợp thức hoá: phương án sau đòi
+viết vào trang thứ hai một khẳng định cũng không xác minh được, tức tự tạo nguồn cho chính mình.
+Nếu sau này ai đó đọc bản in và xác nhận, thì thêm vào Chương 11 trước (có cite trang cụ thể), rồi
+mới nối lại ở bản đồ.
+
+## Bài học
+
+**`book-qa` kiểm cấu trúc, không kiểm trang trông ra sao.** Hai trong ba lỗi của trang này qua
+được mọi cổng tự động. Trang mới phải được mở bằng trình duyệt thật và nhìn trước khi giao cho
+auditor.
+
+**Đừng viết `giá_trị or dự_phòng` trong code trích dữ liệu.** Khi lớp dữ liệu mong đợi không tồn
+tại, dự phòng trả về một giá trị *trông hợp lệ* nhưng sai — và không ai biết. Thà nổ ra ngay.
+
+## Mục mở
+
+**Link mind-map từ các trang chương.** Bản đồ hiện chỉ vào được từ bìa, trong khi nó hữu ích nhất
+lúc người đọc đang ở giữa một chương. Curator đề xuất thêm một dòng trong footer cross-link của cả
+12 chương, trỏ tới section của phần chứa chương đó (`#foundations` / `#distributed` / `#derived`)
+chứ không trỏ suông về đầu trang. Chưa làm — đụng 12 file, để một lượt riêng.

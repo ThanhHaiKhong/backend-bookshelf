@@ -1,0 +1,1462 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Bản đồ toàn cuốn Designing Data-Intensive Applications của Martin Kleppmann: mười hai chương, ba phần, và tám sợi chỉ chạy xuyên suốt — nhật ký, dữ liệu phái sinh, quorum, đồng hồ, và cái bẫy của những cái nhãn.">
+<title>Bản đồ toàn cuốn · DDIA</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / MAP";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* MAP: lưới bản đồ toàn cuốn (chỉ trang này dùng) */
+  .map-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); }
+  .map-grid .overview-card { display: flex; flex-direction: column; gap: 10px; }
+  .map-grid h3 { margin: 0; font-size: 1.08rem; line-height: 1.35; }
+  .map-grid h3 a { color: inherit; text-decoration: none; border-bottom: 1px solid var(--line); }
+  .map-grid h3 a:hover { border-bottom-color: currentColor; }
+  .map-links { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+  .map-links a {
+    font: 500 0.82rem/1.4 var(--body);
+    color: var(--muted);
+    text-decoration: none;
+    padding: 4px 0 4px 14px;
+    border-left: 2px solid var(--line);
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .map-links a:hover { color: var(--ink); border-left-color: var(--teal); }
+  .map-threads .result { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+  .map-threads .result a {
+    color: inherit; text-decoration: none;
+    border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  .map-threads .result a:hover { border-bottom-color: currentColor; }
+
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Bản đồ toàn cuốn</span><span class="easy-only">DDIA · Martin Kleppmann · Bản đồ cả cuốn</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Whole-book map</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">Bản đồ toàn cuốn · 12 chương · 3 phần</span><span class="easy-only">Bản đồ cả cuốn sách</span><span class="en-only" lang="en">Whole-book map · 12 chapters · 3 parts</span></div>
+      <h1 id="page-title"><span class="standard-copy">Cả cuốn sách trên <span class="hero-title-accent">một trang</span></span><span class="easy-only">Cả cuốn sách vẽ thành <span class="hero-title-accent">một bản đồ</span></span><span class="en-only" lang="en">The whole book on <span class="hero-title-accent">one page</span></span></h1>
+      <p class="standard-copy">Mười hai chương của DDIA không phải mười hai chủ đề rời. Chúng là một lập luận kéo dài: Chương 1 dựng thước đo, chín chương giữa cho thấy cái giá phải trả khi dữ liệu rời khỏi một máy, và ba chương cuối ghép mọi thứ lại quanh dòng chảy dữ liệu<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. Trang này bày cả lập luận đó ra cùng lúc — và gọi tên những sợi chỉ chạy xuyên nhiều chương mà đọc tuần tự dễ bỏ sót.</p>
+      <p class="easy-only">Cuốn sách có mười hai chương, nhưng chúng nối vào nhau thành một câu chuyện. Trang này vẽ cả câu chuyện ra một lần. Nhớ nhé: xem rừng trước, rồi hãy bước vào từng cây.</p>
+      <p class="en-only" lang="en">The twelve chapters of DDIA are not twelve separate topics. They are one sustained argument: Chapter 1 sets the yardstick, the nine middle chapters show what it costs when data leaves a single machine, and the last three reassemble everything around dataflow<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>. This page lays that argument out at once — and names the threads running across chapters that sequential reading tends to miss.</p>
+    </div>
+    <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+      <a href="#the-thread"><span><span class="standard-copy">Sợi chỉ</span><span class="easy-only">Sợi chỉ</span><span class="en-only" lang="en">The thread</span></span><b class="standard-copy">Thước đo dựng ở Chương 1</b><b class="easy-only">Ba điều làm nên hệ tốt</b><b class="en-only" lang="en">The yardstick set in Chapter 1</b></a>
+      <a href="#foundations"><span><span class="standard-copy">Phần I</span><span class="easy-only">Phần I</span><span class="en-only" lang="en">Part I</span></span><b class="standard-copy">Nền tảng · Chương 1–4</b><b class="easy-only">Một máy</b><b class="en-only" lang="en">Foundations · Chapters 1–4</b></a>
+      <a href="#distributed"><span><span class="standard-copy">Phần II</span><span class="easy-only">Phần II</span><span class="en-only" lang="en">Part II</span></span><b class="standard-copy">Dữ liệu phân tán · Chương 5–9</b><b class="easy-only">Nhiều máy</b><b class="en-only" lang="en">Distributed Data · Chapters 5–9</b></a>
+      <a href="#through-lines"><span><span class="standard-copy">Sợi chỉ xuyên suốt</span><span class="easy-only">Điểm nối</span><span class="en-only" lang="en">Through-lines</span></span><b class="standard-copy">Tám khái niệm quay lại nhiều lần</b><b class="easy-only">Tám ý lặp lại</b><b class="en-only" lang="en">Eight ideas that keep returning</b></a>
+    </nav>
+  </section>
+
+  <section class="section" id="the-thread" aria-labelledby="the-thread-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="standard-copy">Sợi chỉ</span><span class="easy-only">Sợi chỉ</span><span class="en-only" lang="en">The thread</span></div>
+        <h2 id="the-thread-title"><span class="standard-copy">Chương 1 không phải chương mở đầu, nó là thước đo</span><span class="easy-only">Chương 1 cho ta ba câu hỏi để hỏi mọi chương sau</span><span class="en-only" lang="en">Chapter 1 is not an introduction, it is the yardstick</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann mở sách bằng ba phẩm chất — <strong>tin cậy</strong>, <strong>mở rộng</strong>, <strong>bảo trì</strong> — rồi dùng chúng làm bộ từ vựng để chấm mọi lựa chọn kỹ thuật ở mười một chương còn lại<span class="cite"><a href="#ref-1">1</a></span>. Đọc theo cách đó thì mỗi chương sau trở thành một câu trả lời cho cùng ba câu hỏi, chứ không phải một chủ đề mới.</p>
+      <p class="easy-only">Chương 1 cho ba câu hỏi: hỏng thì sao, đông người dùng thì sao, sửa về sau có dễ không. Nhớ nhé: mười một chương còn lại đều đang trả lời ba câu đó.</p>
+      <p class="en-only" lang="en">Kleppmann opens with three qualities — <strong>reliability</strong>, <strong>scalability</strong>, <strong>maintainability</strong> — then uses them as the vocabulary for judging every technical choice in the remaining eleven chapters<span class="cite"><a href="#ref-1">1</a></span>. Read that way, each later chapter becomes an answer to the same three questions rather than a new subject.</p>
+    </div>
+    <div class="definition">
+      <p class="standard-copy"><strong>Cách dùng trang này:</strong> mỗi thẻ chương bên dưới mở thẳng vào từng mục của chương đó. Nếu bạn đang tìm một khái niệm cụ thể, mục <a href="#through-lines">Sợi chỉ xuyên suốt</a> chỉ ra nó xuất hiện ở những chương nào — vì phần lớn khái niệm quan trọng của cuốn sách xuất hiện nhiều hơn một lần, dưới nhiều tên khác nhau<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Bấm tên chương để đọc cả chương, bấm dòng nhỏ bên dưới để nhảy thẳng tới đúng mục. Nhớ nhé: không cần đọc theo thứ tự.</p>
+      <p class="en-only" lang="en"><strong>How to use this page:</strong> each chapter card below opens directly into that chapter&#39;s sections. If you are hunting a specific idea, the <a href="#through-lines">through-lines</a> section names every chapter it appears in — because most of the book&#39;s important ideas appear more than once, under more than one name<span class="cite"><a href="#ref-1">1</a></span>.</p>
+    </div>
+  </section>
+
+  <section class="section" id="foundations" aria-labelledby="foundations-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="standard-copy">Phần I · Chương 1–4</span><span class="easy-only">Phần I</span><span class="en-only" lang="en">Part I · Chapters 1–4</span></div>
+        <h2 id="foundations-title"><span class="standard-copy">Nền tảng của hệ thống dữ liệu</span><span class="easy-only">Nền tảng của hệ thống dữ liệu</span><span class="en-only" lang="en">Foundations of Data Systems</span></h2>
+      </div>
+      <p class="standard-copy">Bốn chương này ở trên một máy. Chúng quyết định hình dạng dữ liệu trước khi có bất kỳ máy thứ hai nào: dùng mô hình nào, cất trên đĩa ra sao, và mã hóa thế nào để code hôm nay còn đọc được dữ liệu của năm ngoái<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>.</p>
+      <p class="easy-only">Bốn chương đầu nói về một máy thôi: dữ liệu trông thế nào, cất ở đâu, và viết ra sao để sau này còn đọc được. Nhớ nhé: chưa có máy thứ hai nào cả.</p>
+      <p class="en-only" lang="en">These four chapters live on a single machine. They decide the shape of the data before any second machine exists: which model to use, how to lay it out on disk, and how to encode it so today&#39;s code can still read last year&#39;s data<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>.</p>
+    </div>
+    <div class="overview-grid map-grid">
+      <article class="overview-card">
+        <div class="surprise-number">01</div>
+        <h3><span class="vi-only"><a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Ba phẩm chất của hệ thâm dụng dữ liệu</a></span><span class="en-only" lang="en"><a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Three qualities of a data-intensive</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-1-reliable-scalable-and-maintainable-applications.html#reliability"><span class="vi-only">Đáng tin không phải là không bao giờ hỏng</span><span class="en-only" lang="en">Reliable doesn&#x27;t mean never breaking</span></a>
+          <a href="chapter-1-reliable-scalable-and-maintainable-applications.html#scalability"><span class="vi-only">Co giãn không phải một cái nhãn có/không</span><span class="en-only" lang="en">Scalability isn&#x27;t a yes/no label</span></a>
+          <a href="chapter-1-reliable-scalable-and-maintainable-applications.html#maintainability"><span class="vi-only">Phần lớn chi phí nằm ở bảo trì, không ở lúc viết</span><span class="en-only" lang="en">Most of the cost is maintenance, not writing</span></a>
+        </div>
+      </article>
+      <article class="overview-card">
+        <div class="surprise-number">02</div>
+        <h3><span class="vi-only"><a href="chapter-2-data-models-and-query-languages.html">Mỗi tầng phần mềm là một lần kể lại</a></span><span class="en-only" lang="en"><a href="chapter-2-data-models-and-query-languages.html">Every layer of software re-tells</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-2-data-models-and-query-languages.html#relational-vs-document"><span class="vi-only">Đối tượng trong ứng dụng không vừa với hàng trong bảng</span><span class="en-only" lang="en">Application objects don&#x27;t fit rows in tables</span></a>
+          <a href="chapter-2-data-models-and-query-languages.html#schema-and-locality"><span class="vi-only">Lược đồ đọc-khi-cần và cái giá của locality</span><span class="en-only" lang="en">Schema-on-read and the price of locality</span></a>
+          <a href="chapter-2-data-models-and-query-languages.html#query-languages"><span class="vi-only">Nói cái mình muốn, đừng chỉ đường cho máy</span><span class="en-only" lang="en">State what you want, don&#x27;t steer the machine</span></a>
+          <a href="chapter-2-data-models-and-query-languages.html#graph-models"><span class="vi-only">Khi nhiều-nhiều trở thành chuyện thường ngày</span><span class="en-only" lang="en">When many-to-many becomes the norm</span></a>
+        </div>
+      </article>
+      <article class="overview-card">
+        <div class="surprise-number">03</div>
+        <h3><span class="vi-only"><a href="chapter-3-storage-and-retrieval.html">Cỗ máy cất và tìm</a></span><span class="en-only" lang="en"><a href="chapter-3-storage-and-retrieval.html">The store-and-find</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-3-storage-and-retrieval.html#log-and-hash-index"><span class="vi-only">Ghi thì nối đuôi, đọc mới là chỗ phải trả tiền</span><span class="en-only" lang="en">Appending is cheap; reading is where you pay</span></a>
+          <a href="chapter-3-storage-and-retrieval.html#lsm-vs-btree"><span class="vi-only">Hai họ engine, hai chỗ để trả giá</span><span class="en-only" lang="en">Two families of engine, two places to pay</span></a>
+          <a href="chapter-3-storage-and-retrieval.html#index-shapes"><span class="vi-only">Chỉ mục không chỉ có một hình dạng</span><span class="en-only" lang="en">An index has more than one shape</span></a>
+          <a href="chapter-3-storage-and-retrieval.html#oltp-vs-olap"><span class="vi-only">Cùng gọi là cơ sở dữ liệu, nhưng là hai thế giới</span><span class="en-only" lang="en">Both are called databases, but they are two worlds</span></a>
+        </div>
+      </article>
+      <article class="overview-card">
+        <div class="surprise-number">04</div>
+        <h3><span class="vi-only"><a href="chapter-4-encoding-and-evolution.html">Dữ liệu sống lâu hơn</a></span><span class="en-only" lang="en"><a href="chapter-4-encoding-and-evolution.html">Data outlives</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-4-encoding-and-evolution.html#compatibility"><span class="vi-only">Hai chiều tương thích, và vì sao chúng không đối xứng</span><span class="en-only" lang="en">Two directions of compatibility, and why they aren&#x27;t symmetric</span></a>
+          <a href="chapter-4-encoding-and-evolution.html#text-formats"><span class="vi-only">Hai họ định dạng dễ với, và cái giá của chúng</span><span class="en-only" lang="en">Two convenient families, and what they cost</span></a>
+          <a href="chapter-4-encoding-and-evolution.html#binary-formats"><span class="vi-only">Ba cách bỏ tên trường ra khỏi dữ liệu</span><span class="en-only" lang="en">Three ways to take field names out of the data</span></a>
+          <a href="chapter-4-encoding-and-evolution.html#dataflow"><span class="vi-only">Ba con đường dữ liệu rời khỏi một tiến trình</span><span class="en-only" lang="en">Three routes data takes out of a process</span></a>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section" id="distributed" aria-labelledby="distributed-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="standard-copy">Phần II · Chương 5–9</span><span class="easy-only">Phần II</span><span class="en-only" lang="en">Part II · Chapters 5–9</span></div>
+        <h2 id="distributed-title"><span class="standard-copy">Dữ liệu phân tán</span><span class="easy-only">Dữ liệu phân tán</span><span class="en-only" lang="en">Distributed Data</span></h2>
+      </div>
+      <p class="standard-copy">Năm chương nặng nhất cuốn sách. Mỗi chương thêm một máy và cho thấy cái giá: bản sao lệch nhau, dữ liệu phải chia nhỏ, giao dịch phải chống được đồng thời, mạng và đồng hồ không đáng tin, và cuối cùng là câu hỏi làm sao nhiều máy cùng chốt được một sự thật<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>.</p>
+      <p class="easy-only">Năm chương này nói về nhiều máy cùng làm việc. Nhớ nhé: thêm máy thì thêm sức, nhưng cũng thêm cách hỏng.</p>
+      <p class="en-only" lang="en">The heaviest five chapters. Each adds a machine and shows the price: replicas drift apart, data must be split, transactions must withstand concurrency, networks and clocks cannot be trusted, and finally — how do many machines agree on one truth<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>?</p>
+    </div>
+    <div class="overview-grid map-grid">
+      <article class="overview-card">
+        <div class="surprise-number">05</div>
+        <h3><span class="vi-only"><a href="chapter-5-replication.html">Giữ cùng một dữ liệu trên nhiều máy</a></span><span class="en-only" lang="en"><a href="chapter-5-replication.html">Keeping the same data on several machines</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-5-replication.html#leader-follower"><span class="vi-only">Một người ghi, những người còn lại chép theo</span><span class="en-only" lang="en">One writer, everyone else replays the log</span></a>
+          <a href="chapter-5-replication.html#replication-lag"><span class="vi-only">Độ trễ nhân bản: ba bảo đảm vá ba lỗ hổng</span><span class="en-only" lang="en">Replication lag: three guarantees for three holes</span></a>
+          <a href="chapter-5-replication.html#multi-leader"><span class="vi-only">Nhiều lãnh đạo: mua sẵn sàng bằng xung đột</span><span class="en-only" lang="en">Multi-leader: buying availability with conflict</span></a>
+          <a href="chapter-5-replication.html#leaderless"><span class="vi-only">Không lãnh đạo: quorum, và chỗ quorum không giữ lời</span><span class="en-only" lang="en">Leaderless: quorums, and where they break their promise</span></a>
+        </div>
+      </article>
+      <article class="overview-card">
+        <div class="surprise-number">06</div>
+        <h3><span class="vi-only"><a href="chapter-6-partitioning.html">Mỗi bản ghi thuộc đúng một mảnh</a></span><span class="en-only" lang="en"><a href="chapter-6-partitioning.html">Every record lives in exactly one partition</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-6-partitioning.html#key-partitioning"><span class="vi-only">Vẽ ranh giới: theo dải khóa hay theo băm</span><span class="en-only" lang="en">Drawing the line: by key range or by hash</span></a>
+          <a href="chapter-6-partitioning.html#secondary-indexes"><span class="vi-only">Chỉ mục phụ phá vỡ sự gọn gàng</span><span class="en-only" lang="en">Secondary indexes break the tidiness</span></a>
+          <a href="chapter-6-partitioning.html#rebalancing"><span class="vi-only">Dời mảnh mà không dời cả thế giới</span><span class="en-only" lang="en">Moving partitions without moving the world</span></a>
+          <a href="chapter-6-partitioning.html#request-routing"><span class="vi-only">Mảnh đã dời — giờ tìm dữ liệu ở đâu?</span><span class="en-only" lang="en">The partition moved — so where is the data now?</span></a>
+        </div>
+      </article>
+      <article class="overview-card">
+        <div class="surprise-number">07</div>
+        <h3><span class="vi-only"><a href="chapter-7-transactions.html">Giao dịch và những cái nhãn</a></span><span class="en-only" lang="en"><a href="chapter-7-transactions.html">Transactions and the labels that lie</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-7-transactions.html#acid-and-scope"><span class="vi-only">Bốn chữ, và một chữ đi lạc</span><span class="en-only" lang="en">Four letters, and one that wandered off</span></a>
+          <a href="chapter-7-transactions.html#weak-isolation"><span class="vi-only">Tên gọi không phải là bảo đảm</span><span class="en-only" lang="en">The label is not the guarantee</span></a>
+          <a href="chapter-7-transactions.html#write-skew"><span class="vi-only">Cái mà ảnh chụp không cứu được</span><span class="en-only" lang="en">What the snapshot cannot save you from</span></a>
+          <a href="chapter-7-transactions.html#serializability"><span class="vi-only">Ba con đường, ba cái giá</span><span class="en-only" lang="en">Three routes, three prices</span></a>
+        </div>
+      </article>
+      <article class="overview-card">
+        <div class="surprise-number">08</div>
+        <h3><span class="vi-only"><a href="chapter-8-the-trouble-with-distributed-systems.html">Hệ phân tán hỏng theo kiểu bộ phận và bất định</a></span><span class="en-only" lang="en"><a href="chapter-8-the-trouble-with-distributed-systems.html">Distributed systems fail in partial, nondeterministic</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-8-the-trouble-with-distributed-systems.html#partial-failure"><span class="vi-only">Lỗi bộ phận: hỏng một phần, và không biết là phần nào</span><span class="en-only" lang="en">Partial failure: part of it breaks, and you can&#x27;t tell which</span></a>
+          <a href="chapter-8-the-trouble-with-distributed-systems.html#unreliable-networks"><span class="vi-only">Mạng không đáng tin: bạn chỉ có timeout, và timeout luôn nói dối</span><span class="en-only" lang="en">Unreliable networks: all you have is a timeout, and it always lies</span></a>
+          <a href="chapter-8-the-trouble-with-distributed-systems.html#unreliable-clocks"><span class="vi-only">Đồng hồ không đáng tin: hai loại đồng hồ, hai kiểu sai</span><span class="en-only" lang="en">Unreliable clocks: two kinds of clock, two kinds of wrong</span></a>
+          <a href="chapter-8-the-trouble-with-distributed-systems.html#truth-and-lies"><span class="vi-only">Tri thức, sự thật và dối trá: ai có quyền phán xử?</span><span class="en-only" lang="en">Knowledge, truth and lies: who gets to rule?</span></a>
+        </div>
+      </article>
+      <article class="overview-card">
+        <div class="surprise-number">09</div>
+        <h3><span class="vi-only"><a href="chapter-9-consistency-and-consensus.html">Làm sao nhiều máy cùng chốt một sự thật</a></span><span class="en-only" lang="en"><a href="chapter-9-consistency-and-consensus.html">How many machines agree on one truth</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-9-consistency-and-consensus.html#linearizability"><span class="vi-only">Ảo giác “chỉ có một bản sao”</span><span class="en-only" lang="en">The illusion of a single copy</span></a>
+          <a href="chapter-9-consistency-and-consensus.html#cost-of-linearizability"><span class="vi-only">Vài việc thật sự cần nó — và hóa đơn đi kèm</span><span class="en-only" lang="en">A few jobs genuinely need it — and the bill that follows</span></a>
+          <a href="chapter-9-consistency-and-consensus.html#ordering-and-causality"><span class="vi-only">Nhân quả là thứ tự bộ phận, không phải toàn phần</span><span class="en-only" lang="en">Causality is a partial order, not a total one</span></a>
+          <a href="chapter-9-consistency-and-consensus.html#consensus"><span class="vi-only">Từ 2PC đến đồng thuận chịu lỗi</span><span class="en-only" lang="en">From 2PC to fault-tolerant consensus</span></a>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section" id="derived" aria-labelledby="derived-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="standard-copy">Phần III · Chương 10–12</span><span class="easy-only">Phần III</span><span class="en-only" lang="en">Part III · Chapters 10–12</span></div>
+        <h2 id="derived-title"><span class="standard-copy">Dữ liệu phái sinh</span><span class="easy-only">Dữ liệu phái sinh</span><span class="en-only" lang="en">Derived Data</span></h2>
+      </div>
+      <p class="standard-copy">Ba chương cuối không thêm máy nữa mà đổi góc nhìn: xem hệ như một dòng chảy dữ liệu. Xử lý theo lô và xử lý luồng là hai nhịp của cùng một ý tưởng, và chương kết ghép chúng lại thành một lập luận về cách xây hệ — rồi hỏi hệ ấy nên được dùng thế nào<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>.</p>
+      <p class="easy-only">Ba chương cuối nhìn cả hệ như dòng nước chảy. Nhớ nhé: dữ liệu đi từ chỗ này sang chỗ khác, và ta xây quanh dòng chảy đó.</p>
+      <p class="en-only" lang="en">The last three chapters add no machines; they change the viewpoint, seeing a system as dataflow. Batch and stream are two tempos of one idea, and the closing chapter assembles them into an argument about how to build such systems — then asks how they ought to be used<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>.</p>
+    </div>
+    <div class="overview-grid map-grid">
+      <article class="overview-card">
+        <div class="surprise-number">10</div>
+        <h3><span class="vi-only"><a href="chapter-10-batch-processing.html">Khi thước đo không còn là độ trễ mà là thông lượng</a></span><span class="en-only" lang="en"><a href="chapter-10-batch-processing.html">When the measure is no longer latency but throughput</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-10-batch-processing.html#unix-philosophy"><span class="vi-only">Công cụ nhỏ, nối bằng một giao diện duy nhất</span><span class="en-only" lang="en">Small tools, joined by a single interface</span></a>
+          <a href="chapter-10-batch-processing.html#mapreduce"><span class="vi-only">Unix trải trên hàng nghìn máy</span><span class="en-only" lang="en">Unix, spread across thousands of machines</span></a>
+          <a href="chapter-10-batch-processing.html#joins-and-grouping"><span class="vi-only">Đưa dữ liệu liên quan về cùng một chỗ</span><span class="en-only" lang="en">Bringing related data to the same place</span></a>
+          <a href="chapter-10-batch-processing.html#beyond-mapreduce"><span class="vi-only">Vượt khỏi MapReduce: engine dòng dữ liệu</span><span class="en-only" lang="en">Beyond MapReduce: dataflow engines</span></a>
+        </div>
+      </article>
+      <article class="overview-card">
+        <div class="surprise-number">11</div>
+        <h3><span class="vi-only"><a href="chapter-11-stream-processing.html">Theo lô, nhưng không có hồi kết</a></span><span class="en-only" lang="en"><a href="chapter-11-stream-processing.html">Like batch, but it never ends</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-11-stream-processing.html#event-streams"><span class="vi-only">Hàng đợi xóa tin, nhật ký thì nhớ</span><span class="en-only" lang="en">Queues forget; logs remember</span></a>
+          <a href="chapter-11-stream-processing.html#databases-and-streams"><span class="vi-only">Trạng thái là tích phân của luồng</span><span class="en-only" lang="en">State is a stream, integrated</span></a>
+          <a href="chapter-11-stream-processing.html#time-and-windows"><span class="vi-only">Truy vấn đứng yên, dữ liệu chạy qua</span><span class="en-only" lang="en">The query stands still; the data runs past</span></a>
+          <a href="chapter-11-stream-processing.html#stream-fault-tolerance"><span class="vi-only">Hiệu ứng đúng một lần, không phải xử lý đúng một lần</span><span class="en-only" lang="en">Effectively once, not literally once</span></a>
+        </div>
+      </article>
+      <article class="overview-card">
+        <div class="surprise-number">12</div>
+        <h3><span class="vi-only"><a href="chapter-12-the-future-of-data-systems.html">Ghép các mảnh, rồi hỏi hệ này nên</a></span><span class="en-only" lang="en"><a href="chapter-12-the-future-of-data-systems.html">Compose the pieces, then ask what the system ought</a></span></h3>
+        <div class="map-links">
+          <a href="chapter-12-the-future-of-data-systems.html#data-integration"><span class="vi-only">Không có công cụ vạn năng — nên bài toán thật là ghép</span><span class="en-only" lang="en">No tool does everything — so the real problem is composition</span></a>
+          <a href="chapter-12-the-future-of-data-systems.html#unbundling"><span class="vi-only">Tháo rời cơ sở dữ liệu thành những bộ phận lắp ráp được</span><span class="en-only" lang="en">Unbundling the database into assemblable parts</span></a>
+          <a href="chapter-12-the-future-of-data-systems.html#correctness"><span class="vi-only">Hướng tới tính đúng đắn: giao dịch là chưa đủ</span><span class="en-only" lang="en">Aiming for correctness: transactions are not enough</span></a>
+          <a href="chapter-12-the-future-of-data-systems.html#doing-the-right-thing"><span class="vi-only">Làm điều đúng đắn: kỹ thuật không đứng ngoài hệ quả</span><span class="en-only" lang="en">Doing the right thing: engineering does not stand outside its consequences</span></a>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section" id="through-lines" aria-labelledby="through-lines-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="standard-copy">Sợi chỉ xuyên suốt</span><span class="easy-only">Những ý quay lại</span><span class="en-only" lang="en">Through-lines</span></div>
+        <h2 id="through-lines-title"><span class="standard-copy">Tám khái niệm xuất hiện nhiều hơn một lần</span><span class="easy-only">Tám ý lặp lại khắp cuốn sách</span><span class="en-only" lang="en">Eight ideas that appear more than once</span></h2>
+      </div>
+      <p class="standard-copy">Đọc tuần tự dễ khiến mỗi chương trông như một chủ đề riêng. Nhưng phần lớn khái niệm nặng ký của cuốn sách quay lại nhiều lần, thường dưới một cái tên khác<span class="cite"><a href="#ref-1">1</a></span>. Nhận ra chúng là chỗ cuốn sách chuyển từ một tập hợp kỹ thuật thành một lập luận.</p>
+      <p class="easy-only">Nhiều ý trong sách xuất hiện đi xuất hiện lại ở các chương khác nhau, mỗi lần một tên. Nhớ nhé: thấy được chúng thì cả cuốn sách nối lại thành một mạch.</p>
+      <p class="en-only" lang="en">Read in sequence, each chapter can look like its own topic. But most of the book&#39;s load-bearing ideas return several times, usually under a different name<span class="cite"><a href="#ref-1">1</a></span>. Noticing them is where the book turns from a collection of techniques into an argument.</p>
+    </div>
+    <div class="trap-grid map-threads">
+      <article class="trap-card">
+        <h3><span class="standard-copy">Nhật ký nối đuôi</span><span class="easy-only">Nhật ký nối đuôi</span><span class="en-only" lang="en">The append-only log</span></h3>
+        <p class="standard-copy">Cùng một cấu trúc xuất hiện bốn lần dưới bốn cái tên. Chương 3 gọi nó là engine lưu trữ log-structured; Chương 5 gọi là nhật ký nhân bản; Chương 11 gọi là nhật ký phân mảnh; Chương 12 lấy chính nó làm trục để tháo rời cơ sở dữ liệu<span class="cite"><a href="#ref-1">1</a></span>. Nhận ra sợi chỉ này là nhận ra vì sao Phần III không phải chủ đề mới, mà là hệ quả.</p>
+      <p class="easy-only">Cùng một ý tưởng &quot;chỉ ghi thêm vào cuối&quot; xuất hiện đi xuất hiện lại, mỗi lần một tên khác. Nhớ nhé: học một lần, dùng được ở bốn chương.</p>
+      <p class="en-only" lang="en">The same structure appears four times under four names. Chapter 3 calls it a log-structured storage engine; Chapter 5, a replication log; Chapter 11, a partitioned log; Chapter 12 makes it the axis for unbundling the database<span class="cite"><a href="#ref-1">1</a></span>. Seeing this thread is seeing why Part III is not a new topic but a consequence.</p>
+        <div class="result"><span class="vi-only">Chạy qua: <a href="chapter-3-storage-and-retrieval.html">Chương 3</a> <a href="chapter-5-replication.html">Chương 5</a> <a href="chapter-11-stream-processing.html">Chương 11</a> <a href="chapter-12-the-future-of-data-systems.html">Chương 12</a></span><span class="en-only" lang="en">Runs through: <a href="chapter-3-storage-and-retrieval.html">Ch 3</a> <a href="chapter-5-replication.html">Ch 5</a> <a href="chapter-11-stream-processing.html">Ch 11</a> <a href="chapter-12-the-future-of-data-systems.html">Ch 12</a></span></div>
+      </article><article class="trap-card">
+        <h3><span class="standard-copy">Dữ liệu phái sinh</span><span class="easy-only">Dữ liệu phái sinh</span><span class="en-only" lang="en">Derived data</span></h3>
+        <p class="standard-copy">Chỉ mục là dữ liệu phái sinh — dựng lại được từ nguồn, nên mất cũng không sao. Chương 3 nói điều đó về chỉ mục; Chương 10 và 11 nói điều đó về đầu ra của quy trình lô và luồng; Chương 12 nâng nó thành nguyên tắc kiến trúc: tách hệ ghi-gốc khỏi mọi thứ suy ra từ nó<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Có thứ dữ liệu gốc, và thứ tính ra được từ gốc. Nhớ nhé: mất cái thứ hai thì dựng lại được, mất cái thứ nhất thì không.</p>
+      <p class="en-only" lang="en">An index is derived data — rebuildable from the source, so losing it is survivable. Chapter 3 says this of indexes; Chapters 10 and 11 say it of batch and stream outputs; Chapter 12 raises it into an architectural principle: separate the system of record from everything derived from it<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <div class="result"><span class="vi-only">Chạy qua: <a href="chapter-3-storage-and-retrieval.html">Chương 3</a> <a href="chapter-10-batch-processing.html">Chương 10</a> <a href="chapter-11-stream-processing.html">Chương 11</a> <a href="chapter-12-the-future-of-data-systems.html">Chương 12</a></span><span class="en-only" lang="en">Runs through: <a href="chapter-3-storage-and-retrieval.html">Ch 3</a> <a href="chapter-10-batch-processing.html">Ch 10</a> <a href="chapter-11-stream-processing.html">Ch 11</a> <a href="chapter-12-the-future-of-data-systems.html">Ch 12</a></span></div>
+      </article><article class="trap-card">
+        <h3><span class="standard-copy">Đa số phán xử</span><span class="easy-only">Đa số phán xử</span><span class="en-only" lang="en">The majority decides</span></h3>
+        <p class="standard-copy">Không node nào tự biết mình còn sống dưới mắt người khác. Chương 5 dựng quorum đọc–ghi; Chương 8 nói thẳng rằng sự thật do đa số định nghĩa chứ không phải do node tự tin nhất, và đưa ra fencing token; Chương 9 cho thấy đồng thuận chính là hình thức hóa của cùng ý tưởng đó<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Một máy không tự quyết được nó đúng hay sai. Nhớ nhé: phải hỏi số đông mới biết.</p>
+      <p class="en-only" lang="en">No node knows on its own whether the others still consider it alive. Chapter 5 builds read/write quorums; Chapter 8 states plainly that truth is defined by the majority rather than by the most confident node, and introduces fencing tokens; Chapter 9 shows consensus to be the formalisation of that same idea<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <div class="result"><span class="vi-only">Chạy qua: <a href="chapter-5-replication.html">Chương 5</a> <a href="chapter-8-the-trouble-with-distributed-systems.html">Chương 8</a> <a href="chapter-9-consistency-and-consensus.html">Chương 9</a></span><span class="en-only" lang="en">Runs through: <a href="chapter-5-replication.html">Ch 5</a> <a href="chapter-8-the-trouble-with-distributed-systems.html">Ch 8</a> <a href="chapter-9-consistency-and-consensus.html">Ch 9</a></span></div>
+      </article><article class="trap-card">
+        <h3><span class="standard-copy">Đồng hồ và thứ tự</span><span class="easy-only">Đồng hồ và thứ tự</span><span class="en-only" lang="en">Clocks and ordering</span></h3>
+        <p class="standard-copy">Chương 5 dùng dấu thời gian để hóa giải xung đột và chỉ ra LWW làm mất dữ liệu; Chương 8 giải thích vì sao đồng hồ không đáng tin đến thế; Chương 9 thay đồng hồ vật lý bằng thứ tự nhân quả và phát sóng theo thứ tự toàn phần; Chương 11 gặp lại đúng vấn đề dưới tên thời gian sự kiện và thời gian xử lý<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Các máy không thống nhất được &quot;lúc nào&quot;. Nhớ nhé: muốn xếp thứ tự thì đừng chỉ dựa vào đồng hồ.</p>
+      <p class="en-only" lang="en">Chapter 5 resolves conflicts with timestamps and shows that LWW discards data; Chapter 8 explains why clocks are so untrustworthy; Chapter 9 replaces physical clocks with causal ordering and total order broadcast; Chapter 11 meets the same problem again as event time versus processing time<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <div class="result"><span class="vi-only">Chạy qua: <a href="chapter-5-replication.html">Chương 5</a> <a href="chapter-8-the-trouble-with-distributed-systems.html">Chương 8</a> <a href="chapter-9-consistency-and-consensus.html">Chương 9</a> <a href="chapter-11-stream-processing.html">Chương 11</a></span><span class="en-only" lang="en">Runs through: <a href="chapter-5-replication.html">Ch 5</a> <a href="chapter-8-the-trouble-with-distributed-systems.html">Ch 8</a> <a href="chapter-9-consistency-and-consensus.html">Ch 9</a> <a href="chapter-11-stream-processing.html">Ch 11</a></span></div>
+      </article><article class="trap-card">
+        <h3><span class="standard-copy">Hai chiều tương thích</span><span class="easy-only">Hai chiều tương thích</span><span class="en-only" lang="en">Compatibility in both directions</span></h3>
+        <p class="standard-copy">Chương 4 đặt ra cặp tương thích ngược và xuôi vì nâng cấp luôn cuốn chiếu — code mới phải đọc được dữ liệu cũ, và code cũ không được làm hỏng dữ liệu mới. Chương 5 cho thấy chính ràng buộc đó buộc nhân bản phải chịu được hai phiên bản code chạy song song trong suốt quá trình nâng cấp<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Code mới phải đọc được dữ liệu cũ, và code cũ không được làm hỏng dữ liệu mới. Nhớ nhé: lúc nâng cấp, hai bên cùng chạy.</p>
+      <p class="en-only" lang="en">Chapter 4 sets up backward and forward compatibility because upgrades always roll — new code must read old data, and old code must not corrupt new data. Chapter 5 shows the same constraint forcing replication to tolerate two code versions at once throughout the upgrade<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <div class="result"><span class="vi-only">Chạy qua: <a href="chapter-4-encoding-and-evolution.html">Chương 4</a> <a href="chapter-5-replication.html">Chương 5</a></span><span class="en-only" lang="en">Runs through: <a href="chapter-4-encoding-and-evolution.html">Ch 4</a> <a href="chapter-5-replication.html">Ch 5</a></span></div>
+      </article><article class="trap-card">
+        <h3><span class="standard-copy">Lũy đẳng</span><span class="easy-only">Lũy đẳng</span><span class="en-only" lang="en">Idempotence</span></h3>
+        <p class="standard-copy">Khi việc gửi lại là không tránh khỏi, cách duy nhất để kết quả đúng là làm cho việc lặp lại vô hại. Chương 11 dùng nó để đạt hiệu ứng đúng một lần; Chương 12 nâng lên thành lập luận đầu-cuối: chỉ hai đầu mới bảo đảm được tính đúng đắn, tầng giữa không làm thay được<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Làm lại một việc mà kết quả không đổi. Nhớ nhé: đó là cách sống chung với việc phải gửi lại.</p>
+      <p class="en-only" lang="en">When retries are unavoidable, the only way to keep results correct is to make repetition harmless. Chapter 11 uses it to achieve effectively-once; Chapter 12 raises it into the end-to-end argument: only the endpoints can guarantee correctness, and no middle layer can do it for them<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <div class="result"><span class="vi-only">Chạy qua: <a href="chapter-11-stream-processing.html">Chương 11</a> <a href="chapter-12-the-future-of-data-systems.html">Chương 12</a></span><span class="en-only" lang="en">Runs through: <a href="chapter-11-stream-processing.html">Ch 11</a> <a href="chapter-12-the-future-of-data-systems.html">Ch 12</a></span></div>
+      </article><article class="trap-card">
+        <h3><span class="standard-copy">Cái nhãn không phải bảo đảm</span><span class="easy-only">Cái nhãn không phải bảo đảm</span><span class="en-only" lang="en">The label is not the guarantee</span></h3>
+        <p class="standard-copy">Sợi chỉ khó chịu nhất của cuốn sách. Chương 7 cho thấy tên mức cô lập nghĩa khác nhau giữa các cơ sở dữ liệu — cái Oracle gọi là serializable thực ra là snapshot isolation. Chương 9 cho thấy CAP bị dùng sai đến mức gần như vô nghĩa, và khả tuyến tính hóa không phải khả tuần tự hóa. Chương 11 cho thấy exactly-once không có nghĩa như chữ nghĩa của nó<span class="cite"><a href="#ref-1">1</a></span>. Mỗi lần, bài học giống nhau: hỏi hệ chặn được tình huống nào, đừng hỏi nó tự gọi mình là gì.</p>
+      <p class="easy-only">Đừng tin cái tên người ta dán lên. Nhớ nhé: hỏi xem nó thật sự chặn được chuyện gì.</p>
+      <p class="en-only" lang="en">The book&#39;s most uncomfortable thread. Chapter 7 shows isolation-level names meaning different things across databases — what Oracle calls serializable is really snapshot isolation. Chapter 9 shows CAP misused almost past meaning, and linearizability not being serializability. Chapter 11 shows exactly-once not meaning what its words say<span class="cite"><a href="#ref-1">1</a></span>. Each time the lesson is the same: ask which situations a system actually prevents, not what it calls itself.</p>
+        <div class="result"><span class="vi-only">Chạy qua: <a href="chapter-7-transactions.html">Chương 7</a> <a href="chapter-9-consistency-and-consensus.html">Chương 9</a> <a href="chapter-11-stream-processing.html">Chương 11</a></span><span class="en-only" lang="en">Runs through: <a href="chapter-7-transactions.html">Ch 7</a> <a href="chapter-9-consistency-and-consensus.html">Ch 9</a> <a href="chapter-11-stream-processing.html">Ch 11</a></span></div>
+      </article><article class="trap-card">
+        <h3><span class="standard-copy">Phân mảnh vọng lại</span><span class="easy-only">Phân mảnh vọng lại</span><span class="en-only" lang="en">Partitioning echoes</span></h3>
+        <p class="standard-copy">Chương 6 chia dữ liệu ra nhiều máy. Cái giá của quyết định đó vọng lại khắp nơi: Chương 7 cho thấy giao dịch chạm nhiều mảnh chậm hơn hẳn; Chương 10 cho thấy join và lệch tải đều là bài toán đưa dữ liệu liên quan về cùng một chỗ; Chương 11 phân mảnh chính nhật ký<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Chia nhỏ dữ liệu ra nhiều máy làm mọi việc khác khó lên một chút. Nhớ nhé: cái giá đó trả dần ở các chương sau.</p>
+      <p class="en-only" lang="en">Chapter 6 splits data across machines. The price of that decision echoes everywhere: Chapter 7 shows cross-partition transactions being markedly slower; Chapter 10 frames joins and skew as the problem of bringing related data together; Chapter 11 partitions the log itself<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <div class="result"><span class="vi-only">Chạy qua: <a href="chapter-6-partitioning.html">Chương 6</a> <a href="chapter-7-transactions.html">Chương 7</a> <a href="chapter-10-batch-processing.html">Chương 10</a> <a href="chapter-11-stream-processing.html">Chương 11</a></span><span class="en-only" lang="en">Runs through: <a href="chapter-6-partitioning.html">Ch 6</a> <a href="chapter-7-transactions.html">Ch 7</a> <a href="chapter-10-batch-processing.html">Ch 10</a> <a href="chapter-11-stream-processing.html">Ch 11</a></span></div>
+      </article>
+    </div>
+  </section>
+
+  <section class="closing">
+    <blockquote>
+      <p class="standard-copy">Cuốn sách không hứa cho bạn một kiến trúc đúng. Nó cho bạn bộ từ vựng để hỏi đúng câu, và đủ chi tiết để biết mình đang trả giá bằng gì.</p>
+      <p class="easy-only">Sách không chỉ cho bạn một cách làm đúng duy nhất. Nhớ nhé: nó dạy bạn hỏi câu đúng trước khi chọn.</p>
+      <p class="en-only" lang="en">The book does not promise you a correct architecture. It gives you the vocabulary to ask the right question, and enough detail to know what you are paying with.</p>
+    </blockquote>
+  </section>
+
+  <!-- NAV:START (curator-owned: map navigation) -->
+  <nav class="chapter-nav" aria-label="Điều hướng">
+    <a class="nav-cell nav-prev" href="index.html">
+      <span class="nav-label"><span class="vi-only">◀ Mục lục</span><span class="en-only" lang="en">◀ Contents</span></span>
+      <span class="nav-title"><span class="vi-only">Trang bìa · DDIA</span><span class="en-only" lang="en">Cover · DDIA</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="chapter-1-reliable-scalable-and-maintainable-applications.html">
+      <span class="nav-label"><span class="vi-only">Bắt đầu đọc ▶</span><span class="en-only" lang="en">Start reading ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 1 · Tin cậy, mở rộng &amp; bảo trì</span><span class="en-only" lang="en">Chapter 1 · Reliable, Scalable &amp; Maintainable</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O&#39;Reilly Media, 2017<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>. Trang này là bản đồ điều hướng do tài liệu dựng, tóm lược cấu trúc và mạch lập luận của cuốn sách<span class="cite"><a href="#ref-2">2</a></span>; nó không thay thế nội dung chương và không đưa ra khẳng định đặc thù nào ngoài những gì các trang chương đã trích dẫn. Danh mục tham chiếu đầy đủ của từng chương do chính tác giả duy trì<span class="cite"><a href="#ref-4">4</a></span>.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O&#39;Reilly Media, 2017<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>. This page is a navigation map built by this companion, summarising the book&#39;s structure and line of argument<span class="cite"><a href="#ref-2">2</a></span>; it does not replace the chapters and makes no specific claim beyond what the chapter pages already cite. The full per-chapter reference catalogue is maintained by the author<span class="cite"><a href="#ref-4">4</a></span>.</p>
+      <!-- NAV:START (curator-owned: series cross-links) -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Chương 1</a> · <a href="chapter-12-the-future-of-data-systems.html">Chương 12</a>.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Chapter 1</a> · <a href="chapter-12-the-future-of-data-systems.html">Chapter 12</a>.</p>
+      <!-- NAV:END -->
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O&#39;Reilly Media, 2017 — toàn bộ mười hai chương (nguồn sơ cấp).</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách: cấu trúc ba phần và mục lục mười hai chương</a></li>
+        <li id="ref-3"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O&#39;Reilly — trang sách chính thức (định danh ấn bản, mục lục)</a> <em>(oreilly.com chặn truy cập tự động: trả 403 cho fetcher và chặn cả trình duyệt headless (Akamai “Access Denied”); nguồn có thật và được định danh đầy đủ ở trên)</em></li>
+        <li id="ref-4"><a href="https://github.com/ept/ddia-references" target="_blank" rel="noopener noreferrer">ept/ddia-references — danh mục tham chiếu từng chương do chính Martin Kleppmann duy trì</a></li>
+      </ol>
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

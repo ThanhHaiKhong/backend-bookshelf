@@ -24,7 +24,11 @@ DDIA làm mẫu.
 | Verify toàn site + báo cáo | `book-fidelity-auditor` | read-only, chạy cuối |
 
 Trang không phải chương (mind-map, trang Part, glossary) hiện vẫn là việc của main
-session — author chưa tổng quát hoá cho chúng.
+session — author chưa tổng quát hoá cho chúng. Cách làm đã chạy được một lần (trang
+mind-map của DDIA): rút cấu trúc thật của các chương bằng script (id + tiêu đề từng
+mục) rồi **sinh** markup từ dữ liệu đó, thay vì gõ tay 47 link. `book-qa` nhận
+`--kind synthesis`: không đòi tầng `deep-only` dày, nhưng vẫn đòi rail, ref-list, và
+ít nhất một link ngoài.
 
 **Hai điểm cứng, còn lại là khuyến nghị:**
 - `book-cover-curator` **từ chối** nếu `<book>/index.html` chưa tồn tại — genesis phải
@@ -146,6 +150,27 @@ Cẩn thận với cảnh báo giả khi quét bằng luật: `quả`/`quá`/`qu
 nhưng `u` trong `qu` là phụ âm kép chứ không phải âm đệm; `toàn`/`hoàn`/`loại` có phụ
 âm cuối nên dấu vốn đã đúng chỗ. Luôn khớp theo **ranh giới từ**, không thay chuỗi con.
 
+## Gate không thay được việc nhìn vào trang
+
+`book-qa` kiểm **cấu trúc**, không kiểm trang **trông ra sao**. Trang mind-map của DDIA
+qua gate ngay lần đầu trong khi đang hỏng rõ ràng: nhãn link hiện cả tiếng Việt lẫn
+tiếng Anh dính liền, và 47 link hiện chữ hoa font mono vì container mang thừa một class
+làm ghi đè font. Không cổng tự động nào bắt được.
+
+Trang mới phải được mở bằng trình duyệt thật (`chrome-devtools-axi open file://…` rồi
+chụp ảnh và **nhìn**) trước khi giao cho auditor.
+
+**Đừng viết `giá_trị or dự_phòng` trong code trích dữ liệu.** Khi lớp dữ liệu mong đợi
+không tồn tại, nhánh dự phòng trả về thứ *trông hợp lệ* nhưng sai, và lỗi trở nên im
+lặng. Trong ca vừa rồi, hàm tìm `standard-copy` trong `<h2>` nhưng cả 59 `<h2>` section
+dùng `vi-only`/`en-only`, nên fallback nối cả hai lớp lại. Thà nổ ra ngay.
+
+**Không tự tạo nguồn cho chính mình.** Khi một trang tổng hợp khẳng định điều gì mà
+trang chương không chứng minh được, đường sai là thêm khẳng định đó vào trang chương rồi
+lấy nó làm chỗ dựa — đó là viết cùng một điều chưa kiểm ra hai chỗ. Đường đúng là **cắt**
+khẳng định đi; nếu về sau xác minh được từ bản in thì thêm vào trang chương trước, kèm
+cite trang cụ thể, rồi mới nối lại.
+
 Sau mỗi wave song song, kiểm nhiễm chéo trước khi tin vào gate: định danh chương
 (`<title>`, `content: "DDIA / 0N"`, `.book-label`, tập `section[id]`), và các thuật
 ngữ **chỉ thuộc về một chương** (đếm từ khoá chung như "quorum" sẽ báo động giả).
@@ -175,6 +200,6 @@ DDIA dùng tông giấy cũ: `--teal: #b5502f` (đất nung), `--blue: #2b7c73`,
 
 | Cuốn | Chương | Ghi chú |
 |---|---|---|
-| `designing-data-intensive-applications` | **12 / 12 — trọn cuốn** | Kleppmann, O'Reilly 2017. Cả ba phần đủ. Chính tả đã chuẩn hoá toàn site (dấu trên nguyên âm đầu). Mục mở: `ref-1` thiếu link ngoài ở hầu hết chương; **trang mind-map chưa có** (CSS `.mindmap-banner` đã nằm sẵn trong bìa, chưa có element trong body). |
+| `designing-data-intensive-applications` | **12 / 12 + mind-map** | Kleppmann, O'Reilly 2017. Cả ba phần đủ, cộng trang `mind-map.html` (5 section, 12 thẻ chương × 47 link sâu, 8 sợi chỉ xuyên suốt) và banner trên bìa. Chính tả đã chuẩn hoá toàn site. Mục mở: `ref-1` thiếu link ngoài ở hầu hết chương; chưa có link tới mind-map từ footer các trang chương. |
 
-Việc kế tiếp của DDIA: trang mind-map tổng hợp cả 12 chương.
+DDIA đã hoàn tất. Việc còn lại chỉ là polish.
