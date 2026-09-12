@@ -75,6 +75,10 @@ Scaffold phải được copy **nguyên văn**, không cắt gọt. Những th�
 - **NAV fence**: mọi sửa đổi điều hướng chỉ được nằm trong
   `<!-- NAV:START … NAV:END -->`. Author link neighbour một cách lạc quan; curator là
   bên duy nhất được demote về `<span>` disabled "sắp có".
+- **Ghi chú bot-blocked**: ref trả 403/405 vì host chặn fetcher (w3.org, oreilly.com,
+  cacm.acm.org, infoq.com) vẫn được cite bình thường — chúng có thật, chỉ chặn bot.
+  Kèm một `<em>` anh em **ngoài** thẻ `<a>` ghi rõ host nào chặn và mã trả về, để
+  trang tự đứng được mà không cần người đọc lục file này.
 
 **Nguồn scaffold canonical:** `~/Documents/secrets-of-a-super-memory` (cùng khuôn,
 đã mang đủ rail). Khi cần một khối bị thiếu, trích từ đó chứ đừng viết lại — khối
@@ -105,6 +109,6 @@ DDIA dùng tông giấy cũ: `--teal: #b5502f` (đất nung), `--blue: #2b7c73`,
 
 | Cuốn | Chương | Ghi chú |
 |---|---|---|
-| `designing-data-intensive-applications` | **1 / 12** | Kleppmann, O'Reilly 2017. Phần I 1/4; Phần II 0/5; Phần III 0/3. Mind-map: CSS `.mindmap-banner` đã có, chưa có element trong body. |
+| `designing-data-intensive-applications` | **4 / 12** | Kleppmann, O'Reilly 2017. Phần I **4/4 trọn vẹn**; Phần II 0/5; Phần III 0/3. Mind-map: CSS `.mindmap-banner` đã có, chưa có element trong body. |
 
-Việc kế tiếp của DDIA: Chương 2–4 để đóng Phần I.
+Việc kế tiếp của DDIA: Chương 5–9 (Phần II · Distributed Data).

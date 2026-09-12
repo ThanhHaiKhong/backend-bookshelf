@@ -1,0 +1,1765 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 2 &quot;Data Models and Query Languages&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: object-relational mismatch, quan hệ so với document, schema-on-read và locality, truy vấn khai báo so với mệnh lệnh, MapReduce, và các mô hình đồ thị (property graph, triple-store, Cypher, SPARQL, Datalog).">
+<title>Data Models and Query Languages</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 02";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 2</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 2</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 2</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 2 · Mô hình dữ liệu &amp; ngôn ngữ truy vấn</span><span class="easy-only">DDIA · Chương 2 · Mô hình dữ liệu &amp; ngôn ngữ truy vấn</span><span class="en-only" lang="en">DDIA · Chapter 2 · Data Models &amp; Query Languages</span></div>
+      <h1 id="page-title"><span class="standard-copy">Mỗi tầng phần mềm là một <span class="hero-title-accent">lần kể lại</span> dữ liệu</span><span class="easy-only">Cùng một dữ liệu, nhiều cách sắp</span><span class="en-only" lang="en">Every layer of software <span class="hero-title-accent">re-tells</span> the data</span></h1>
+      <p class="standard-copy">Kleppmann mở Chương 2 bằng một khẳng định mạnh: <strong>mô hình dữ liệu có lẽ là phần quan trọng bậc nhất của việc phát triển phần mềm</strong>, vì nó không chỉ định đoạt phần mềm được viết ra sao mà còn định đoạt cách ta <em>nghĩ</em> về chính bài toán<span class="cite"><a href="#ref-1">1</a></span>. Phần mềm được xây thành nhiều tầng, mỗi tầng che tầng dưới bằng một mô hình sạch hơn: đối tượng trong ứng dụng → bảng hoặc tài liệu JSON → byte trên đĩa → dòng điện trong phần cứng. Chương này hỏi hai câu nối liền nhau: <strong>có những họ mô hình nào để chọn, và mỗi họ kéo theo ngôn ngữ truy vấn kiểu gì?</strong></p>
+      <p class="easy-only">Dữ liệu giống như đồ đạc trong nhà. Cùng một mớ đồ, bạn có thể xếp vào ngăn kéo có nhãn, gói thành từng túi, hay treo lên một mạng lưới móc nối nhau. Cách xếp quyết định lúc tìm có nhanh không, và quyết định luôn cả cách bạn <em>hỏi</em>: "cái áo ở ngăn nào?" khác hẳn "lấy cho tôi mọi thứ nối với cái áo này". Nhớ nhé: chọn cách sắp dữ liệu là chọn luôn cách suy nghĩ về nó.</p>
+      <p class="en-only" lang="en">Kleppmann opens Chapter 2 with a strong claim: <strong>the data model is perhaps the single most important part of developing software</strong>, because it shapes not only how the software is written but how we <em>think</em> about the problem itself<span class="cite"><a href="#ref-1">1</a></span>. Software is built in layers, each hiding the one below behind a cleaner model: application objects → tables or JSON documents → bytes on disk → currents in hardware. This chapter asks two linked questions: <strong>which families of model are on offer, and what kind of query language does each one drag along with it?</strong></p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Không có mô hình dữ liệu vạn năng. Quan hệ, tài liệu và đồ thị mỗi loại được sinh ra để đỡ một <em>hình dạng quan hệ</em> khác nhau — một-nhiều, nhiều-một, nhiều-nhiều — và chọn sai buộc lớp ứng dụng phải tự tay làm việc lẽ ra cơ sở dữ liệu nên làm<span class="cite"><a href="#ref-1">1</a></span>. Điều quyết định không phải nhãn "SQL" hay "NoSQL", mà là câu hỏi khiêm tốn hơn: <strong>dữ liệu của bạn thật ra có hình gì?</strong></p>
+          <p class="easy-only">Không có kiểu sắp nào đúng cho mọi thứ. Có dữ liệu giống một cái cây (một người có nhiều việc làm), có dữ liệu giống một mạng lưới (ai cũng quen ai). Chọn nhầm kiểu thì sau này phải làm bù bằng tay rất mệt. Nhớ nhé: hãy nhìn hình dạng của dữ liệu trước khi chọn chỗ cất nó.</p>
+          <p class="en-only" lang="en">There is no universal data model. Relational, document and graph models each exist to carry a different <em>shape of relationship</em> — one-to-many, many-to-one, many-to-many — and choosing wrongly forces the application layer to hand-do work the database should have done<span class="cite"><a href="#ref-1">1</a></span>. What decides is not the "SQL" or "NoSQL" label but a humbler question: <strong>what shape is your data, really?</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Ba họ mô hình dữ liệu của Chương 2: quan hệ, tài liệu và đồ thị, mỗi loại mạnh ở một hình dạng quan hệ khác nhau / The three data-model families of Chapter 2: relational, document and graph">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">DỮ LIỆU NÀY<br>CÓ HÌNH GÌ?</span><span class="en-only" lang="en">WHAT SHAPE<br>IS THIS DATA?</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Relational</span><span class="en-only" lang="en">Relational</span></b>
+        <small class="standard-copy">Bảng và khoá ngoại; join rẻ nên mạnh ở nhiều-một</small>
+        <small class="easy-only">Ngăn kéo có nhãn, nối nhau bằng mã số.</small>
+        <small class="en-only" lang="en">Tables and foreign keys; cheap joins, strong at many-to-one</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Document</span><span class="en-only" lang="en">Document</span></b>
+        <small class="standard-copy">Cây JSON lồng nhau; mạnh ở một-nhiều và locality</small>
+        <small class="easy-only">Một túi chứa trọn một hồ sơ.</small>
+        <small class="en-only" lang="en">Nested JSON trees; strong at one-to-many and locality</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Graph</span><span class="en-only" lang="en">Graph</span></b>
+        <small class="standard-copy">Đỉnh và cạnh; mạnh khi mọi thứ nối với mọi thứ</small>
+        <small class="easy-only">Mạng lưới ai cũng nối được với ai.</small>
+        <small class="en-only" lang="en">Vertices and edges; strong when anything links to anything</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#relational-vs-document"><span><span class="vi-only">Trục 1</span><span class="en-only" lang="en">Axis 1</span></span><b class="standard-copy">Quan hệ hay tài liệu — hỏi hình dạng, đừng hỏi nhãn</b><b class="easy-only">Bảng hay túi hồ sơ?</b><b class="en-only" lang="en">Relational or document — ask the shape, not the label</b></a>
+    <a href="#schema-and-locality"><span><span class="vi-only">Trục 2</span><span class="en-only" lang="en">Axis 2</span></span><b class="standard-copy">Lược đồ đọc-khi-cần và cái giá của locality</b><b class="easy-only">Luật lỏng, lấy một lần</b><b class="en-only" lang="en">Schema-on-read and the price of locality</b></a>
+    <a href="#query-languages"><span><span class="vi-only">Trục 3</span><span class="en-only" lang="en">Axis 3</span></span><b class="standard-copy">Nói cái mình muốn, đừng chỉ đường cho máy</b><b class="easy-only">Nói kết quả, không nói cách làm</b><b class="en-only" lang="en">State what you want, don't steer the machine</b></a>
+    <a href="#graph-models"><span><span class="vi-only">Trục 4</span><span class="en-only" lang="en">Axis 4</span></span><b class="standard-copy">Khi nhiều-nhiều trở thành chuyện thường ngày</b><b class="easy-only">Khi ai cũng nối với ai</b><b class="en-only" lang="en">When many-to-many becomes the norm</b></a>
+  </nav>
+
+  <section class="section" id="relational-vs-document" aria-labelledby="relational-vs-document-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">Relational vs Document</span></span><span class="en-only" lang="en">Axis 1 · Relational vs Document</span></div>
+        <h2 id="relational-vs-document-title"><span class="vi-only">Đối tượng trong ứng dụng không vừa với hàng trong bảng</span><span class="en-only" lang="en">Application objects don't fit rows in tables</span></h2>
+      </div>
+      <p class="standard-copy">Phần lớn ứng dụng ngày nay được viết bằng ngôn ngữ hướng đối tượng, nhưng dữ liệu lại nằm trong các bảng quan hệ; lớp mã phải dịch qua lại giữa hai thế giới đó được gọi là <em><span lang="en">impedance mismatch</span></em><span class="cite"><a href="#ref-6">6</a></span>, và cả một họ framework <span lang="en">ORM</span> — <span lang="en">Hibernate</span>, <span lang="en">ActiveRecord</span> — ra đời chỉ để che bớt nó<span class="cite"><a href="#ref-7">7</a></span>. Kleppmann lấy một <strong>hồ sơ nghề nghiệp kiểu <span lang="en">LinkedIn</span></strong> làm ví dụ chạy xuyên chương: một người, nhiều vị trí công việc, nhiều bằng cấp, nhiều thông tin liên hệ<span class="cite"><a href="#ref-1">1</a></span>. Chính cái hồ sơ ấy phơi ra ba hình dạng quan hệ mà toàn bộ cuộc tranh luận quan hệ-hay-tài liệu xoay quanh.</p>
+      <p class="easy-only">Trong chương trình, dữ liệu là những "đồ vật" lồng nhau: một người có một danh sách công việc, mỗi công việc lại có tên công ty, ngày tháng. Nhưng cơ sở dữ liệu kiểu cũ chỉ biết những bảng kẻ ô phẳng lì. Thế là lập trình viên phải ngồi tháo đồ vật ra thành nhiều bảng rồi lắp lại — mệt và dễ sai. Nhớ nhé: chỗ hai bên "không khớp nhau" chính là nơi sinh ra hầu hết rắc rối trong chương này.</p>
+      <p class="en-only" lang="en">Most applications today are written in object-oriented languages, yet the data lives in relational tables; the translation layer between those two worlds is called the <em>impedance mismatch</em><span class="cite"><a href="#ref-6">6</a></span>, and a whole family of ORM frameworks — Hibernate, ActiveRecord — exists just to soften it<span class="cite"><a href="#ref-7">7</a></span>. Kleppmann uses a <strong>LinkedIn-style résumé</strong> as the chapter's running example: one person, many positions, many degrees, many pieces of contact information<span class="cite"><a href="#ref-1">1</a></span>. That single résumé exposes the three relationship shapes the whole relational-versus-document argument turns on.</p>
+    </div>
+
+    <div class="overview-grid">
+      <article class="overview-card teal">
+        <div class="term"><span class="vi-only">Hình dạng 01 · <span lang="en">Impedance mismatch</span></span><span class="en-only" lang="en">Shape 01 · Impedance mismatch</span></div>
+        <h3><span class="vi-only">Lớp dịch giữa hai thế giới</span><span class="en-only" lang="en">A translation layer between two worlds</span></h3>
+        <p class="standard-copy">Bảng quan hệ là tập hợp các hàng phẳng; đối tượng trong bộ nhớ là cây lồng nhau có danh sách, tham chiếu và kế thừa. Sự vênh nhau giữa hai cấu trúc ấy là <span lang="en">impedance mismatch</span><span class="cite"><a href="#ref-6">6</a></span>. <span lang="en">ORM</span> giảm bớt lượng mã bản mẫu phải viết<span class="cite"><a href="#ref-7">7</a></span>, nhưng Kleppmann nhấn rằng nó <strong>không xoá</strong> sự vênh — chỉ dời nó vào một lớp khác<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <p class="easy-only">Hình dung bạn có một con búp bê gỗ lồng nhau, nhưng cái tủ chỉ có những ngăn dẹt. Muốn cất thì phải tháo từng lớp ra, và muốn lấy thì phải lắp lại. Có người viết sẵn "máy tháo-lắp" giúp bạn, nhưng việc tháo-lắp vẫn còn đó. Nhớ nhé: công cụ làm đỡ mệt, chứ không làm cho hai hình dạng vừa nhau.</p>
+        <p class="en-only" lang="en">A relational table is a set of flat rows; an in-memory object is a nested tree with lists, references and inheritance. That gap is the impedance mismatch<span class="cite"><a href="#ref-6">6</a></span>. ORMs cut the boilerplate you must write<span class="cite"><a href="#ref-7">7</a></span>, but Kleppmann stresses they <strong>do not erase</strong> the mismatch — they only move it into another layer<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        <div class="result standard-copy">ORM che bớt, không gỡ bỏ.</div>
+        <div class="result easy-only">Nhớ nhé: vẫn phải tháo-lắp.</div>
+        <div class="result en-only" lang="en">ORMs hide it, not remove it.</div>
+      </article>
+      <article class="overview-card blue">
+        <div class="term"><span class="vi-only">Hình dạng 02 · <span lang="en">One-to-many</span></span><span class="en-only" lang="en">Shape 02 · One-to-many</span></div>
+        <h3><span class="vi-only">Một-nhiều: hồ sơ vốn là một cái cây</span><span class="en-only" lang="en">One-to-many: a résumé is a tree</span></h3>
+        <p class="standard-copy">Một hồ sơ có nhiều vị trí công việc, nhiều bằng cấp — quan hệ <em><span lang="en">one-to-many</span></em>. Trong SQL cổ điển, mỗi danh sách phải tách thành bảng con trỏ về hồ sơ bằng khoá ngoại. Trong mô hình tài liệu, cùng cấu trúc ấy được viết thẳng thành mảng lồng trong một tài liệu <span lang="en">JSON</span><span class="cite"><a href="#ref-1">1</a></span>. Kleppmann nhận xét: ở đây mô hình tài liệu <strong>gần với cấu trúc dữ liệu của ứng dụng hơn</strong>, và cả cây được lấy về trong một lần đọc<span class="cite"><a href="#ref-8">8</a></span>.</p>
+        <p class="easy-only">Một người có nhiều chỗ làm, nhiều trường đã học. Kiểu bảng thì mỗi loại phải một cuốn sổ riêng rồi ghi mã số nối lại. Kiểu tài liệu thì cứ bỏ hết vào một túi mang tên người đó, mở túi là thấy đủ. Nhớ nhé: khi dữ liệu giống một cái cây, cất nguyên cây vào một túi là tiện nhất.</p>
+        <p class="en-only" lang="en">One résumé has many positions, many degrees — a <em>one-to-many</em> relationship. In classic SQL each list becomes a child table pointing back with a foreign key. In the document model the same structure is written directly as nested arrays inside one JSON document<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann's point: here the document model is <strong>closer to the application's own data structure</strong>, and the whole tree comes back in a single read<span class="cite"><a href="#ref-8">8</a></span>.</p>
+        <div class="result standard-copy">Cây lồng nhau hợp với tài liệu.</div>
+        <div class="result easy-only">Nhớ nhé: cả cây một túi.</div>
+        <div class="result en-only" lang="en">Nested trees suit documents.</div>
+      </article>
+      <article class="overview-card amber">
+        <div class="term"><span class="vi-only">Hình dạng 03 · <span lang="en">Many-to-one &amp; many-to-many</span></span><span class="en-only" lang="en">Shape 03 · Many-to-one &amp; many-to-many</span></div>
+        <h3><span class="vi-only">Nhiều-một và nhiều-nhiều: nơi tài liệu đuối</span><span class="en-only" lang="en">Where documents run out of road</span></h3>
+        <p class="standard-copy">"Công ty", "trường", "vùng địa lý" nên là <strong>tham chiếu chuẩn hoá</strong> bằng mã định danh, không phải chuỗi tự do: nhiều hồ sơ cùng trỏ về một công ty — quan hệ <em><span lang="en">many-to-one</span></em>. Khi thêm lời giới thiệu giữa người với người thì thành <em><span lang="en">many-to-many</span></em><span class="cite"><a href="#ref-1">1</a></span>. Chuẩn hoá đòi hỏi join, và Kleppmann chỉ ra rằng cơ sở dữ liệu tài liệu <strong>hỗ trợ join yếu</strong> — công việc nối phải dồn về mã ứng dụng, tức nhiều vòng truy vấn hơn<span class="cite"><a href="#ref-8">8</a></span>.</p>
+        <p class="easy-only">Nếu hàng nghìn hồ sơ đều ghi tên một công ty, đổi tên công ty ấy nghĩa là phải sửa hàng nghìn chỗ. Nên tốt hơn là ghi mã số công ty, rồi chỗ nào cần tên thì đi tra. Nhưng "đi tra" chính là việc mà kiểu-túi làm kém. Nhớ nhé: cái gì dùng chung cho nhiều người thì nên để một chỗ và trỏ tới, chứ đừng chép ra khắp nơi.</p>
+        <p class="en-only" lang="en">"Company", "school", "region" should be <strong>normalized references</strong> by identifier, not free text: many résumés point at one company — a <em>many-to-one</em> relationship. Add recommendations between people and it becomes <em>many-to-many</em><span class="cite"><a href="#ref-1">1</a></span>. Normalization demands joins, and Kleppmann notes that document databases have <strong>weak join support</strong> — the joining work is pushed into application code, i.e. more round trips<span class="cite"><a href="#ref-8">8</a></span>.</p>
+        <div class="result standard-copy">Nhiều-nhiều là điểm yếu của tài liệu.</div>
+        <div class="result easy-only">Nhớ nhé: dùng chung thì trỏ tới.</div>
+        <div class="result en-only" lang="en">Many-to-many is the document's weak spot.</div>
+      </article>
+    </div>
+
+    <div class="surprise-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">The debate is about shape, not about SQL vs NoSQL</div>
+        <p class="definition standard-copy">Câu hỏi "quan hệ hay tài liệu?" thật ra là câu hỏi "dữ liệu của bạn có hình gì?". Nếu là <em>cây một-nhiều</em> và thường được nạp trọn vẹn, tài liệu thắng. Nếu có nhiều <em>liên kết chéo</em> giữa các thực thể, quan hệ — hoặc đồ thị — thắng.</p>
+        <p class="definition easy-only">Đừng hỏi "SQL hay NoSQL". Hãy hỏi: dữ liệu của tôi giống cái cây hay giống tấm lưới? Cây thì bỏ túi, lưới thì cần chỗ biết nối. Nhớ nhé: nhìn hình dạng trước, chọn công nghệ sau.</p>
+        <p class="definition en-only" lang="en">"Relational or document?" is really "what shape is your data?". If it is a <em>one-to-many tree</em> usually loaded whole, documents win. If it is full of <em>cross-links</em> between entities, relational — or graph — wins.</p>
+        <p class="deep-only">Cuộc tranh luận này đã diễn ra một lần, từ rất lâu trước <span lang="en">NoSQL</span>. Kleppmann kể lại rằng mô hình phân cấp — cây lồng nhau, gần hệt <span lang="en">JSON</span> ngày nay — được hiện thực trong <span lang="en">IMS</span> của IBM, hệ ra đời để quản lý bảng kê vật tư cho chương trình Apollo và phát tín hiệu sẵn sàng đầu tiên ngày 14/8/1968<span class="cite"><a href="#ref-4">4</a></span>. Nó xử lý một-nhiều rất tốt và nhiều-nhiều rất tệ — đúng điểm yếu của mô hình tài liệu hôm nay. Hai lời đáp cạnh tranh xuất hiện: <em>mô hình mạng</em> của <span lang="en">CODASYL</span>, nơi bản ghi nối nhau bằng chuỗi con trỏ và lập trình viên phải men theo <em><span lang="en">access path</span></em> để tới dữ liệu<span class="cite"><a href="#ref-5">5</a></span>; và <em>mô hình quan hệ</em> mà E. F. Codd công bố trên <span lang="en">Communications of the ACM</span> năm 1970, đề xuất bày dữ liệu ra thành các quan hệ đơn giản để người dùng khỏi phải biết dữ liệu được tổ chức thế nào bên trong<span class="cite"><a href="#ref-3">3</a></span>. Đây là bối cảnh <strong>lịch sử</strong>, không phải hiện trạng: <span lang="en">CODASYL</span> nhạt dần khi quan tâm dồn sang quan hệ từ đầu thập niên 1980<span class="cite"><a href="#ref-5">5</a></span>, còn <span lang="en">IMS</span> thì vẫn tồn tại trong các hệ <span lang="en">mainframe</span> kế thừa<span class="cite"><a href="#ref-4">4</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba hình dạng quan hệ và mô hình hợp với chúng">
+        <div class="equation-row">
+          <b>Một-nhiều</b>
+          <span>Cây tài liệu biểu diễn tự nhiên, lấy trọn một lần; quan hệ cần bảng con và khoá ngoại.</span>
+        </div>
+        <div class="equation-row">
+          <b>Nhiều-một</b>
+          <span>Chuẩn hoá về mã định danh; quan hệ join rẻ, tài liệu phải nối thủ công trong mã ứng dụng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Nhiều-nhiều</b>
+          <span>Bảng nối hoặc mô hình đồ thị; đây là nơi mô hình tài liệu đuối nhất.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba kiểu quan hệ dễ nhớ">
+        <div class="equation-row">
+          <b>Một có nhiều</b>
+          <span>Một người nhiều việc làm — bỏ chung một túi là gọn.</span>
+        </div>
+        <div class="equation-row">
+          <b>Nhiều về một</b>
+          <span>Nghìn người cùng một công ty — ghi mã số rồi đi tra.</span>
+        </div>
+        <div class="equation-row">
+          <b>Ai cũng nối ai</b>
+          <span>Bạn bè, giới thiệu, đề xuất — cần thứ biết đi theo đường nối.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three relationship shapes and the models that fit them">
+        <div class="equation-row">
+          <b>One-to-many</b>
+          <span>A document tree expresses it naturally and loads in one read; relational needs a child table and a foreign key.</span>
+        </div>
+        <div class="equation-row">
+          <b>Many-to-one</b>
+          <span>Normalize to an identifier; relational joins are cheap, documents must stitch in application code.</span>
+        </div>
+        <div class="equation-row">
+          <b>Many-to-many</b>
+          <span>A join table or a graph model; this is where the document model is weakest.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="schema-and-locality" aria-labelledby="schema-and-locality-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · <span lang="en">Schema &amp; locality</span></span><span class="en-only" lang="en">Axis 2 · Schema &amp; locality</span></div>
+        <h2 id="schema-and-locality-title"><span class="vi-only">Lược đồ đọc-khi-cần và cái giá của locality</span><span class="en-only" lang="en">Schema-on-read and the price of locality</span></h2>
+      </div>
+      <p class="standard-copy">Hai lập luận còn lại bênh vực mô hình tài liệu là <strong>lược đồ linh hoạt</strong> và <strong>hiệu năng nhờ locality</strong><span class="cite"><a href="#ref-1">1</a></span>. Kleppmann gỡ cả hai ra khỏi lớp khẩu hiệu: cơ sở dữ liệu tài liệu không phải "không có lược đồ" mà là <em>lược đồ ngầm, kiểm khi đọc</em>; còn locality chỉ có lợi khi bạn thật sự cần phần lớn tài liệu cùng lúc. Và ông kết phần này bằng quan sát quan trọng nhất của cả trục: hai phe <strong>đang hội tụ</strong>.</p>
+      <p class="easy-only">Người ta hay khen kiểu-túi vì hai điều: không bắt khai báo trước cái gì có trong túi, và mở một cái là thấy đủ. Cả hai đều đúng một nửa. Túi vẫn có "luật ngầm", chỉ là luật nằm trong đầu người viết chương trình thôi. Và mở nguyên túi chỉ lợi khi bạn cần gần hết đồ trong đó. Nhớ nhé: cái gọi là "tự do" thường chỉ là luật được dời sang chỗ khác.</p>
+      <p class="en-only" lang="en">The two remaining arguments for the document model are <strong>schema flexibility</strong> and <strong>performance from locality</strong><span class="cite"><a href="#ref-1">1</a></span>. Kleppmann strips both of their slogan layer: a document database is not "schemaless" but has an <em>implicit schema, checked on read</em>; and locality only pays when you genuinely need most of the document at once. He closes the axis with its most important observation: the two camps are <strong>converging</strong>.</p>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Schema-on-read vs schema-on-write</div>
+          <h3><span class="vi-only">Không phải "không lược đồ", mà là lược đồ ngầm</span><span class="en-only" lang="en">Not schemaless — an implicit schema</span></h3>
+          <p class="standard-copy">Kleppmann đề nghị gọi đúng tên: cơ sở dữ liệu tài liệu là <em><span lang="en">schema-on-read</span></em> — cấu trúc chỉ được diễn giải lúc mã ứng dụng đọc dữ liệu; còn quan hệ là <em><span lang="en">schema-on-write</span></em> — cơ sở dữ liệu bắt tuân thủ ngay khi ghi. Ông ví von hai kiểu ấy với <strong>kiểm kiểu động và kiểm kiểu tĩnh</strong> trong ngôn ngữ lập trình<span class="cite"><a href="#ref-1">1</a></span>. Khác biệt lộ rõ nhất lúc đổi cấu trúc: bên tài liệu chỉ cần ghi dạng mới và để mã xử lý cả hai dạng; bên quan hệ cần một lệnh <span lang="en">ALTER TABLE</span> di trú.</p>
+          <p class="easy-only">"Không có luật" thật ra là "luật không được viết ra". Khi bỏ đồ vào túi mà không dán nhãn, vẫn có một quy ước trong đầu bạn về cái gì nằm đâu — chỉ là máy không kiểm giúp. Khi nào máy kiểm: lúc cất, hay lúc lấy? Đó mới là khác biệt thật. Nhớ nhé: luật không biến mất, nó chỉ chuyển từ lúc cất sang lúc lấy.</p>
+          <p class="en-only" lang="en">Kleppmann insists on the right name: document databases are <em>schema-on-read</em> — structure is interpreted only when application code reads the data; relational ones are <em>schema-on-write</em> — the database enforces it at write time. He likens the pair to <strong>dynamic versus static type checking</strong> in programming languages<span class="cite"><a href="#ref-1">1</a></span>. The difference shows up hardest during change: on the document side you write the new shape and let code handle both; on the relational side you need an ALTER TABLE migration.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Khi nào hợp</strong><span lang="en">Schema-on-read</span> hợp khi dữ liệu vốn không đồng nhất, hoặc cấu trúc do một hệ ngoài quyết định. <span lang="en">Schema-on-write</span> hợp khi mọi bản ghi đều cùng một dạng và bạn muốn máy phát hiện sai sót giúp.</div>
+            <div class="easy-only"><strong>Chọn kiểu nào</strong>Đồ lộn xộn thì đừng bắt dán nhãn cứng; đồ cùng loại thì dán nhãn cho máy kiểm giúp.</div>
+            <div class="en-only" lang="en"><strong>When each fits</strong>Schema-on-read fits heterogeneous data, or structure decided by an external system. Schema-on-write fits uniform records where you want the machine to catch mistakes for you.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cơ chế di trú</h4>
+              <p>Với <span lang="en">schema-on-read</span>, việc "di trú" chỉ là ghi tài liệu mới theo dạng mới và để mã đọc chấp nhận cả dạng cũ lẫn mới — chi phí dời sang mã ứng dụng và sẽ kéo dài chừng nào dữ liệu cũ còn tồn tại. Với <span lang="en">schema-on-write</span>, <span lang="en">ALTER TABLE</span> thường nhanh ở hầu hết hệ quan hệ, nhưng lệnh <span lang="en">UPDATE</span> ghi lại toàn bảng thì có thể rất nặng.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ranh giới đang mờ</h4>
+              <p>Ngay cả phe tài liệu cũng đã thêm ràng buộc tuỳ chọn: <span lang="en">MongoDB</span> cung cấp <em><span lang="en">schema validation</span></em> để đặt luật cho phép/chặn ở tầng cơ sở dữ liệu<span class="cite"><a href="#ref-9">9</a></span>. Đó là bằng chứng sớm cho luận điểm hội tụ ở thẻ 03.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Locality — and its fine print</div>
+          <h3><span class="vi-only">Locality: lợi khi lấy trọn, hại khi tài liệu phình</span><span class="en-only" lang="en">Locality: a win when you read it whole</span></h3>
+          <p class="standard-copy">Một tài liệu thường được lưu như một chuỗi liên tục, nên nếu ứng dụng cần <strong>phần lớn</strong> nội dung cùng lúc thì một lần đọc là đủ — thay vì nhiều lần tra chỉ mục trên các bảng rải rác<span class="cite"><a href="#ref-1">1</a></span>. Nhưng Kleppmann kèm ngay phần chữ nhỏ: lợi ích ấy <strong>chỉ đúng khi bạn cần gần hết tài liệu</strong>, và vì nhiều cơ sở dữ liệu tài liệu phải ghi lại cả tài liệu khi cập nhật, nên <strong>nên giữ tài liệu nhỏ</strong><span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <p class="easy-only">Để hết đồ của một người trong một túi thì lấy rất nhanh — chỉ cần với tay một lần. Nhưng nếu cái túi phình to mà mỗi lần thêm một món lại phải đổ ra xếp lại cả túi, thì cái nhanh lúc lấy sẽ bị trả giá lúc cất. Nhớ nhé: túi nên vừa tay, đừng để nó to quá.</p>
+          <p class="en-only" lang="en">A document is usually stored as one contiguous string, so if the application needs <strong>most</strong> of it at once, a single read suffices — instead of several index lookups across scattered tables<span class="cite"><a href="#ref-1">1</a></span>. But Kleppmann attaches the fine print immediately: the benefit <strong>only holds when you need nearly the whole document</strong>, and because many document databases rewrite the entire document on update, you should <strong>keep documents small</strong><span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Hệ quả thiết kế</strong>Nhúng dữ liệu con khi nó luôn được đọc cùng tài liệu cha và không tăng vô hạn; tách ra thành tham chiếu khi nó lớn dần hoặc được dùng chung<span class="cite"><a href="#ref-8">8</a></span>.</div>
+            <div class="easy-only"><strong>Cách làm</strong>Đồ luôn đi cùng nhau thì để chung túi; đồ ngày càng nhiều hoặc dùng chung thì để riêng rồi trỏ tới.</div>
+            <div class="en-only" lang="en"><strong>Design consequence</strong>Embed child data when it's always read with its parent and doesn't grow without bound; split it out into a reference when it grows or is shared<span class="cite"><a href="#ref-8">8</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Locality không độc quyền của tài liệu</h4>
+              <p>Kleppmann nhắc rằng ý tưởng gom dữ liệu liên quan nằm cạnh nhau trên đĩa cũng xuất hiện trong thế giới quan hệ dưới những tên khác — nhóm hàng của bảng con nằm lồng trong bảng cha, hay nhóm cột lưu chung một chỗ<span class="cite"><a href="#ref-1">1</a></span>. Nói cách khác, locality là một <em>kỹ thuật lưu trữ</em>, không phải một đặc quyền của mô hình tài liệu.</p>
+            </div>
+            <div class="info-block">
+              <h4>Nối với Chương 3</h4>
+              <p>Vì sao một lần đọc liên tục lại rẻ hơn nhiều lần tra chỉ mục là câu chuyện của tầng lưu trữ — cấu trúc chỉ mục, chi phí tìm kiếm, ghi tuần tự. Đó chính là nội dung Chương 3 <span lang="en">“Storage and Retrieval”</span> sẽ mở ra<span class="cite"><a href="#ref-2">2</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Convergence of the two camps</div>
+          <h3><span class="vi-only">Hai phe đang mượn đồ của nhau</span><span class="en-only" lang="en">The two camps borrow from each other</span></h3>
+          <p class="standard-copy">Kết luận thực dụng của Kleppmann: cơ sở dữ liệu quan hệ và tài liệu <strong>ngày càng giống nhau</strong>, và đó là một hướng đi tốt — mỗi bên xử lý phần dữ liệu hợp với mình<span class="cite"><a href="#ref-1">1</a></span>. Bằng chứng ở cả hai phía: <span lang="en">PostgreSQL</span> có kiểu <span lang="en">json</span> và <span lang="en">jsonb</span> cùng bộ toán tử và chỉ mục riêng<span class="cite"><a href="#ref-10">10</a></span>; còn <span lang="en">RethinkDB</span> — một cơ sở dữ liệu tài liệu — hỗ trợ phép nối giữa các bảng<span class="cite"><a href="#ref-11">11</a></span>, và <span lang="en">MongoDB</span> bổ sung ràng buộc lược đồ tuỳ chọn<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="easy-only">Hai phe từng cãi nhau giờ đang học lẫn nhau: bên ngăn kéo học cách chứa nguyên một túi trong ngăn, còn bên túi học cách nối các túi lại và đặt vài luật. Nhớ nhé: đừng chọn phe — chọn công cụ có đủ cả hai thứ bạn cần.</p>
+          <p class="en-only" lang="en">Kleppmann's pragmatic conclusion: relational and document databases are <strong>becoming more alike</strong>, and that is a good direction — each handling the part of the data it suits<span class="cite"><a href="#ref-1">1</a></span>. The evidence runs both ways: PostgreSQL has json and jsonb types with their own operators and indexes<span class="cite"><a href="#ref-10">10</a></span>; RethinkDB — a document database — supports joins between tables<span class="cite"><a href="#ref-11">11</a></span>, and MongoDB added optional schema validation<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đọc ngược lại nhãn</strong>"SQL" và "NoSQL" ngày càng là nhãn tiếp thị hơn là ranh giới kỹ thuật. Hỏi thẳng: hệ này có nhúng được cây không, có join được không, có ép lược đồ khi cần không?</div>
+            <div class="easy-only"><strong>Cách hỏi đúng</strong>Đừng hỏi tên gọi. Hỏi: nó có để được cả cây không, có nối được không, có kiểm giúp không?</div>
+            <div class="en-only" lang="en"><strong>Read past the label</strong>"SQL" and "NoSQL" are increasingly marketing labels rather than technical boundaries. Ask directly: can it nest a tree, can it join, can it enforce a schema when you want one?</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Mô hình lai</h4>
+              <p>Một hệ quan hệ lưu cột <span lang="en">JSON</span> cho phần dữ liệu không đồng nhất, đồng thời giữ khoá ngoại cho phần chuẩn hoá, là mô hình lai rất phổ biến trong thực tế<span class="cite"><a href="#ref-10">10</a></span>. Nó cho bạn locality ở chỗ cần và join ở chỗ cần.</p>
+            </div>
+            <div class="info-block">
+              <h4>Giới hạn của hội tụ</h4>
+              <p>Hội tụ không có nghĩa là mọi hệ thành một. Đặc tính phân tán, mô hình giao dịch và cách xử lý nhất quán vẫn khác nhau rất nhiều — những chủ đề mà các phần sau của cuốn sách mới mổ xẻ<span class="cite"><a href="#ref-2">2</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ hình dạng dữ liệu sang cách hỏi dữ liệu</strong>
+      <strong class="en-only" lang="en">From the shape of data to the way we ask for it</strong>
+      <span class="standard-copy">Chọn mô hình là nửa câu chuyện. Nửa còn lại là: bạn <em>nói</em> với cơ sở dữ liệu bằng thứ ngôn ngữ nào? Mỗi mô hình kéo theo một phong cách hỏi, và Kleppmann cho thấy bước ngoặt lớn nhất của lịch sử cơ sở dữ liệu không nằm ở cấu trúc lưu trữ mà ở chỗ này.</span>
+      <span class="easy-only">Đã biết cách sắp đồ rồi. Giờ tới chuyện: bạn ra lệnh tìm đồ kiểu gì — chỉ từng bước cho máy, hay chỉ cần nói mình muốn gì? Nhớ nhé: cách hỏi cũng quan trọng như cách sắp.</span>
+      <span class="en-only" lang="en">Choosing a model is half the story. The other half: in what language do you <em>speak</em> to the database? Each model drags a querying style along with it, and Kleppmann shows the biggest turn in database history lies here, not in storage structure.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="query-languages" aria-labelledby="query-languages-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Query languages</span></span><span class="en-only" lang="en">Axis 3 · Query languages</span></div>
+        <h2 id="query-languages-title"><span class="vi-only">Nói cái mình muốn, đừng chỉ đường cho máy</span><span class="en-only" lang="en">State what you want, don't steer the machine</span></h2>
+      </div>
+      <p class="standard-copy">Khi mô hình quan hệ ra đời, nó mang theo một cách hỏi dữ liệu hoàn toàn mới: <strong>khai báo</strong><span class="cite"><a href="#ref-3">3</a></span>. Trước đó, truy vấn <span lang="en">IMS</span> hay <span lang="en">CODASYL</span> là những đoạn mã <strong>mệnh lệnh</strong>: lập trình viên phải men theo chuỗi con trỏ, di chuyển con trỏ bản ghi từng bước theo đúng <em><span lang="en">access path</span></em> đã định trước<span class="cite"><a href="#ref-5">5</a></span>. <span lang="en">SQL</span> lật ngược điều đó: bạn mô tả <em>mẫu dữ liệu mình muốn</em>, còn việc chọn đường đi để lấy nó là trách nhiệm của bộ tối ưu hoá. Kleppmann lập luận rằng chính sự ẩn giấu này — chứ không phải cú pháp — mới là nguồn sức mạnh<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Có hai cách nhờ ai đó lấy đồ giúp bạn. Cách một: "đi thẳng, rẽ trái, mở ngăn thứ ba, lấy hộp màu xanh" — bạn phải biết đường. Cách hai: "lấy giúp tôi tất cả hộp màu xanh" — người kia tự tìm đường. Cơ sở dữ liệu hiện đại thích cách hai, vì nó tự nghĩ ra đường đi nhanh nhất. Nhớ nhé: nói kết quả bạn muốn, đừng đọc từng bước đi.</p>
+      <p class="en-only" lang="en">When the relational model arrived it brought an entirely new way of asking for data: <strong>declarative</strong> querying<span class="cite"><a href="#ref-3">3</a></span>. Before that, IMS and CODASYL queries were <strong>imperative</strong> code: the programmer followed pointer chains, stepping a record cursor along a predetermined <em>access path</em><span class="cite"><a href="#ref-5">5</a></span>. SQL inverts this: you describe <em>the pattern of data you want</em>, and choosing the route to get it is the optimizer's job. Kleppmann argues that this hiding — not the syntax — is the source of the power<span class="cite"><a href="#ref-1">1</a></span>.</p>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Declarative vs imperative</div>
+          <h3><span class="vi-only">Khai báo tả mẫu, mệnh lệnh tả lối đi</span><span class="en-only" lang="en">Declarative states a pattern, imperative states a path</span></h3>
+          <p class="standard-copy">Một truy vấn khai báo nêu <strong>điều kiện mà kết quả phải thoả</strong> và cách sắp xếp, biến đổi kết quả — không nêu <em>cách</em> đạt tới. Một đoạn mã mệnh lệnh nêu từng thao tác theo thứ tự. Để minh hoạ, Kleppmann rời khỏi thế giới cơ sở dữ liệu và dùng <strong>trình duyệt web</strong>: chọn phần tử bằng <span lang="en">CSS</span> hay <span lang="en">XSL</span> là khai báo — bạn tả <em>cái gì</em> cần tô — còn tự tay duyệt cây <span lang="en">DOM</span> bằng JavaScript để đổi lớp là mệnh lệnh<span class="cite"><a href="#ref-1">1</a></span>. Chính vì <span lang="en">CSS</span> là ngôn ngữ khai báo mà quy tắc kiểu vẫn đúng khi phần tử mới xuất hiện<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <p class="easy-only">Muốn tô đỏ mọi tiêu đề trên trang, có hai cách. Cách mệnh lệnh: đi từng chữ một, thấy tiêu đề thì tô. Cách khai báo: viết một dòng luật "tiêu đề thì màu đỏ" rồi để máy lo. Cái hay của cách hai: tiêu đề mới thêm vào cũng tự đỏ, không cần sửa gì. Nhớ nhé: đặt luật thì bền hơn làm từng việc.</p>
+          <p class="en-only" lang="en">A declarative query states <strong>the conditions results must satisfy</strong> and how to sort or transform them — not <em>how</em> to get there. Imperative code states each operation in order. To illustrate, Kleppmann leaves the database world for the <strong>web browser</strong>: selecting elements with CSS or XSL is declarative — you describe <em>what</em> to style — while hand-walking the DOM in JavaScript to flip classes is imperative<span class="cite"><a href="#ref-1">1</a></span>. Precisely because CSS is declarative, a style rule still applies when new elements appear<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao khác biệt lớn</strong>Mã mệnh lệnh khoá chặt <em>một</em> cách thực thi; truy vấn khai báo để ngỏ mọi cách thực thi tương đương, nên engine có thể đổi chiến lược mà không cần bạn viết lại gì.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Ra lệnh từng bước thì phải sửa mỗi khi đổi; đặt luật thì máy tự lo.</div>
+            <div class="en-only" lang="en"><strong>Why the difference is big</strong>Imperative code locks in <em>one</em> execution; a declarative query leaves every equivalent execution open, so the engine can change strategy without you rewriting anything.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Gốc lịch sử</h4>
+              <p>Codd đề xuất mô hình quan hệ chính là để người dùng và chương trình <strong>không phải biết dữ liệu được tổ chức bên trong ra sao</strong>, tức tách biểu diễn logic khỏi biểu diễn vật lý<span class="cite"><a href="#ref-3">3</a></span>. Truy vấn khai báo là hệ quả trực tiếp của sự tách đó — một điểm thuộc <em>lịch sử</em> thập niên 1970, nhưng vẫn là nền của mọi hệ hôm nay.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cái giá phải trả</h4>
+              <p>Khai báo cũng có mặt trái: bạn mất quyền kiểm soát chi tiết, và khi bộ tối ưu hoá chọn nhầm kế hoạch thì khó can thiệp. Đổi lại, mọi cải tiến trong engine đều tự động chảy vào truy vấn cũ của bạn mà không phải sửa một dòng nào.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Why declarative won</div>
+          <h3><span class="vi-only">Giấu chi tiết thì mới song song hoá được</span><span class="en-only" lang="en">Hiding the details is what enables parallelism</span></h3>
+          <p class="standard-copy">Kleppmann nêu ba lợi thế nối nhau<span class="cite"><a href="#ref-1">1</a></span>. Một: ngôn ngữ khai báo <strong>ngắn và dễ hơn</strong> vì giấu phần hiện thực. Hai: nó cho phép <strong>đổi cách thực thi mà không đổi truy vấn</strong> — thêm một chỉ mục, đổi cấu trúc lưu trữ, và truy vấn cũ tự hưởng lợi. Ba, và quan trọng nhất: vì không quy định thứ tự thao tác, nó <strong>dễ song song hoá</strong> trên nhiều lõi và nhiều máy; mã mệnh lệnh thì ràng buộc thứ tự nên rất khó chia ra chạy song song.</p>
+          <p class="easy-only">Khi bạn chỉ nói "lấy giúp tôi tất cả hộp xanh", mười người có thể chia nhau đi tìm cùng lúc. Nhưng nếu bạn đọc từng bước "rẽ trái, mở ngăn ba…" thì chỉ một người làm theo được, người thứ hai đứng chờ. Nhớ nhé: nói kết quả thì nhiều người cùng làm được, đọc từng bước thì phải xếp hàng.</p>
+          <p class="en-only" lang="en">Kleppmann lists three linked advantages<span class="cite"><a href="#ref-1">1</a></span>. One: declarative languages are <strong>shorter and easier</strong> because they hide implementation. Two: they let the engine <strong>change execution without changing the query</strong> — add an index, change the storage layout, and old queries benefit automatically. Three, and most important: since they don't fix the order of operations, they <strong>parallelize easily</strong> across cores and machines; imperative code pins the order and resists being split up.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao còn đúng hôm nay</strong>Tốc độ một lõi CPU đã gần chững lại, nên sức mạnh tới từ chạy song song. Đó là lý do ngôn ngữ khai báo càng ngày càng có giá, chứ không phải chỉ là di sản của <span lang="en">SQL</span>.</div>
+            <div class="easy-only"><strong>Vì sao quan trọng</strong>Máy giờ mạnh lên bằng cách làm nhiều việc cùng lúc, nên cách nói "kết quả tôi muốn" hợp thời hơn.</div>
+            <div class="en-only" lang="en"><strong>Why it still holds</strong>Single-core speed has largely plateaued, so power comes from running in parallel. That is why declarative languages keep gaining value, rather than being a mere SQL legacy.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Không chỉ là <span lang="en">SQL</span></h4>
+              <p>Lập luận này không gắn với cú pháp <span lang="en">SQL</span>. Nó áp cho mọi ngôn ngữ tả-mẫu: <span lang="en">CSS</span> trên trình duyệt<span class="cite"><a href="#ref-12">12</a></span>, <span lang="en">Cypher</span> trên đồ thị thuộc tính<span class="cite"><a href="#ref-16">16</a></span>, <span lang="en">SPARQL</span> trên bộ ba<span class="cite"><a href="#ref-19">19</a></span>. Mô hình dữ liệu khác nhau, tinh thần khai báo thì giống nhau.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ranh giới thực tế</h4>
+              <p>Thực tế hiếm khi thuần một phe: hàm do người dùng viết, thủ tục lưu trữ, hay các pha xử lý trong ứng dụng đều là mảnh mệnh lệnh cắm vào giữa một khung khai báo. Thẻ 03 là ví dụ được đặt tên hẳn hoi cho kiểu lai đó.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">MapReduce — the hybrid in the middle</div>
+          <h3><span class="vi-only"><span lang="en">MapReduce</span>: nửa khai báo, nửa mệnh lệnh</span><span class="en-only" lang="en">MapReduce: half declarative, half imperative</span></h3>
+          <p class="standard-copy"><span lang="en">MapReduce</span> là mô hình lập trình do Jeffrey Dean và Sanjay Ghemawat của Google công bố năm 2004 để xử lý và sinh dữ liệu quy mô lớn trên cụm máy<span class="cite"><a href="#ref-13">13</a></span>. Kleppmann xếp nó vào <strong>khoảng giữa</strong>: bạn viết <span lang="en">map</span> và <span lang="en">reduce</span> bằng mã thường — phần mệnh lệnh — nhưng bị buộc phải viết chúng như <em>hàm thuần khiết</em>, chỉ dùng dữ liệu đầu vào và không có tác dụng phụ; nhờ vậy khung nền được tự do gọi lại, sắp xếp lại và chạy song song<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Có kiểu ở giữa: bạn tự viết hai việc nhỏ — "với mỗi món, rút ra một mẩu" và "gộp các mẩu giống nhau lại" — rồi máy tự chia cho cả trăm người cùng làm. Bí quyết là hai việc ấy không được đụng vào gì khác ngoài món đang cầm. Nhớ nhé: việc nào không gây ảnh hưởng lung tung thì mới chia cho nhiều người làm cùng lúc được.</p>
+          <p class="en-only" lang="en">MapReduce is a programming model published in 2004 by Google's Jeffrey Dean and Sanjay Ghemawat for processing and generating large datasets on clusters<span class="cite"><a href="#ref-13">13</a></span>. Kleppmann places it <strong>in between</strong>: you write map and reduce in ordinary code — the imperative part — but you must write them as <em>pure functions</em>, using only their input and causing no side effects; that constraint frees the framework to re-run, reorder and parallelize them<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Đoạn kết của ví dụ</strong>Kleppmann đối chiếu <span lang="en">MapReduce</span> của <span lang="en">MongoDB</span> với <em><span lang="en">aggregation pipeline</span></em> khai báo của chính hệ đó<span class="cite"><a href="#ref-14">14</a></span> — và kể từ <span lang="en">MongoDB</span> 5.0, <span lang="en">map-reduce</span> đã bị coi là lỗi thời, nhường chỗ cho pipeline<span class="cite"><a href="#ref-14">14</a></span>.</div>
+            <div class="easy-only"><strong>Kết cục</strong>Về sau người ta làm cách gọn hơn để nói cùng việc đó, nên kiểu tự viết hai hàm dần ít dùng.</div>
+            <div class="en-only" lang="en"><strong>How the example ends</strong>Kleppmann contrasts MongoDB's MapReduce with that same system's declarative <em>aggregation pipeline</em><span class="cite"><a href="#ref-14">14</a></span> — and since MongoDB 5.0, map-reduce is deprecated in favour of the pipeline<span class="cite"><a href="#ref-14">14</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao phải thuần khiết</h4>
+              <p>Trên một cụm máy, một tác vụ có thể bị chạy lại vì máy hỏng hoặc chậm. Nếu hàm <span lang="en">map</span> có tác dụng phụ — ghi vào đâu đó, đọc trạng thái ngoài — thì chạy lại sẽ cho kết quả khác. Ràng buộc thuần khiết chính là cái giá để đổi lấy quyền song song hoá và tự phục hồi<span class="cite"><a href="#ref-13">13</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vòng quay về khai báo</h4>
+              <p><span lang="en">Aggregation pipeline</span> là chuỗi các giai đoạn tả-mẫu nối tiếp nhau, gần với tinh thần <span lang="en">SQL</span> hơn hẳn<span class="cite"><a href="#ref-14">14</a></span>. Kleppmann dùng nó để cho thấy rằng, ngay cả trong thế giới <span lang="en">NoSQL</span>, sức hút của ngôn ngữ khai báo vẫn kéo mọi thứ về cùng một hướng.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Và khi mọi thứ nối với mọi thứ?</strong>
+      <strong class="en-only" lang="en">And when everything links to everything?</strong>
+      <span class="standard-copy">Mô hình tài liệu hụt hơi ở nhiều-nhiều; mô hình quan hệ kham được bằng bảng nối nhưng viết truy vấn nhiều bước thì cồng kềnh. Khi các kết nối trở thành <em>nội dung chính</em> của dữ liệu chứ không phải phần phụ, cần một mô hình lấy chính cạnh nối làm đối tượng hạng nhất.</span>
+      <span class="easy-only">Túi thì không nối tốt; ngăn kéo nối được nhưng lệnh dài dòng. Khi thứ quan trọng nhất lại chính là những sợi dây nối, ta cần cách sắp lấy sợi dây làm trung tâm. Nhớ nhé: dây nối cũng là dữ liệu.</span>
+      <span class="en-only" lang="en">The document model runs out of breath at many-to-many; the relational model copes with join tables but multi-hop queries get clumsy. When the connections become the <em>main content</em> of the data rather than an accessory, we need a model that makes the edge itself a first-class object.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="graph-models" aria-labelledby="graph-models-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · <span lang="en">Graph-like data models</span></span><span class="en-only" lang="en">Axis 4 · Graph-like data models</span></div>
+        <h2 id="graph-models-title"><span class="vi-only">Khi nhiều-nhiều trở thành chuyện thường ngày</span><span class="en-only" lang="en">When many-to-many becomes the norm</span></h2>
+      </div>
+      <p class="standard-copy">Nếu ứng dụng của bạn có <strong>rất nhiều</strong> quan hệ nhiều-nhiều, Kleppmann đề nghị bước hẳn sang mô hình đồ thị: dữ liệu là <em>đỉnh</em> và <em>cạnh</em>, và cạnh — chứ không phải bảng — mới là công dân hạng nhất<span class="cite"><a href="#ref-1">1</a></span>. Ông lấy ví dụ đồ thị mạng xã hội, đồ thị web, và đồ thị đường bộ hoặc đường sắt; cũng nhắc rằng một đồ thị <strong>không nhất thiết đồng nhất</strong> — Facebook lưu người, địa điểm, sự kiện, lượt check-in và bình luận trong cùng một đồ thị<span class="cite"><a href="#ref-1">1</a></span>. Chương giới thiệu hai kiểu cấu trúc — <em><span lang="en">property graph</span></em> và <em><span lang="en">triple-store</span></em> — cùng ba ngôn ngữ hỏi chúng.</p>
+      <p class="easy-only">Có loại dữ liệu mà phần quan trọng nhất chính là những sợi dây: ai quen ai, đường nào nối thành phố nào, trang web nào dẫn tới trang nào. Với loại đó, đừng cố nhét vào ngăn kéo hay túi — hãy vẽ hẳn một tấm lưới gồm các nút và các sợi dây, rồi hỏi "đi từ nút này tới nút kia được không". Nhớ nhé: khi sợi dây quan trọng hơn cái nút, hãy chọn tấm lưới.</p>
+      <p class="en-only" lang="en">If your application has <strong>lots</strong> of many-to-many relationships, Kleppmann suggests moving all the way to a graph model: data is <em>vertices</em> and <em>edges</em>, and the edge — not the table — is the first-class citizen<span class="cite"><a href="#ref-1">1</a></span>. He cites social graphs, the web graph, and road or rail networks; he also notes a graph need <strong>not be homogeneous</strong> — Facebook keeps people, locations, events, check-ins and comments in one graph<span class="cite"><a href="#ref-1">1</a></span>. The chapter introduces two structures — the <em>property graph</em> and the <em>triple-store</em> — and three languages for asking questions of them.</p>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Property graph &amp; Cypher</div>
+          <h3><span class="vi-only">Đồ thị thuộc tính: đỉnh, cạnh, và nhãn</span><span class="en-only" lang="en">Property graphs: vertices, edges, labels</span></h3>
+          <p class="standard-copy">Trong mô hình <em><span lang="en">property graph</span></em>, mỗi đỉnh có một định danh, tập cạnh đi ra, đi vào và một tập cặp khoá-giá trị; mỗi cạnh cũng có định danh, đỉnh đầu, đỉnh cuối, một nhãn mô tả quan hệ và các thuộc tính riêng<span class="cite"><a href="#ref-15">15</a></span>. Kleppmann lấy <span lang="en">Neo4j</span>, <span lang="en">Titan</span> và <span lang="en">InfiniteGraph</span> làm ví dụ hiện thực<span class="cite"><a href="#ref-1">1</a></span>. Ngôn ngữ đi kèm phổ biến nhất là <em><span lang="en">Cypher</span></em>, mà Neo4j mô tả thẳng là <strong>ngôn ngữ truy vấn khai báo</strong> cho cơ sở dữ liệu đồ thị thuộc tính<span class="cite"><a href="#ref-16">16</a></span>; đặc tả mở của nó được công bố dưới tên <span lang="en">openCypher</span><span class="cite"><a href="#ref-17">17</a></span>.</p>
+          <p class="easy-only">Tưởng tượng một tấm bản đồ đầy chấm tròn và mũi tên. Mỗi chấm là một thứ (một người, một thành phố), mỗi mũi tên là một mối liên hệ và có tên hẳn hoi: "là bạn của", "sinh ra ở". Bạn hỏi bằng cách vẽ hình mẫu mình muốn tìm — "chấm nào có mũi tên <em>sinh ra ở</em> chỉ tới Huế?" — rồi máy đi dò. Nhớ nhé: hỏi đồ thị là mô tả hình mẫu, không phải chỉ đường.</p>
+          <p class="en-only" lang="en">In the <em>property graph</em> model each vertex has an identifier, a set of outgoing and incoming edges, and a set of key-value properties; each edge has an identifier, a tail and head vertex, a label describing the relationship, and its own properties<span class="cite"><a href="#ref-15">15</a></span>. Kleppmann names Neo4j, Titan and InfiniteGraph as implementations<span class="cite"><a href="#ref-1">1</a></span>. The best-known companion language is <em>Cypher</em>, which Neo4j describes outright as a <strong>declarative query language</strong> for property graph databases<span class="cite"><a href="#ref-16">16</a></span>; its open specification is published as openCypher<span class="cite"><a href="#ref-17">17</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Sức mạnh thật</strong>Đồ thị chịu được <em>tiến hoá</em>: thêm một loại quan hệ mới chỉ là thêm một nhãn cạnh, không phải đổi lược đồ. Với dữ liệu mà cấu trúc còn đang lớn lên, đó là ưu thế lớn<span class="cite"><a href="#ref-1">1</a></span>.</div>
+            <div class="easy-only"><strong>Điểm mạnh</strong>Muốn thêm kiểu quan hệ mới thì chỉ cần vẽ thêm một loại mũi tên, không phải làm lại cả tấm bản đồ.</div>
+            <div class="en-only" lang="en"><strong>The real strength</strong>Graphs absorb <em>evolution</em>: adding a new kind of relationship is just a new edge label, not a schema change. For data whose structure is still growing, that is a big advantage<span class="cite"><a href="#ref-1">1</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Truy vấn nhiều bước</h4>
+              <p>Điều đồ thị làm gọn mà <span lang="en">SQL</span> cổ điển làm cồng kềnh là đi <em>nhiều bước với số bước chưa biết trước</em>: "tìm mọi người cách tôi từ một tới ba bước quen biết". Trong <span lang="en">Cypher</span> đó là một mẫu đường đi có độ dài thay đổi<span class="cite"><a href="#ref-16">16</a></span>; trong <span lang="en">SQL</span> phải viết truy vấn đệ quy phức tạp hơn nhiều<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Sau khi sách xuất bản</h4>
+              <p>Cuốn sách ra năm 2017 khi mỗi hệ đồ thị còn một phương ngữ riêng. Từ đó, nỗ lực chuẩn hoá <span lang="en">GQL</span> — kế thừa trực tiếp tinh thần của <span lang="en">Cypher</span> và <span lang="en">openCypher</span> — đã hình thành một ngôn ngữ truy vấn đồ thị chung<span class="cite"><a href="#ref-24">24</a></span>. Đây là diễn biến <em>sau</em> nội dung chương, nêu ra để bạn không đọc chương như bản đồ hiện trạng.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Triple-stores, RDF &amp; SPARQL</div>
+          <h3><span class="vi-only">Bộ ba: chủ thể — vị từ — đối tượng</span><span class="en-only" lang="en">Triples: subject — predicate — object</span></h3>
+          <p class="standard-copy">Mô hình <em><span lang="en">triple-store</span></em> ghi mọi thứ thành câu ba thành phần: <strong>chủ thể, vị từ, đối tượng</strong>. Đối tượng có thể là một giá trị nguyên thuỷ (khi đó bộ ba là một thuộc tính của đỉnh) hoặc là một đỉnh khác (khi đó bộ ba là một cạnh)<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann nêu <span lang="en">Datomic</span> và <span lang="en">AllegroGraph</span> làm ví dụ<span class="cite"><a href="#ref-1">1</a></span>, và nối mô hình này với <span lang="en">RDF</span> — chuẩn biểu diễn dữ liệu dưới dạng bộ ba của Web ngữ nghĩa<span class="cite"><a href="#ref-18">18</a></span>. Ngôn ngữ hỏi bộ ba là <em><span lang="en">SPARQL</span></em>, một ngôn ngữ tả-mẫu trên đồ thị <span lang="en">RDF</span><span class="cite"><a href="#ref-19">19</a></span><span class="cite"><a href="#ref-20">20</a></span>, được W3C công nhận thành khuyến nghị năm 2008 và bản 1.1 năm 2013<span class="cite"><a href="#ref-19">19</a></span><span class="cite"><a href="#ref-21">21</a></span>.</p>
+          <p class="easy-only">Cách này ghi mọi thứ thành câu ba chữ, kiểu "Lan — thích — Toán" hay "Lan — bạn của — Minh". Chỉ cần ba ô cho mọi loại thông tin, nên thêm kiểu thông tin mới rất dễ: cứ viết thêm một câu. Muốn hỏi thì để trống một ô: "ai — bạn của — Minh?". Nhớ nhé: ba ô đơn giản mà kể được gần như mọi chuyện.</p>
+          <p class="en-only" lang="en">The <em>triple-store</em> model records everything as a three-part statement: <strong>subject, predicate, object</strong>. The object may be a primitive value — making the triple a property of the vertex — or another vertex, making it an edge<span class="cite"><a href="#ref-1">1</a></span>. Kleppmann names Datomic and AllegroGraph as examples<span class="cite"><a href="#ref-1">1</a></span>, and ties the model to RDF, the Semantic Web's standard for representing data as triples<span class="cite"><a href="#ref-18">18</a></span>. The language for asking about triples is <em>SPARQL</em>, a pattern-matching language over RDF graphs<span class="cite"><a href="#ref-19">19</a></span><span class="cite"><a href="#ref-20">20</a></span>, made a W3C Recommendation in 2008 with version 1.1 following in 2013<span class="cite"><a href="#ref-19">19</a></span><span class="cite"><a href="#ref-21">21</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Quan hệ với đồ thị thuộc tính</strong>Kleppmann chỉ ra hai mô hình gần như tương đương về sức biểu đạt: cùng một dữ liệu viết được bằng bộ ba hay bằng đỉnh-cạnh. Khác nhau ở truyền thống và công cụ, không ở khả năng<span class="cite"><a href="#ref-1">1</a></span>.</div>
+            <div class="easy-only"><strong>Giống nhau ở đâu</strong>Bản đồ chấm-mũi tên và câu ba chữ nói được cùng những thứ, chỉ là cách viết khác nhau.</div>
+            <div class="en-only" lang="en"><strong>Relation to property graphs</strong>Kleppmann points out the two models are near-equivalent in expressive power: the same data can be written as triples or as vertices and edges. They differ in tradition and tooling, not capability<span class="cite"><a href="#ref-1">1</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Web ngữ nghĩa: tham vọng và thực tế</h4>
+              <p>Kleppmann tách rõ <em>mô hình bộ ba</em> khỏi <em>dự án Web ngữ nghĩa</em>: ý tưởng để các website công bố dữ liệu máy đọc được nhằm dựng nên một "cơ sở dữ liệu của cả Internet" đã không thành hiện thực như kỳ vọng, nhưng bản thân mô hình dữ liệu bộ ba thì vẫn là một công cụ tốt cho ứng dụng nội bộ<span class="cite"><a href="#ref-1">1</a></span>. Đừng vì thất vọng với cái thứ nhất mà bỏ cái thứ hai.</p>
+            </div>
+            <div class="info-block">
+              <h4>Định danh bằng <span lang="en">URI</span></h4>
+              <p><span lang="en">RDF</span> dùng <span lang="en">URI</span> làm định danh cho chủ thể, vị từ và đối tượng, để dữ liệu từ nhiều nguồn khác nhau ghép lại được mà không đụng tên<span class="cite"><a href="#ref-18">18</a></span>. Đây chính là chi tiết khiến <span lang="en">RDF</span> trông lạ mắt so với đồ thị thuộc tính, dù nội dung bên dưới tương đương.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Datalog — the oldest and the most composable</div>
+          <h3><span class="vi-only"><span lang="en">Datalog</span>: nền móng cũ, sức ghép nối mới</span><span class="en-only" lang="en">Datalog: an old foundation, new composability</span></h3>
+          <p class="standard-copy"><span lang="en">Datalog</span> là ngôn ngữ truy vấn khai báo bắt nguồn từ logic vị từ, được nghiên cứu kỹ trong giới hàn lâm từ thập niên 1980<span class="cite"><a href="#ref-23">23</a></span> — nghĩa là <em>cũ hơn</em> cả <span lang="en">Cypher</span> lẫn <span lang="en">SPARQL</span>. Kleppmann xếp nó cuối phần đồ thị vì nó là <strong>nền móng</strong> mà các ngôn ngữ sau dựng lên<span class="cite"><a href="#ref-1">1</a></span>. Nó ghi dữ liệu gần như bộ ba nhưng viết theo lối vị từ, và cho phép <strong>định nghĩa quy tắc dẫn xuất</strong> rồi dùng lại quy tắc đó trong quy tắc khác — kể cả đệ quy. <span lang="en">Datomic</span> dùng <span lang="en">Datalog</span> làm ngôn ngữ truy vấn của mình<span class="cite"><a href="#ref-22">22</a></span>.</p>
+          <p class="easy-only">Kiểu này giống như dạy cho máy vài "luật suy ra": nếu A là cha của B, và B là cha của C, thì A là ông của C. Dạy xong, bạn chỉ cần hỏi "ai là ông của C?" và máy tự lần theo luật. Cái hay là luật này dùng lại được trong luật khác. Nhớ nhé: dạy luật một lần rồi hỏi được rất nhiều câu.</p>
+          <p class="en-only" lang="en">Datalog is a declarative query language rooted in predicate logic, studied thoroughly in academia since the 1980s<span class="cite"><a href="#ref-23">23</a></span> — that is, <em>older</em> than both Cypher and SPARQL. Kleppmann puts it last in the graph section because it is the <strong>foundation</strong> the later languages build on<span class="cite"><a href="#ref-1">1</a></span>. It stores data much like triples but written as predicates, and it lets you <strong>define derived rules</strong> and reuse them inside other rules, recursion included. Datomic uses Datalog as its query language<span class="cite"><a href="#ref-22">22</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao đáng học</strong>Khả năng ghép quy tắc khiến <span lang="en">Datalog</span> mạnh với truy vấn phức tạp: bạn chia bài toán thành từng quy tắc nhỏ đặt tên được, thay vì viết một truy vấn khổng lồ một lần<span class="cite"><a href="#ref-22">22</a></span>.</div>
+            <div class="easy-only"><strong>Vì sao hay</strong>Chia câu hỏi lớn thành nhiều luật nhỏ có tên, dễ hiểu hơn một câu hỏi dài ngoằng.</div>
+            <div class="en-only" lang="en"><strong>Why it's worth learning</strong>Rule composition makes Datalog strong for complex queries: you split the problem into small named rules instead of writing one giant query at once<span class="cite"><a href="#ref-22">22</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Quy tắc và đệ quy</h4>
+              <p>Một quy tắc <span lang="en">Datalog</span> nói: nếu các mệnh đề bên phải đúng thì mệnh đề bên trái cũng đúng. Vì bên phải có thể gọi lại chính quy tắc đang định nghĩa, ta biểu diễn được những câu hỏi "đi bao nhiêu bước cũng được" một cách tự nhiên<span class="cite"><a href="#ref-23">23</a></span> — đúng loại câu hỏi mà đồ thị hay gặp.</p>
+            </div>
+            <div class="info-block">
+              <h4>Trả giá bằng độ quen thuộc</h4>
+              <p><span lang="en">Datalog</span> đòi người viết đổi lối nghĩ và không có mấy công cụ phổ thông, nên nó ít gặp hơn <span lang="en">SQL</span> hay <span lang="en">Cypher</span>. Kleppmann trình bày nó không phải để bạn dùng ngay, mà để thấy <em>nền lý thuyết</em> chung bên dưới các ngôn ngữ đồ thị<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Graphs are not CODASYL returning</div>
+          <h3><span class="vi-only">Đồ thị không phải mô hình mạng sống lại</span><span class="en-only" lang="en">Graphs are not the network model reborn</span></h3>
+          <p class="standard-copy">Vì cả hai đều nói chuyện "bản ghi nối bản ghi", người ta dễ tưởng cơ sở dữ liệu đồ thị là <span lang="en">CODASYL</span> quay lại. Kleppmann bác bỏ bằng những khác biệt cụ thể<span class="cite"><a href="#ref-1">1</a></span>: <span lang="en">CODASYL</span> quy định trước những kiểu bản ghi nào được lồng vào kiểu nào và bắt lập trình viên men theo <em><span lang="en">access path</span></em> bằng chuỗi con trỏ<span class="cite"><a href="#ref-5">5</a></span>; đồ thị thì <strong>cho phép bất kỳ đỉnh nào nối bất kỳ đỉnh nào</strong>, cho tra cứu trực tiếp một đỉnh qua định danh hoặc chỉ mục, và hỏi bằng ngôn ngữ <strong>khai báo</strong> thay vì mã điều hướng<span class="cite"><a href="#ref-16">16</a></span>.</p>
+          <p class="easy-only">Ngày xưa cũng có kiểu "nối bản ghi bằng dây", nhưng bạn buộc phải đi đúng đường đã vạch sẵn, như đi trong mê cung có một lối. Tấm lưới hôm nay thì khác: nút nào nối nút nào cũng được, và bạn có thể nhảy thẳng tới một nút bất kỳ rồi mới đi tiếp. Nhớ nhé: giống nhau ở chỗ có dây, khác nhau ở chỗ được tự do đi.</p>
+          <p class="en-only" lang="en">Because both talk about records linked to records, it's tempting to read graph databases as CODASYL returning. Kleppmann rejects that with concrete differences<span class="cite"><a href="#ref-1">1</a></span>: CODASYL fixed in advance which record types could nest inside which, and made the programmer follow an <em>access path</em> along pointer chains<span class="cite"><a href="#ref-5">5</a></span>; a graph <strong>lets any vertex link to any other vertex</strong>, allows direct lookup of a vertex by identifier or index, and is queried in a <strong>declarative</strong> language instead of navigation code<span class="cite"><a href="#ref-16">16</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bài học rộng hơn</strong>Hai hệ giống nhau về <em>cấu trúc lưu trữ</em> vẫn có thể khác hẳn nhau về <em>mô hình lập trình</em>. Điều quyết định trải nghiệm không phải "có con trỏ hay không", mà là ai chịu trách nhiệm chọn đường đi.</div>
+            <div class="easy-only"><strong>Ý chính</strong>Nhìn giống nhau chưa chắc đã giống: quan trọng là ai phải tìm đường — bạn hay máy.</div>
+            <div class="en-only" lang="en"><strong>The wider lesson</strong>Two systems can share a <em>storage structure</em> and still differ utterly in <em>programming model</em>. What decides the experience is not "are there pointers" but who is responsible for choosing the route.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Khung lịch sử</h4>
+              <p>Mọi điều nói về <span lang="en">IMS</span> và <span lang="en">CODASYL</span> trong chương này thuộc về <strong>bối cảnh lịch sử</strong> của thập niên 1960–1980, được Kleppmann kể lại để giải thích vì sao mô hình quan hệ thắng, chứ không mô tả cách các hệ ấy đang được dùng hôm nay<span class="cite"><a href="#ref-4">4</a></span><span class="cite"><a href="#ref-5">5</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Cùng một bài học, lặp lại</h4>
+              <p>Kleppmann nhắc rằng mô hình tài liệu hôm nay lặp lại đúng điểm mạnh và điểm yếu của mô hình phân cấp ngày xưa: giỏi một-nhiều, kém nhiều-nhiều<span class="cite"><a href="#ref-1">1</a></span>. Lịch sử không lặp lại y nguyên, nhưng các đánh đổi thì có.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận thường gặp về Chương 2</span><span class="en-only" lang="en">Three common misreadings of Chapter 2</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“<span lang="en">NoSQL</span> nghĩa là không có lược đồ”</span><span class="en-only" lang="en">"NoSQL means no schema"</span></h4>
+          <p class="standard-copy">Sai: lược đồ vẫn tồn tại, chỉ là <em>ngầm</em> và được kiểm lúc đọc. Tên đúng là <span lang="en">schema-on-read</span>, và nó tương ứng với kiểm kiểu động chứ không phải vô luật<span class="cite"><a href="#ref-1">1</a></span>. Thậm chí các hệ tài liệu nay còn cho bật ràng buộc lược đồ tuỳ chọn<span class="cite"><a href="#ref-9">9</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: the schema still exists, it is just <em>implicit</em> and checked on read. The right name is schema-on-read, which corresponds to dynamic type checking, not to lawlessness<span class="cite"><a href="#ref-1">1</a></span>. Document systems now even let you switch on optional schema constraints<span class="cite"><a href="#ref-9">9</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Tài liệu luôn nhanh hơn vì không join”</span><span class="en-only" lang="en">"Documents are always faster — no joins"</span></h4>
+          <p class="standard-copy">Sai: lợi thế locality chỉ đúng khi cần gần trọn tài liệu, và việc nối vẫn phải làm — chỉ là làm trong mã ứng dụng, thường tốn nhiều vòng truy vấn hơn<span class="cite"><a href="#ref-1">1</a></span>. Tài liệu phình to còn khiến mỗi lần cập nhật phải ghi lại nhiều hơn<span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: the locality win only holds when you need nearly the whole document, and the joining still happens — just in application code, usually across more round trips<span class="cite"><a href="#ref-1">1</a></span>. Bloated documents also make every update rewrite more<span class="cite"><a href="#ref-8">8</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Đồ thị chỉ dành cho mạng xã hội”</span><span class="en-only" lang="en">"Graphs are only for social networks"</span></h4>
+          <p class="standard-copy">Sai: Kleppmann nêu đồ thị web, mạng đường bộ và đường sắt, và cả những đồ thị <em>không đồng nhất</em> trộn nhiều loại đối tượng trong một cấu trúc<span class="cite"><a href="#ref-1">1</a></span>. Tiêu chí chọn là mật độ quan hệ nhiều-nhiều, không phải lĩnh vực ứng dụng<span class="cite"><a href="#ref-15">15</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: Kleppmann cites the web graph, road and rail networks, and <em>heterogeneous</em> graphs mixing many object types in one structure<span class="cite"><a href="#ref-1">1</a></span>. The criterion is the density of many-to-many relationships, not the application domain<span class="cite"><a href="#ref-15">15</a></span>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi mô hình dữ liệu của chính hệ bạn</span><span class="en-only" lang="en">Test your own system's data model</span></h2>
+        <p class="standard-copy">Chương 2 không bảo bạn nên chọn gì; nó đưa cho bạn những câu hỏi để tự biết mình đang ở đâu. Hãy lấy một hệ bạn đang làm và trả lời thật — phần lớn nợ kỹ thuật về dữ liệu bắt đầu từ một câu trả lời bị bỏ qua ở đây.</p>
+        <p class="easy-only">Lấy một app hay một dịch vụ bạn đang làm, rồi thử trả lời mấy câu dưới. Không phải để chọn công nghệ mới, mà để biết cách bạn đang sắp dữ liệu có hợp với hình dạng thật của nó không. Nhớ nhé: trả lời thật thì mới soi ra được chỗ đang lệch.</p>
+        <p class="en-only" lang="en">Chapter 2 doesn't tell you what to pick; it hands you questions to locate yourself. Take a system you work on and answer honestly — most data-shaped technical debt starts from one question skipped here.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Dữ liệu của bạn nghiêng về hình dạng nào: cây, bảng nối, hay lưới?</strong><span class="deep-only">Đếm thật: có bao nhiêu quan hệ một-nhiều được nạp trọn vẹn, bao nhiêu quan hệ nhiều-một cần chuẩn hoá, bao nhiêu quan hệ nhiều-nhiều? Tỉ lệ ấy — chứ không phải sở thích công nghệ — mới là căn cứ chọn mô hình.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Chỗ nào trong mã của bạn đang làm việc mà cơ sở dữ liệu lẽ ra nên làm?</strong><span class="deep-only">Nếu bạn đang lặp qua danh sách ID rồi gọi truy vấn từng cái để "nối" dữ liệu, đó chính là một phép join bị dời vào ứng dụng. Nó có ý thức hay chỉ là hệ quả của một lựa chọn mô hình cũ?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Lược đồ của bạn được kiểm lúc ghi hay lúc đọc — và bạn có chủ động chọn điều đó không?</strong><span class="deep-only">Nếu là <span lang="en">schema-on-read</span>, hãy chỉ ra chỗ mã đang xử lý các dạng dữ liệu cũ. Nếu là <span lang="en">schema-on-write</span>, hãy chỉ ra lần di trú gần nhất tốn bao lâu. Cả hai đều ổn, miễn là một lựa chọn chứ không phải một tai nạn.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Mỗi lần đọc, bạn dùng bao nhiêu phần trăm tài liệu lấy về?</strong><span class="deep-only">Locality chỉ trả cổ tức khi con số này cao. Nếu bạn kéo về một tài liệu lớn chỉ để lấy hai trường, bạn đang trả tiền cho locality mà không tiêu nó — và đang làm mỗi lần cập nhật đắt lên.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Tài liệu lớn nhất của bạn to tới đâu, và nó có xu hướng tăng vô hạn không?</strong><span class="deep-only">Một mảng lồng chỉ tăng mà không bao giờ giảm là dấu hiệu cần tách ra thành tham chiếu. Hãy đặt một ngưỡng cụ thể và một cảnh báo, thay vì đợi tới lúc một tài liệu chạm giới hạn của hệ.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Truy vấn của bạn nói <em>cái gì</em> hay nói <em>làm thế nào</em>?</strong><span class="deep-only">Tìm những chỗ bạn đã tự tay viết vòng lặp, sắp xếp, lọc trong mã ứng dụng cho dữ liệu vốn nằm sẵn trong cơ sở dữ liệu. Mỗi chỗ như thế là một cơ hội bị bỏ lỡ để bộ tối ưu hoá làm hộ — và là một chỗ khó song song hoá.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu phải đi ba bước quan hệ, truy vấn của bạn trông thế nào?</strong><span class="deep-only">Đây là phép thử nhanh nhất xem bạn có đang cần mô hình đồ thị không. Nếu câu trả lời là một chuỗi join dài hoặc một truy vấn đệ quy khó đọc, và loại câu hỏi đó lặp lại thường xuyên, hãy nghiêm túc cân nhắc đồ thị.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có đang chọn công nghệ theo nhãn thay vì theo khả năng?</strong><span class="deep-only">Hai phe đang hội tụ: hệ quan hệ lưu được <span lang="en">JSON</span>, hệ tài liệu nối và ràng buộc được. Thay vì hỏi "SQL hay NoSQL", hãy liệt kê ba khả năng bạn thật sự cần và kiểm từng ứng viên theo danh sách đó.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Dữ liệu của bạn giống cái cây hay giống tấm lưới?</strong><span>Cây thì bỏ chung một túi; lưới thì cần thứ biết đi theo dây nối.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có thứ gì bạn đang chép ra nhiều chỗ không?</strong><span>Cái gì dùng chung thì để một chỗ rồi trỏ tới, đổi một lần là xong.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Mỗi lần lấy đồ, bạn có dùng gần hết túi không?</strong><span>Nếu chỉ lấy hai món mà phải bê cả túi, thì cách cất đang chưa hợp.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn đang nói kết quả mình muốn, hay đọc từng bước cho máy?</strong><span>Nói kết quả thì máy tự tìm đường nhanh nhất, và nhiều máy làm cùng lúc được.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>Which shape dominates your data: tree, join table, or web?</strong><span>Count honestly: how many one-to-many relationships loaded whole, how many many-to-one needing normalization, how many many-to-many? That ratio, not taste in technology, is the basis for choosing a model.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Where is your code doing work the database should do?</strong><span>If you loop over IDs issuing one query each to "stitch" data together, that is a join displaced into the application. Is it deliberate, or a leftover of an old model choice?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is your schema checked on write or on read — and did you choose that?</strong><span>If schema-on-read, point at the code handling older shapes. If schema-on-write, point at how long your last migration took. Either is fine, as long as it is a choice rather than an accident.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>What fraction of each document you fetch do you actually use?</strong><span>Locality only pays a dividend when that number is high. Pulling a large document for two fields means you pay for locality without spending it — and make every update dearer.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How large is your biggest document, and does it grow without bound?</strong><span>A nested array that only ever grows is a signal to split it into a reference. Set a concrete threshold and an alert rather than waiting for a document to hit the system limit.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Do your queries say <em>what</em> or say <em>how</em>?</strong><span>Find the places where you hand-wrote loops, sorts and filters in application code over data already in the database. Each is a missed chance to let the optimizer do it — and a place that resists parallelism.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>What does a three-hop relationship query look like in your system?</strong><span>This is the fastest test for whether you need a graph model. If the answer is a long join chain or an unreadable recursive query, and such questions recur, consider a graph seriously.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Are you choosing technology by label rather than by capability?</strong><span>The camps are converging: relational systems store JSON, document systems join and constrain. Instead of "SQL or NoSQL", list the three capabilities you actually need and test each candidate against that list.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Cuộc tranh cãi <span class="closing-accent">quan hệ hay tài liệu</span> không phải chuyện công nghệ mới thắng công nghệ cũ, mà là chuyện <span class="closing-accent">dữ liệu của bạn có hình gì</span>: cây một-nhiều, lưới nhiều-nhiều, hay đâu đó ở giữa. Mỗi hình dạng kéo theo một mô hình, mỗi mô hình kéo theo một cách hỏi — và bước ngoặt lớn nhất của lịch sử cơ sở dữ liệu là lúc ta thôi chỉ đường cho máy và bắt đầu <span class="closing-accent">nói ra điều mình muốn</span>.</span><span class="easy-only">Không có kiểu sắp dữ liệu nào đúng cho mọi thứ. Có dữ liệu giống <span class="closing-accent">cái cây</span>, có dữ liệu giống <span class="closing-accent">tấm lưới</span>, và mỗi kiểu có cách hỏi riêng. Nhớ nhé: nhìn hình dạng của dữ liệu trước, rồi hãy <span class="closing-accent">nói điều mình muốn</span> thay vì chỉ từng bước cho máy.</span><span class="en-only" lang="en">The <span class="closing-accent">relational-versus-document</span> argument is not new technology beating old, but a question of <span class="closing-accent">what shape your data has</span>: a one-to-many tree, a many-to-many web, or somewhere between. Each shape drags a model behind it, each model a way of asking — and the biggest turn in database history was the moment we stopped steering the machine and began <span class="closing-accent">stating what we want</span>.</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-1-reliable-scalable-and-maintainable-applications.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 1 · Ứng dụng đáng tin, co giãn, dễ bảo trì</span><span class="en-only" lang="en">Chapter 1 · Reliable, Scalable &amp; Maintainable Applications</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="chapter-3-storage-and-retrieval.html">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 3 · Lưu trữ &amp; truy xuất</span><span class="en-only" lang="en">Chapter 3 · Storage and Retrieval</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 2 <span lang="en">“Data Models and Query Languages”</span><span class="cite"><a href="#ref-1">1</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (túi hồ sơ, ngăn kéo có nhãn, tấm lưới chấm-mũi tên, luật "ông của C"…) là minh hoạ do tài liệu này bổ sung, không phải ví dụ nguyên văn của Kleppmann. Các mốc <span lang="en">IMS</span> (1968, chương trình Apollo)<span class="cite"><a href="#ref-4">4</a></span> và <span lang="en">CODASYL</span><span class="cite"><a href="#ref-5">5</a></span> là bối cảnh <strong>lịch sử</strong> được chương sách kể lại, không mô tả hiện trạng vận hành ngày nay; phần ghi chú về <span lang="en">GQL</span><span class="cite"><a href="#ref-24">24</a></span> và về việc <span lang="en">MongoDB</span> khai tử <span lang="en">map-reduce</span> từ phiên bản 5.0<span class="cite"><a href="#ref-14">14</a></span> là diễn biến <em>sau</em> thời điểm sách xuất bản, được nêu để đối chiếu.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 2 “Data Models and Query Languages”<span class="cite"><a href="#ref-1">1</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (the bag of papers, labelled drawers, the dot-and-arrow web, the "grandfather of C" rule…) are illustrations added by this companion, not Kleppmann's own examples. The IMS (1968, Apollo programme)<span class="cite"><a href="#ref-4">4</a></span> and CODASYL<span class="cite"><a href="#ref-5">5</a></span> milestones are <strong>historical</strong> context as the chapter recounts it, not a description of how those systems operate today; the notes on GQL<span class="cite"><a href="#ref-24">24</a></span> and on MongoDB deprecating map-reduce in 5.0<span class="cite"><a href="#ref-14">14</a></span> are developments <em>after</em> the book's publication, included for contrast.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1"><a href="https://openlibrary.org/works/OL19293745W/Designing_Data-Intensive_Applications" target="_blank" rel="noopener noreferrer">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 2 “Data Models and Query Languages” (bản ghi thư mục, Open Library)</a></li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách</a></li>
+        <li id="ref-3"><a href="https://www.seas.upenn.edu/~zives/03f/cis550/codd.pdf" target="_blank" rel="noopener noreferrer">E. F. Codd, “A Relational Model of Data for Large Shared Data Banks”, <em>Communications of the ACM</em>, 1970 (bản PDF lưu tại University of Pennsylvania)</a></li>
+        <li id="ref-4"><a href="https://www.ibm.com/history/information-management-system" target="_blank" rel="noopener noreferrer">IBM History — Information Management System (IMS): mô hình phân cấp, bảng kê vật tư Apollo, tín hiệu sẵn sàng đầu tiên 14/8/1968</a></li>
+        <li id="ref-5"><a href="https://en.wikipedia.org/wiki/CODASYL" target="_blank" rel="noopener noreferrer">CODASYL — mô hình mạng, cấu trúc set, chuỗi con trỏ và access path; quan tâm nhạt dần từ đầu thập niên 1980</a></li>
+        <li id="ref-6"><a href="https://en.wikipedia.org/wiki/Object%E2%80%93relational_impedance_mismatch" target="_blank" rel="noopener noreferrer">Object–relational impedance mismatch — mô tả sự vênh giữa đối tượng và bảng quan hệ</a></li>
+        <li id="ref-7"><a href="https://hibernate.org/orm/" target="_blank" rel="noopener noreferrer">Hibernate ORM — framework ánh xạ đối tượng sang quan hệ</a></li>
+        <li id="ref-8"><a href="https://www.mongodb.com/docs/manual/core/data-model-design/" target="_blank" rel="noopener noreferrer">MongoDB — Data Model Design: nhúng (embedding) so với tham chiếu (referencing), và lý do giữ tài liệu nhỏ</a></li>
+        <li id="ref-9"><a href="https://www.mongodb.com/docs/manual/core/schema-validation/" target="_blank" rel="noopener noreferrer">MongoDB — Schema Validation: ràng buộc lược đồ tuỳ chọn ở tầng cơ sở dữ liệu</a></li>
+        <li id="ref-10"><a href="https://www.postgresql.org/docs/current/datatype-json.html" target="_blank" rel="noopener noreferrer">PostgreSQL — kiểu dữ liệu json và jsonb (bằng chứng hội tụ phía quan hệ)</a></li>
+        <li id="ref-11"><a href="https://rethinkdb.com/docs/table-joins/" target="_blank" rel="noopener noreferrer">RethinkDB — Table joins: một cơ sở dữ liệu tài liệu hỗ trợ phép nối</a></li>
+        <li id="ref-12"><a href="https://developer.mozilla.org/en-US/docs/Web/CSS" target="_blank" rel="noopener noreferrer">MDN Web Docs — CSS: ngôn ngữ khai báo mô tả kiểu trình bày cho phần tử được chọn</a></li>
+        <li id="ref-13"><a href="https://research.google/pubs/mapreduce-simplified-data-processing-on-large-clusters/" target="_blank" rel="noopener noreferrer">Jeffrey Dean &amp; Sanjay Ghemawat, “MapReduce: Simplified Data Processing on Large Clusters”, Google Research, 2004</a></li>
+        <li id="ref-14"><a href="https://www.mongodb.com/docs/manual/core/aggregation-pipeline/" target="_blank" rel="noopener noreferrer">MongoDB — Aggregation Pipeline: thay thế khai báo cho map-reduce; map-reduce bị khai tử từ MongoDB 5.0</a></li>
+        <li id="ref-15"><a href="https://neo4j.com/docs/getting-started/appendix/graphdb-concepts/" target="_blank" rel="noopener noreferrer">Neo4j — Graph database concepts: nút, quan hệ có hướng và có nhãn, thuộc tính</a></li>
+        <li id="ref-16"><a href="https://neo4j.com/docs/cypher-manual/current/introduction/" target="_blank" rel="noopener noreferrer">Neo4j — Cypher Manual: “Cypher is Neo4j's declarative query language”, mẫu đường đi và độ dài thay đổi</a></li>
+        <li id="ref-17"><a href="https://opencypher.org/" target="_blank" rel="noopener noreferrer">openCypher — đặc tả mở của ngôn ngữ Cypher</a></li>
+                <li id="ref-18"><a href="https://www.w3.org/TR/rdf11-concepts/" target="_blank" rel="noopener noreferrer">W3C — RDF 1.1 Concepts and Abstract Syntax: mô hình bộ ba (chủ thể – vị từ – đối tượng) và định danh bằng IRI/URI — <em>spec gốc; w3.org chặn truy cập tự động (403 với bot), link mở bình thường trên trình duyệt</em></a></li>
+        <li id="ref-19"><a href="https://www.w3.org/TR/sparql11-query/" target="_blank" rel="noopener noreferrer">W3C — SPARQL 1.1 Query Language: ngôn ngữ truy vấn theo mẫu đồ thị trên dữ liệu RDF, W3C Recommendation 2013 — <em>spec gốc; w3.org chặn truy cập tự động (403 với bot), link mở bình thường trên trình duyệt</em></a></li>
+        <li id="ref-20"><a href="https://jena.apache.org/tutorials/sparql.html" target="_blank" rel="noopener noreferrer">Apache Jena — SPARQL tutorial: hướng dẫn hiện thực việc khớp mẫu đồ thị (nguồn phụ trợ cho ref-19)</a></li>
+        <li id="ref-21"><a href="https://en.wikipedia.org/wiki/SPARQL" target="_blank" rel="noopener noreferrer">SPARQL — đối chứng mốc lịch sử: W3C Recommendation 15/01/2008 (SPARQL 1.0) và 21/03/2013 (SPARQL 1.1)</a></li>
+        <li id="ref-22"><a href="https://docs.datomic.com/query/query-data-reference.html" target="_blank" rel="noopener noreferrer">Datomic — Datalog query reference: cú pháp truy vấn và quy tắc (rules)</a></li>
+        <li id="ref-23"><a href="https://en.wikipedia.org/wiki/Datalog" target="_blank" rel="noopener noreferrer">Datalog — ngôn ngữ khai báo gốc logic vị từ, được nghiên cứu từ thập niên 1980; quy tắc và đệ quy</a></li>
+        <li id="ref-24"><a href="https://www.gqlstandards.org/" target="_blank" rel="noopener noreferrer">GQL Standards — nỗ lực chuẩn hoá ngôn ngữ truy vấn đồ thị kế thừa tinh thần Cypher (diễn biến sau năm 2017)</a></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Chương 1 — Ứng dụng đáng tin, co giãn, dễ bảo trì</a> · <a href="chapter-3-storage-and-retrieval.html">Chương 3 — Lưu trữ &amp; truy xuất</a>.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Chapter 1 — Reliable, Scalable &amp; Maintainable Applications</a> · <a href="chapter-3-storage-and-retrieval.html">Chapter 3 — Storage and Retrieval</a>.</p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

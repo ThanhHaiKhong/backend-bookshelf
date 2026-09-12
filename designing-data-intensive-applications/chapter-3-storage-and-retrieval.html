@@ -1,0 +1,2046 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 3 &quot;Storage and Retrieval&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: log nối đuôi và hash index, SSTable &amp; LSM-tree, B-tree và write-ahead log, các hình dạng chỉ mục, ranh giới OLTP/OLAP và lưu trữ theo cột.">
+<title>Storage and Retrieval</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 03";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 3</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 3</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 3</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 3 · Lưu trữ &amp; truy xuất</span><span class="easy-only">DDIA · Chương 3 · Lưu trữ &amp; truy xuất</span><span class="en-only" lang="en">DDIA · Chapter 3 · Storage and Retrieval</span></div>
+      <h1 id="page-title"><span class="standard-copy">Cỗ máy <span class="hero-title-accent">cất và tìm</span> nằm dưới mọi truy vấn</span><span class="easy-only">Máy cất dữ liệu ở đâu, tìm lại kiểu gì?</span><span class="en-only" lang="en">The <span class="hero-title-accent">store-and-find</span> engine under every query</span></h1>
+      <p class="standard-copy">Chương 2 hỏi <em>dữ liệu trông như thế nào</em>; Chương 3 hỏi một câu thấp hơn hẳn: <strong>khi bạn đưa dữ liệu cho cơ sở dữ liệu, nó cất ở đâu, và khi bạn hỏi lại, nó tìm bằng cách nào?</strong><span class="cite"><a href="#ref-1">1</a></span> Kleppmann nói rõ rằng phần lớn lập trình viên ứng dụng sẽ không tự viết một <span lang="en">storage engine</span>, nhưng gần như chắc chắn sẽ phải <em>chọn</em> một cái — và chọn đúng thì cần hình dung được nó làm gì bên dưới<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>.</p>
+      <p class="easy-only">Bạn đưa cho máy một thứ và bảo "nhớ giùm". Lát sau bạn hỏi lại. Câu hỏi của chương này rất đơn giản: <strong>máy cất thứ đó vào đâu, và làm sao nó tìm lại nhanh đến thế?</strong> Bạn không cần tự làm ra cái tủ ấy, nhưng bạn sẽ phải chọn tủ nào — nên cũng nên biết bên trong nó xếp đồ ra sao.</p>
+      <p class="en-only" lang="en">Chapter 2 asked what data <em>looks like</em>; Chapter 3 asks something far lower down: <strong>when you hand data to a database, where does it put it, and how does it find it again?</strong><span class="cite"><a href="#ref-1">1</a></span> Kleppmann is explicit that most application developers won't implement a storage engine from scratch, but almost certainly will have to <em>pick</em> one — and picking well means having a rough picture of what it does underneath<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-2">2</a></span>.</p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Mọi engine lưu trữ đều đứng trên cùng một đánh đổi: <strong>chỉ mục làm việc đọc nhanh lên và luôn làm việc ghi chậm đi</strong>, vì chỉ mục là cấu trúc <em>phái sinh</em> phải được cập nhật ở mỗi lần ghi<span class="cite"><a href="#ref-1">1</a></span>. Từ đánh đổi ấy mọc ra hai họ engine — <span lang="en">log-structured</span> (ghi nối đuôi rồi hợp nhất sau) và <span lang="en">page-oriented</span> kiểu B-tree (sửa tại chỗ trên các trang cố định) — rồi một trục thứ hai cắt ngang: hệ phục vụ <em>giao dịch</em> và hệ phục vụ <em>phân tích</em> muốn hai cách bố trí dữ liệu khác hẳn nhau.</p>
+          <p class="easy-only">Muốn tìm nhanh thì phải làm thêm "mục lục". Nhưng mục lục không tự có: mỗi lần ghi thêm một dòng, máy phải sửa cả mục lục nữa — nên ghi sẽ chậm đi một chút. Nhớ nhé: <strong>đọc nhanh hơn thì ghi phải trả tiền</strong>, không có bữa trưa miễn phí.</p>
+          <p class="en-only" lang="en">Every storage engine rests on the same trade-off: <strong>an index speeds up reads and always slows down writes</strong>, because an index is a <em>derived</em> structure that must be updated on every write<span class="cite"><a href="#ref-1">1</a></span>. Out of that trade-off grow two families of engine — log-structured (append, then merge later) and page-oriented B-trees (update in place on fixed-size pages) — and then a second axis cuts across: systems serving <em>transactions</em> and systems serving <em>analytics</em> want quite different data layouts.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Ba cách bố trí dữ liệu của Chương 3: log-structured (LSM-tree), page-oriented (B-tree) và column-oriented cho phân tích">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">CẤT Ở ĐÂU,<br>TÌM BẰNG GÌ?</span><span class="en-only" lang="en">WHERE TO STORE,<br>HOW TO FIND?</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Log-structured</span><span class="en-only" lang="en">Log-structured</span></b>
+        <small class="standard-copy">Ghi nối đuôi, sắp xếp và hợp nhất về sau</small>
+        <small class="easy-only">Ghi thêm vào cuối, dọn dẹp sau.</small>
+        <small class="en-only" lang="en">Append now, sort and merge later</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Page-oriented</span><span class="en-only" lang="en">Page-oriented</span></b>
+        <small class="standard-copy">Trang cố định, sửa đúng chỗ cũ</small>
+        <small class="easy-only">Sửa ngay vào đúng ô cũ.</small>
+        <small class="en-only" lang="en">Fixed pages, updated in place</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Column-oriented</span><span class="en-only" lang="en">Column-oriented</span></b>
+        <small class="standard-copy">Xếp theo cột để quét và nén cho phân tích</small>
+        <small class="easy-only">Xếp theo cột để đếm cho nhanh.</small>
+        <small class="en-only" lang="en">Grouped by column to scan and compress</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#log-and-hash-index"><span><span class="vi-only">Log &amp; hash index</span><span class="en-only" lang="en">Log &amp; hash index</span></span><b class="standard-copy">Ghi nối đuôi và cái giá của chỉ mục</b><b class="easy-only">Ghi thêm vào cuối là nhanh nhất</b><b class="en-only" lang="en">Appending, and the price of an index</b></a>
+    <a href="#lsm-vs-btree"><span><span class="vi-only">LSM vs B-tree</span><span class="en-only" lang="en">LSM vs B-tree</span></span><b class="standard-copy">Hai họ engine, hai cách trả giá</b><b class="easy-only">Hai kiểu tủ, hai kiểu tốn công</b><b class="en-only" lang="en">Two families, two ways to pay</b></a>
+    <a href="#index-shapes"><span><span class="vi-only">Hình dạng chỉ mục</span><span class="en-only" lang="en">Index shapes</span></span><b class="standard-copy">Chỉ mục phụ, phủ, đa chiều và mờ</b><b class="easy-only">Nhiều kiểu mục lục khác nhau</b><b class="en-only" lang="en">Secondary, covering, spatial, fuzzy</b></a>
+    <a href="#oltp-vs-olap"><span><span class="vi-only">OLTP vs OLAP</span><span class="en-only" lang="en">OLTP vs OLAP</span></span><b class="standard-copy">Giao dịch, phân tích và kho cột</b><b class="easy-only">Ghi sổ hằng ngày khác việc thống kê</b><b class="en-only" lang="en">Transactions, analytics, column stores</b></a>
+    <a href="#diagnostic"><span><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></span><b class="standard-copy">Soi engine đang đỡ hệ của bạn</b><b class="easy-only">Câu hỏi tự hỏi mình</b><b class="en-only" lang="en">Look at the engine under your system</b></a>
+  </nav>
+
+  <section class="section" id="log-and-hash-index" aria-labelledby="log-and-hash-index-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Nền tảng 1 · <span lang="en">Log &amp; hash index</span></span><span class="en-only" lang="en">Foundation 1 · Log &amp; hash index</span></div>
+        <h2 id="log-and-hash-index-title"><span class="vi-only">Ghi thì nối đuôi, đọc mới là chỗ phải trả tiền</span><span class="en-only" lang="en">Appending is cheap; reading is where you pay</span></h2>
+      </div>
+      <p class="standard-copy">Kleppmann mở chương bằng cơ sở dữ liệu đơn giản nhất có thể tưởng tượng: một tệp mà mỗi lần ghi chỉ <strong>nối thêm một dòng vào cuối</strong>, còn mỗi lần đọc thì quét cả tệp để lấy giá trị mới nhất<span class="cite"><a href="#ref-1">1</a></span>. Ghi rẻ đến mức khó tin, nhưng chi phí đọc tăng theo số bản ghi. Muốn đọc nhanh thì phải dựng <em>chỉ mục</em> — một cấu trúc <strong>phái sinh</strong> từ dữ liệu gốc, không thêm thông tin mới mà chỉ thêm một lối đi ngắn hơn. Và vì lối đi ấy phải được bảo trì, <strong>mọi chỉ mục đều bắt việc ghi gánh thêm chi phí</strong> — đó là đánh đổi nền tảng mà cả chương xoay quanh<span class="cite"><a href="#ref-1">1</a></span>.</p>
+      <p class="easy-only">Hãy tưởng tượng một cuốn sổ mà bạn chỉ được viết thêm vào dòng cuối, không được tẩy xoá. Viết thì nhanh lắm. Nhưng muốn tìm lại một điều đã ghi thì phải lật từ đầu đến cuối. Vậy nên người ta làm thêm một trang "mục lục" ghi sẵn mỗi thứ nằm ở dòng nào. Tìm nhanh hẳn — đổi lại, mỗi lần viết thêm một dòng, bạn phải sửa mục lục nữa.</p>
+      <p class="en-only" lang="en">Kleppmann opens the chapter with the simplest database imaginable: a file where every write just <strong>appends one line to the end</strong>, and every read scans the whole file for the latest value<span class="cite"><a href="#ref-1">1</a></span>. Writing is absurdly cheap, but read cost grows with the number of records. To read fast you need an <em>index</em> — a <strong>derived</strong> structure built from the primary data, adding no new information, only a shorter path to it. And because that path must be maintained, <strong>every index makes writes pay more</strong> — the foundational trade-off the whole chapter turns on<span class="cite"><a href="#ref-1">1</a></span>.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">An index is derived data — you choose what it costs you</div>
+        <p class="definition standard-copy">Chỉ mục không phải là dữ liệu; nó là <em>ý kiến</em> của bạn về cách dữ liệu sẽ được hỏi. Chọn chỉ mục là chọn trước xem bạn muốn trả chi phí ở lúc ghi hay ở lúc đọc — và không có lựa chọn nào miễn phí cả hai đầu.</p>
+        <p class="definition easy-only">Mục lục không phải là nội dung cuốn sách; nó chỉ là cách bạn đoán trước người ta sẽ tra gì. Nhớ nhé: làm mục lục là trả tiền trước cho lần tìm sau.</p>
+        <p class="definition en-only" lang="en">An index isn't data; it's your <em>opinion</em> about how the data will be asked for. Choosing an index is choosing in advance whether to pay at write time or at read time — and no choice is free at both ends.</p>
+        <p class="deep-only">Lý do việc nối đuôi lại nhanh nằm ở dạng truy cập chứ không ở tốc độ thiết bị: ghi tuần tự tránh được việc dịch chuyển đầu đọc. Bài giới thiệu Bitcask nói thẳng rằng tệp đang hoạt động "chỉ được ghi bằng cách nối thêm, nghĩa là các lần ghi tuần tự không cần <span lang="en">disk seeking</span>"<span class="cite"><a href="#ref-3">3</a></span>. Điều đáng nhớ là kết luận này <em>không</em> dựa trên việc phần cứng nhanh hay chậm: đó là lý do vì sao cùng một ý tưởng vẫn được dùng lại trên ổ SSD, nơi người ta muốn ghi thành khối lớn liên tục thay vì sửa lắt nhắt.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định nền tảng về log và chỉ mục">
+        <div class="equation-row">
+          <b>Ghi = nối đuôi</b>
+          <span>Thao tác rẻ nhất là thêm vào cuối; không đụng tới thứ đã ghi nên không cần tìm chỗ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Đọc = quét</b>
+          <span>Không có chỉ mục, tìm một khoá phải đi hết tệp; chi phí tăng theo số bản ghi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Chỉ mục = trả trước</b>
+          <span>Cấu trúc phái sinh, phải cập nhật ở mỗi lần ghi: đọc nhanh lên, ghi chậm đi.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về log và chỉ mục">
+        <div class="equation-row">
+          <b>Viết thêm vào cuối</b>
+          <span>Cách ghi nhanh nhất là không đụng gì tới phần đã viết.</span>
+        </div>
+        <div class="equation-row">
+          <b>Không mục lục thì phải lật hết</b>
+          <span>Sổ càng dày, tìm càng lâu.</span>
+        </div>
+        <div class="equation-row">
+          <b>Mục lục tốn công</b>
+          <span>Mỗi lần viết thêm, phải sửa mục lục theo.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three foundational claims about logs and indexes">
+        <div class="equation-row">
+          <b>Write = append</b>
+          <span>The cheapest operation is adding to the end; nothing already written is touched, so nothing must be found.</span>
+        </div>
+        <div class="equation-row">
+          <b>Read = scan</b>
+          <span>With no index, finding a key walks the whole file; cost grows with the number of records.</span>
+        </div>
+        <div class="equation-row">
+          <b>Index = pay up front</b>
+          <span>A derived structure, updated on every write: reads get faster, writes get slower.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Append-only log</div>
+          <h3><span class="vi-only">Cuốn sổ chỉ được viết thêm</span><span class="en-only" lang="en">A book you can only add to</span></h3>
+          <p class="standard-copy">Trong một kho ghi theo log, mỗi thao tác ghi là một bản ghi mới nối vào cuối tệp đang hoạt động; khi tệp đủ lớn, nó được đóng lại và trở thành <strong>bất biến</strong>, một tệp mới mở ra thay thế<span class="cite"><a href="#ref-3">3</a></span>. Xoá cũng là một lần ghi: người ta ghi một dấu <em><span lang="en">tombstone</span></em> đặc biệt, và giá trị cũ chỉ thật sự biến mất ở lần hợp nhất sau<span class="cite"><a href="#ref-3">3</a></span>.</p>
+          <p class="easy-only">Cuốn sổ này có luật lạ: không được tẩy, không được sửa, chỉ được viết thêm xuống dưới. Muốn xoá một điều? Bạn viết thêm một dòng "điều kia bỏ đi nhé". Dòng cũ vẫn còn đó cho tới hôm tổng dọn. Nhớ nhé: ở đây, xoá cũng là một lần viết.</p>
+          <p class="en-only" lang="en">In a log-structured store, every write is a new record appended to the active file; once that file is big enough it is closed and becomes <strong>immutable</strong>, and a new one takes its place<span class="cite"><a href="#ref-3">3</a></span>. Deletion is also a write: a special <em>tombstone</em> is appended, and the old value only really disappears at the next merge<span class="cite"><a href="#ref-3">3</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Bất cứ chỗ nào ưu tiên thông lượng ghi: nhật ký sự kiện, hàng đợi bền, các kho khoá–giá trị dòng LSM, và cả <span lang="en">write-ahead log</span> của cơ sở dữ liệu quan hệ.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở mọi chỗ cần ghi thật nhiều, thật nhanh — như sổ nhật ký ghi liên tục cả ngày.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Anywhere write throughput matters: event logs, durable queues, LSM-family key–value stores, and the write-ahead log of a relational database.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Hash index &amp; the in-memory keydir</div>
+          <h3><span class="vi-only">Bản đồ khoá → vị trí byte, nằm trong RAM</span><span class="en-only" lang="en">A key-to-byte-offset map, held in RAM</span></h3>
+          <p class="standard-copy">Chỉ mục đơn giản nhất cho một log như thế là một <strong>bảng băm trong bộ nhớ</strong> trỏ từ khoá tới vị trí byte trong tệp. Bitcask — engine cục bộ ra đời từ kiến trúc lưu trữ cắm-thay-được của Riak — gọi nó là <em><span lang="en">keydir</span></em>: "một bảng băm ánh xạ mọi khoá trong Bitcask tới một cấu trúc kích thước cố định cho biết tệp, vị trí và kích thước của bản ghi được ghi gần nhất cho khoá đó"<span class="cite"><a href="#ref-3">3</a></span>. Nhờ vậy, đọc một giá trị <strong>không bao giờ cần quá một lần <span lang="en">disk seek</span></strong><span class="cite"><a href="#ref-3">3</a></span>.</p>
+          <p class="easy-only">Mục lục ở đây là một tờ giấy để trên bàn (chứ không cất trong sổ), ghi: "món A ở trang 12, dòng 3". Cần tìm món A? Liếc tờ giấy rồi mở đúng một chỗ. Nhớ nhé: mục lục để ngoài thì tra cực nhanh, nhưng nó chiếm chỗ trên bàn.</p>
+          <p class="en-only" lang="en">The simplest index over such a log is an <strong>in-memory hash map</strong> from key to byte offset. Bitcask — the local engine that grew out of Riak's pluggable storage — calls it the <em>keydir</em>: "a hash table that maps every key in a Bitcask to a fixed-size structure giving the file, offset, and size of the most recently written entry for that key"<span class="cite"><a href="#ref-3">3</a></span>. Because of it, reading a value <strong>never requires more than a single disk seek</strong><span class="cite"><a href="#ref-3">3</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Ở những kho khoá–giá trị mà tập khoá nhỏ nhưng bị ghi đè rất nhiều — ví dụ đếm lượt xem theo URL, nơi số khoá có hạn còn số lần cập nhật thì không.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi có ít món nhưng phải cập nhật liên tục — như bảng đếm lượt xem của từng video.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Key–value stores where the key set is small but overwritten constantly — counting views per URL, say, where the number of keys is bounded but the number of updates is not.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Segments, compaction &amp; hint files</div>
+          <h3><span class="vi-only">Cắt khúc rồi hợp nhất để lấy lại chỗ</span><span class="en-only" lang="en">Segment, then merge to win space back</span></h3>
+          <p class="standard-copy">Ghi mãi mà không xoá thì đĩa đầy. Lời giải là <em>hợp nhất</em> (Bitcask gọi là <span lang="en">merging</span>, giới LSM gọi là <span lang="en">compaction</span>): duyệt qua các tệp bất biến và sinh ra một bộ tệp mới "chỉ chứa bản mới nhất, còn sống, của mỗi khoá có mặt"<span class="cite"><a href="#ref-3">3</a></span>. Kèm theo mỗi tệp dữ liệu là một <em><span lang="en">hint file</span></em> chứa vị trí và kích thước thay vì giá trị, để lần khởi động sau dựng lại keydir nhanh hơn nhiều<span class="cite"><a href="#ref-3">3</a></span>.</p>
+          <p class="easy-only">Sổ viết mãi thì dày. Nên thỉnh thoảng người ta chép lại: mỗi món chỉ giữ dòng mới nhất, những dòng cũ và những dòng "bỏ đi" thì không chép nữa. Cuốn sổ mới mỏng hơn hẳn. Nhớ nhé: dọn dẹp không phải để đẹp, mà để còn chỗ viết tiếp.</p>
+          <p class="en-only" lang="en">Append forever and the disk fills up. The answer is merging (Bitcask's word; the LSM world says <em>compaction</em>): walk the immutable files and produce a new set containing "only the 'live' or latest versions of each present key"<span class="cite"><a href="#ref-3">3</a></span>. Alongside each data file sits a <em>hint file</em> holding positions and sizes instead of values, so the next startup can rebuild the keydir far faster<span class="cite"><a href="#ref-3">3</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Mỗi khi một hệ "ghi nhanh" bất ngờ phình dung lượng: gần như luôn là vì tiến trình hợp nhất đang chậm hơn tốc độ ghi mới.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi ổ đĩa đầy lên nhanh bất thường — thường là vì chưa kịp dọn.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Whenever a "fast-write" system suddenly balloons on disk: almost always the merge process is falling behind the incoming writes.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Where the hash index stops</div>
+          <h3><span class="vi-only">Hai bức tường của chỉ mục băm</span><span class="en-only" lang="en">The two walls a hash index hits</span></h3>
+          <p class="standard-copy">Bức tường thứ nhất: vì keydir ánh xạ <em>mọi</em> khoá và nằm trong bộ nhớ<span class="cite"><a href="#ref-3">3</a></span>, tập khoá bị chặn bởi RAM — trong khi phần giá trị thì không, và chính bài Bitcask đặt mục tiêu "xử lý được tập dữ liệu lớn hơn RAM rất nhiều mà không suy giảm"<span class="cite"><a href="#ref-3">3</a></span>. Bức tường thứ hai: bảng băm không có thứ tự, nên truy vấn theo <em>khoảng</em> — "mọi khoá từ A đến B" — lại phải quay về quét<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Cách này có hai chỗ kẹt. Một: tờ mục lục phải để trên bàn, mà bàn thì bé — quá nhiều món là hết chỗ. Hai: tờ giấy ghi lộn xộn, nên nếu bạn hỏi "cho xem tất cả món từ A đến B" thì vẫn phải dò từng dòng. Nhớ nhé: mục lục không xếp thứ tự thì không tra theo khoảng được.</p>
+          <p class="en-only" lang="en">Wall one: because the keydir maps <em>every</em> key and lives in memory<span class="cite"><a href="#ref-3">3</a></span>, the key set is bounded by RAM — while the values are not, and the Bitcask paper's own goal was the "ability to handle datasets much larger than RAM w/o degradation"<span class="cite"><a href="#ref-3">3</a></span>. Wall two: a hash map has no order, so a <em>range</em> query — "every key from A to B" — falls back to scanning<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Khi mô hình dữ liệu của bạn đầy khoá dạng chuỗi thời gian hoặc tiền tố phân cấp, và câu hỏi thường trực là "lấy tất cả trong khoảng này" — đó là lúc chỉ mục băm hết đất dùng.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi bạn hay hỏi "cho xem từ ngày này đến ngày kia" — kiểu mục lục lộn xộn sẽ không giúp được.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>When your keys are time series or hierarchical prefixes and the standing question is "give me everything in this range" — that's where the hash index runs out of road.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Đọc con số hiệu năng cho đúng</h4>
+              <p>Bài Bitcask có nêu thông lượng "5000–6000 lần ghi mỗi giây", nhưng kèm điều kiện rất cụ thể: đó là <em>thử nghiệm ban đầu trên một máy xách tay với đĩa chậm</em>, trong tài liệu năm 2010<span class="cite"><a href="#ref-3">3</a></span>. Con số ấy nói lên hình dạng của thiết kế chứ không phải giới hạn của phần cứng hôm nay — và nó là ví dụ tốt cho thói quen nên có: mọi <span lang="en">benchmark</span> chỉ có nghĩa khi đi kèm điều kiện đo.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao hai bức tường lại đi cùng nhau</h4>
+              <p>Cả hai đều bắt nguồn từ một chọn lựa duy nhất: dùng <em>băm</em> làm cấu trúc tra cứu. Băm cho thời gian tra cứu gần như hằng số nhưng phá bỏ thứ tự, và nó bắt buộc phải giữ trọn bộ khoá ở nơi truy cập ngẫu nhiên rẻ, tức bộ nhớ. Thay băm bằng một cấu trúc <em>có thứ tự</em> sẽ gỡ được cả hai — đó chính là đường dẫn sang phần tiếp theo.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ lộn xộn sang có thứ tự</strong>
+      <strong class="en-only" lang="en">From unordered to sorted</strong>
+      <span class="standard-copy">Cả hai giới hạn trên đều tan biến nếu ta yêu cầu mỗi đoạn log được <em>sắp xếp theo khoá</em>. Khi đó chỉ mục trong bộ nhớ chỉ cần thưa thớt, truy vấn khoảng trở lại khả thi, và việc hợp nhất các đoạn biến thành một phép trộn kiểu <span lang="en">mergesort</span>. Đó là lối vào của SSTable và LSM-tree.</span>
+      <span class="easy-only">Chỉ cần bắt mỗi cuốn sổ con phải xếp theo thứ tự chữ cái, hai chỗ kẹt vừa rồi biến mất. Phần sau nói về cách làm đó.</span>
+      <span class="en-only" lang="en">Both limits dissolve if we require each log segment to be <em>sorted by key</em>. Then the in-memory index need only be sparse, range queries become possible again, and merging segments turns into a mergesort. That is the doorway to SSTables and the LSM-tree.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="lsm-vs-btree" aria-labelledby="lsm-vs-btree-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Nền tảng 2 · <span lang="en">LSM-tree vs B-tree</span></span><span class="en-only" lang="en">Foundation 2 · LSM-tree vs B-tree</span></div>
+        <h2 id="lsm-vs-btree-title"><span class="vi-only">Hai họ engine, hai chỗ để trả giá</span><span class="en-only" lang="en">Two families of engine, two places to pay</span></h2>
+      </div>
+      <p class="standard-copy">Bắt các đoạn log phải sắp xếp theo khoá, ta được <em>SSTable</em>; cho các bản ghi mới đi vào một cây trong bộ nhớ rồi định kỳ đổ xuống đĩa, ta được <strong>LSM-tree</strong>. Tên gọi đến từ bài của O'Neil và cộng sự năm 1996, mô tả một cấu trúc "hoãn lại và gom lô các thay đổi chỉ mục, dồn thay đổi từ một thành phần trong bộ nhớ xuống một hoặc nhiều thành phần trên đĩa theo cách gợi nhớ <span lang="en">merge sort</span>"<span class="cite"><a href="#ref-4">4</a></span>. Ở phía đối diện là <strong>B-tree</strong>, cấu trúc chỉ mục tiêu chuẩn của cơ sở dữ liệu quan hệ — phổ biến tới mức năm 1979 Douglas Comer đã đặt tên bài tổng quan của mình là "The Ubiquitous B-Tree"<span class="cite"><a href="#ref-9">9</a></span>. Nó chia dữ liệu thành các <em>trang</em> kích thước cố định và <strong>sửa tại chỗ</strong>.</p>
+      <p class="easy-only">Có hai kiểu tủ đựng đồ. Tủ thứ nhất: bạn cứ ném đồ mới vào một cái hộp nhỏ trên bàn, đầy thì đổ cả hộp xuống ngăn dưới, rồi thỉnh thoảng gộp các ngăn lại cho gọn. Tủ thứ hai: mỗi món có sẵn một ô cố định, đổi gì thì mở đúng ô đó ra sửa. Kiểu một ghi nhanh nhưng dọn nhiều; kiểu hai gọn gàng nhưng mỗi lần sửa phải đi tìm ô.</p>
+      <p class="en-only" lang="en">Require the log segments to be sorted by key and you get <em>SSTables</em>; let new records land in an in-memory tree and spill to disk periodically and you get the <strong>LSM-tree</strong>. The name comes from O'Neil and colleagues in 1996, describing a structure that "defers and batches index changes, cascading the changes from a memory-based component through one or more disk components in an efficient manner reminiscent of merge sort"<span class="cite"><a href="#ref-4">4</a></span>. Facing it is the <strong>B-tree</strong>, the standard index of relational databases — so standard that in 1979 Douglas Comer titled his survey "The Ubiquitous B-Tree"<span class="cite"><a href="#ref-9">9</a></span>. It breaks data into fixed-size <em>pages</em> and <strong>updates in place</strong>.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Defer and merge, or edit in place</div>
+        <p class="definition standard-copy">LSM-tree ghi bằng cách <em>hoãn</em>: nhận nhanh, sắp xếp trong bộ nhớ, rồi trộn dần xuống đĩa. B-tree ghi bằng cách <em>sửa</em>: tìm đúng trang, thay đúng chỗ, và ghi nhật ký trước để còn cứu được nếu mất điện. Cả hai đều đúng; câu hỏi duy nhất là bạn muốn trả giá ở đâu.</p>
+        <p class="definition easy-only">Kiểu một: cứ nhận đã, dọn sau. Kiểu hai: xếp đúng chỗ ngay từ đầu. Nhớ nhé: không có kiểu nào "tốt hơn" — chỉ có kiểu hợp với việc bạn hay làm.</p>
+        <p class="definition en-only" lang="en">An LSM-tree writes by <em>deferring</em>: accept fast, sort in memory, merge down to disk over time. A B-tree writes by <em>editing</em>: find the right page, change it in place, and log first so a crash can be recovered. Both are correct; the only question is where you want to pay.</p>
+        <p class="deep-only">Điểm tinh tế mà Kleppmann nhấn mạnh là đánh đổi này <strong>phụ thuộc workload</strong>, không phải một thứ hạng cố định<span class="cite"><a href="#ref-1">1</a></span>. Chính bài LSM gốc đã tự giới hạn phạm vi: cấu trúc này "hữu ích nhất trong các ứng dụng mà việc chèn vào chỉ mục xảy ra thường xuyên hơn các lần tìm để lấy bản ghi ra", và ngược lại "các lần tìm cần trả lời ngay sẽ mất hiệu quả I/O trong một số trường hợp"<span class="cite"><a href="#ref-4">4</a></span>. Ai trích một con số hiệu năng mà bỏ vế sau là đã kể nửa câu chuyện.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định về hai họ engine">
+        <div class="equation-row">
+          <b>Hoãn &amp; trộn</b>
+          <span>LSM nhận ghi vào bộ nhớ, đổ xuống đĩa thành tệp bất biến, rồi hợp nhất nền.</span>
+        </div>
+        <div class="equation-row">
+          <b>Sửa tại chỗ</b>
+          <span>B-tree ghi đè đúng trang chứa khoá; nhật ký ghi trước lo phần an toàn khi sập.</span>
+        </div>
+        <div class="equation-row">
+          <b>Không có kẻ thắng chung</b>
+          <span>Ưu thế đảo chiều theo tỉ lệ đọc/ghi, kích thước bản ghi và yêu cầu độ trễ.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về hai họ engine">
+        <div class="equation-row">
+          <b>Nhận trước, dọn sau</b>
+          <span>Ghi rất nhanh, nhưng phải dọn dẹp đều đặn.</span>
+        </div>
+        <div class="equation-row">
+          <b>Xếp đúng ô ngay</b>
+          <span>Tìm lại rất gọn, nhưng mỗi lần sửa phải đi tìm ô.</span>
+        </div>
+        <div class="equation-row">
+          <b>Tuỳ việc mà chọn</b>
+          <span>Hay ghi thì chọn kiểu một; hay tra thì kiểu hai thường hợp hơn.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three claims about the two engine families">
+        <div class="equation-row">
+          <b>Defer &amp; merge</b>
+          <span>LSM takes writes into memory, spills immutable files to disk, then compacts in the background.</span>
+        </div>
+        <div class="equation-row">
+          <b>Edit in place</b>
+          <span>A B-tree overwrites the page holding the key; a write-ahead log handles crash safety.</span>
+        </div>
+        <div class="equation-row">
+          <b>No overall winner</b>
+          <span>The advantage flips with read/write ratio, record size and latency requirements.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">SSTable &amp; memtable</div>
+          <h3><span class="vi-only">Sắp xếp trước, rồi mới chạm đĩa</span><span class="en-only" lang="en">Sort first, touch disk later</span></h3>
+          <p class="standard-copy">Bản ghi mới không đi thẳng xuống đĩa: chúng vào một cấu trúc cây trong bộ nhớ — <em><span lang="en">memtable</span></em> — nơi thứ tự khoá được giữ sẵn. Tài liệu hiện thực của LevelDB mô tả đúng vòng đời ấy: "một bản sao của tệp log hiện thời được giữ trong một cấu trúc trong bộ nhớ (memtable)", và khi tệp log đạt khoảng 4&nbsp;MB thì nó được chuyển thành một bảng đã sắp xếp, đồng thời một tệp log mới được tạo<span class="cite"><a href="#ref-5">5</a></span>. Vì mỗi tệp đã sắp xếp, chỉ mục trong bộ nhớ chỉ cần <strong>thưa</strong> — vài khoá mốc là đủ để nhảy tới đúng vùng.</p>
+          <p class="easy-only">Đồ mới không bị ném thẳng vào tủ. Chúng nằm tạm trong một khay trên bàn, và khay này luôn được xếp theo thứ tự chữ cái. Khay đầy thì bê nguyên xuống tủ, vẫn đúng thứ tự. Nhờ vậy, mục lục không cần ghi từng món — chỉ cần ghi "A đến F ở ngăn một" là đủ. Nhớ nhé: xếp trước thì mục lục nhẹ đi rất nhiều.</p>
+          <p class="en-only" lang="en">New records don't go straight to disk: they land in an in-memory tree — the <em>memtable</em> — where key order is maintained for free. LevelDB's implementation notes describe exactly that lifecycle: "a copy of the current log file is kept in an in-memory structure (the memtable)", and when the log file reaches about 4&nbsp;MB it is converted to a sorted table and a fresh log file is started<span class="cite"><a href="#ref-5">5</a></span>. Because each file is sorted, the in-memory index need only be <strong>sparse</strong> — a few landmark keys are enough to jump to the right region.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Ở mọi engine họ LSM: LevelDB, RocksDB, và các kho phân tán dựng trên ý tưởng SSTable. Truy vấn theo khoảng khoá trở lại rẻ vì dữ liệu đã nằm đúng thứ tự trên đĩa.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở những hệ cần vừa ghi nhiều vừa tra được theo khoảng — như dữ liệu theo thời gian.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In every LSM-family engine: LevelDB, RocksDB, and the distributed stores built on the SSTable idea. Range queries get cheap again because the data already sits in order on disk.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Compaction strategies: leveled vs size-tiered</div>
+          <h3><span class="vi-only">Hai lối hợp nhất, hai kiểu hoá đơn</span><span class="en-only" lang="en">Two ways to compact, two kinds of bill</span></h3>
+          <p class="standard-copy">Lối <em><span lang="en">leveled</span></em> xếp các tệp thành tầng có kích thước tăng dần. LevelDB: khi tổng kích thước tệp ở tầng L vượt 10<sup>L</sup>&nbsp;MB (10&nbsp;MB cho tầng 1, 100&nbsp;MB cho tầng 2…), một tệp ở tầng L cùng mọi tệp giao khoảng ở tầng L+1 được trộn lại; tệp đầu ra có kích thước mục tiêu 2&nbsp;MB<span class="cite"><a href="#ref-5">5</a></span>. RocksDB nêu cùng công thức: <span lang="en">Target_Size(Ln+1) = Target_Size(Ln) × max_bytes_for_level_multiplier</span>, mặc định nhân 10<span class="cite"><a href="#ref-6">6</a></span>. Lối <em><span lang="en">size-tiered</span></em> thì gom các tệp <strong>xấp xỉ bằng nhau</strong> lại: tài liệu Cassandra cho biết STCS khởi động khi tích đủ một số tệp cùng cỡ (mặc định 4) và trộn chúng thành tệp lớn hơn<span class="cite"><a href="#ref-7">7</a></span>.</p>
+          <p class="easy-only">Dọn tủ có hai cách. Cách một: chia tủ thành nhiều ngăn, ngăn dưới to gấp mười ngăn trên; đầy ngăn nào thì gộp ngăn đó xuống dưới. Cách hai: cứ thấy bốn hộp cỡ bằng nhau thì gộp thành một hộp to. Nhớ nhé: cách một giữ tủ gọn hơn nhưng phải dọn nhiều lần hơn; cách hai dọn ít hơn nhưng có lúc tủ phình ra.</p>
+          <p class="en-only" lang="en">The <em>leveled</em> approach arranges files into levels of growing size. LevelDB: when the combined size of files at level L exceeds 10<sup>L</sup>&nbsp;MB (10&nbsp;MB for level-1, 100&nbsp;MB for level-2…), one file at L plus all overlapping files at L+1 are merged; output files target 2&nbsp;MB<span class="cite"><a href="#ref-5">5</a></span>. RocksDB states the same formula: <span lang="en">Target_Size(Ln+1) = Target_Size(Ln) × max_bytes_for_level_multiplier</span>, default 10<span class="cite"><a href="#ref-6">6</a></span>. The <em>size-tiered</em> approach instead merges files of <strong>roughly equal size</strong>: Cassandra's docs say STCS fires once a set number of similarly-sized SSTables accumulate (default 4) and merges them into a larger one<span class="cite"><a href="#ref-7">7</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Trong các nút chỉnh cấu hình mà bạn tưởng là vô hại. Đổi chiến lược hợp nhất là đổi thẳng hoá đơn I/O và dung lượng dư của cụm — thường đáng làm trước khi nghĩ tới việc thêm máy.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở phần cài đặt của cơ sở dữ liệu — một dòng cấu hình đổi hẳn chuyện tủ có gọn hay không.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In config knobs that look harmless. Changing the compaction strategy changes your cluster's I/O and spare-capacity bill directly — often worth trying before adding machines.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Cái giá của size-tiered</h4>
+              <p>Tài liệu Cassandra nói rõ hai nhược điểm: đọc chậm hơn "vì quá trình trộn theo kích thước không nhóm dữ liệu theo hàng", làm các phiên bản của một hàng rải ra nhiều SSTable; và <em>khuếch đại không gian</em> — dung lượng cần cho cả tệp mới lẫn tệp cũ trong lúc hợp nhất có thể vượt quá chỗ trống thường có trên một nút<span class="cite"><a href="#ref-7">7</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Sách viết năm 2017, phần mềm thì không đứng yên</h4>
+              <p>Tài liệu hiện thời của Cassandra vẫn ghi <span lang="en">SizeTieredCompactionStrategy</span> là chiến lược mặc định, nhưng đồng thời khuyến nghị <span lang="en">Unified Compaction Strategy</span> (UCS) cho phần lớn workload từ Cassandra 5.0 trở đi<span class="cite"><a href="#ref-7">7</a></span>. Nói cách khác, cặp "LevelDB/RocksDB leveled — Cassandra/HBase size-tiered" là cách phân đôi đúng với thời điểm cuốn sách, chứ không phải một sự thật vĩnh viễn: hãy kiểm tra tài liệu phiên bản bạn đang chạy.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Bloom filter</div>
+          <h3><span class="vi-only">Trả lời "chắc chắn không có" mà không cần mở đĩa</span><span class="en-only" lang="en">Saying "definitely not here" without touching disk</span></h3>
+          <p class="standard-copy">Điểm yếu cố hữu của LSM là truy vấn một khoá <strong>không tồn tại</strong>: phải hỏi lần lượt từng tệp mới dám kết luận. <em><span lang="en">Bloom filter</span></em> chặn đúng chỗ đó. Tài liệu RocksDB mô tả nó như một cấu trúc cho biết một khoá <em>có thể tồn tại</em> hay <em>chắc chắn không tồn tại</em> trong tập khoá của một tệp SST, nhờ vậy tránh được những lần đọc đĩa vô ích<span class="cite"><a href="#ref-8">8</a></span>. Nó có thể báo nhầm "có" nhưng <strong>không bao giờ</strong> báo nhầm "không"<span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <p class="easy-only">Trước khi lục tung cả tủ để tìm một món, bạn hỏi người giữ kho: "trong ngăn này có món X không?". Người ấy có thể trả lời "chắc là có" (rồi mở ra thấy không có thật), nhưng nếu bảo "chắc chắn không có" thì đúng là không có. Nhớ nhé: một câu "chắc chắn không" tiết kiệm được cả một lần lục tủ.</p>
+          <p class="en-only" lang="en">The inherent weakness of an LSM is a query for a key that <strong>doesn't exist</strong>: you must ask every file before you can say so. The <em>bloom filter</em> blocks exactly that. RocksDB's docs describe it as a structure that tells you whether a key <em>may exist</em> or <em>definitely does not exist</em> in an SST file's key set, avoiding wasted disk reads<span class="cite"><a href="#ref-8">8</a></span>. It can wrongly say "yes", but <strong>never</strong> wrongly says "no"<span class="cite"><a href="#ref-8">8</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Trong mọi tra cứu "khoá này đã tồn tại chưa" ở quy mô lớn — kiểm tra trùng, tra cache, lọc khoá trước khi đọc. Đây cũng là cấu trúc đầu tiên nên nghĩ tới khi phần lớn truy vấn của bạn là câu trả lời "không có".</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi phần lớn câu hỏi của bạn là "cái này có chưa?" và câu trả lời thường là "chưa".</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In any large-scale "does this key exist yet" lookup — dedup checks, cache probes, filtering before a read. It's the first structure to reach for when most of your queries answer "not here".</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Đổi bộ nhớ lấy độ chính xác</h4>
+              <p>Quan hệ giữa chỗ chiếm và tỉ lệ báo nhầm không tuyến tính. Tài liệu RocksDB đưa các mốc: khoảng 4,9 bit mỗi khoá cho tỉ lệ dương tính giả ~10%, 9,9 bit cho ~1%, và 15,5 bit cho ~0,1%<span class="cite"><a href="#ref-8">8</a></span>. Gấp đôi số bit <em>không</em> làm tỉ lệ nhầm giảm một nửa — đó là lý do việc chỉnh tham số này nên bám vào tỉ lệ truy vấn trượt thật của bạn.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao sai một chiều lại chấp nhận được</h4>
+              <p>Vì hậu quả của hai loại sai không cân xứng. Báo nhầm "có" chỉ tốn thêm một lần đọc đĩa rồi phát hiện không có. Báo nhầm "không" sẽ khiến hệ trả lời sai. Thiết kế của bloom filter cố ý dồn toàn bộ rủi ro về phía loại sai rẻ tiền hơn.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">B-tree: fixed pages + write-ahead log</div>
+          <h3><span class="vi-only">Trang cố định, và cuốn nhật ký ghi trước</span><span class="en-only" lang="en">Fixed pages, and the log written first</span></h3>
+          <p class="standard-copy">B-tree chia không gian khoá thành các <em>trang</em> kích thước cố định; mỗi trang chứa khoá và con trỏ tới trang con, cây được giữ cân bằng nên độ sâu tăng rất chậm theo dữ liệu<span class="cite"><a href="#ref-9">9</a></span>. Nhưng "sửa tại chỗ" đặt ra một rủi ro mà log không có: mất điện giữa chừng có thể để lại một trang hỏng. Lời giải là <strong>nhật ký ghi trước</strong>. Tài liệu PostgreSQL phát biểu nguyên tắc rất gọn: thay đổi lên các tệp dữ liệu "chỉ được ghi sau khi những thay đổi đó đã được ghi nhật ký, tức là sau khi các bản ghi WAL mô tả thay đổi đã được đẩy xuống lưu trữ bền"<span class="cite"><a href="#ref-10">10</a></span>.</p>
+          <p class="easy-only">Tủ kiểu hai chia sẵn thành ô, mỗi ô một kích cỡ, và mỗi ô ghi sẵn "muốn tìm chữ A thì mở ngăn bên trái". Nhưng sửa ngay vào ô cũ thì nguy hiểm: đang sửa mà mất điện là hỏng cả ô. Nên trước khi sửa, người ta ghi vào một cuốn nhật ký: "tôi sắp đổi ô này thành thế này". Nhớ nhé: <strong>ghi nhật ký trước, sửa thật sau</strong> — mất điện vẫn làm lại được.</p>
+          <p class="en-only" lang="en">A B-tree splits the key space into fixed-size <em>pages</em>; each holds keys and pointers to child pages, and the tree stays balanced so depth grows very slowly with data<span class="cite"><a href="#ref-9">9</a></span>. But updating in place carries a risk a log doesn't: losing power mid-write can leave a corrupted page. The answer is the <strong>write-ahead log</strong>. PostgreSQL's docs put the principle crisply: changes to data files "must be written only after those changes have been logged, that is, after WAL records describing the changes have been flushed to permanent storage"<span class="cite"><a href="#ref-10">10</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Trong gần như mọi cơ sở dữ liệu quan hệ bạn đang chạy, và trong mọi cuộc điều tra sự cố có câu hỏi "sau khi sập, hệ khôi phục lại từ đâu". Câu trả lời gần như luôn là: phát lại nhật ký.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở hầu hết cơ sở dữ liệu quen thuộc — và mỗi lần máy sập rồi bật lại mà dữ liệu vẫn còn.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In nearly every relational database you run, and in every incident review that asks "after the crash, where did it recover from". The answer is almost always: replaying the log.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>WAL còn giúp nhanh hơn, không chỉ an toàn hơn</h4>
+              <p>PostgreSQL ghi nhận rằng WAL làm <em>giảm đáng kể</em> số lần ghi đĩa, vì chỉ cần đẩy tệp WAL xuống đĩa để bảo đảm một giao dịch đã <span lang="en">commit</span>, thay vì đẩy mọi tệp dữ liệu mà giao dịch đó chạm tới; WAL được ghi tuần tự nên rẻ hơn nhiều so với việc đồng bộ các trang dữ liệu rải rác<span class="cite"><a href="#ref-10">10</a></span>. Khi có nhiều giao dịch nhỏ chạy song song, một lần <span lang="en">fsync</span> tệp WAL có thể đủ để xác nhận nhiều giao dịch cùng lúc<span class="cite"><a href="#ref-10">10</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ghi trước — một ý tưởng, hai họ engine</h4>
+              <p>Điều thú vị là B-tree phải mượn chính cơ chế <em>log</em> để an toàn, còn LSM thì mượn chính cơ chế <em>cây có thứ tự</em> để nhận ghi. Hai họ engine không đối lập tuyệt đối; chúng vay của nhau đúng phần mình thiếu, và khác nhau chủ yếu ở chỗ cấu trúc nào được coi là nguồn sự thật chính.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Write amplification &amp; tail latency</div>
+          <h3><span class="vi-only">Đọc bảng đánh đổi cho đúng</span><span class="en-only" lang="en">Reading the trade-off table honestly</span></h3>
+          <p class="standard-copy">Cả hai họ đều ghi dữ liệu xuống đĩa <em>nhiều lần hơn</em> số lần ứng dụng ghi — hiện tượng <strong>khuếch đại ghi</strong>. Với hợp nhất theo tầng, wiki RocksDB nói thẳng rằng khuếch đại ghi "thường lớn hơn 10"<span class="cite"><a href="#ref-6">6</a></span>. Đổi lại, dữ liệu đã sắp xếp và nén theo tệp thường chiếm ít chỗ hơn các trang B-tree có phân mảnh bên trong. Mặt trái nguy hiểm hơn nằm ở <em>độ trễ đuôi</em>: hợp nhất chạy nền và giành băng thông đĩa với truy vấn đang phục vụ — tài liệu Cassandra mô tả rõ tình huống dung lượng cần cho cả tệp cũ lẫn mới trong lúc hợp nhất có thể vượt chỗ trống của một nút<span class="cite"><a href="#ref-7">7</a></span>. B-tree thì có một ưu thế khác hẳn: mỗi khoá tồn tại ở <strong>đúng một chỗ</strong> trong cây, nên khoá và ngữ nghĩa giao dịch dễ gắn vào hơn<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Cả hai kiểu tủ đều có lúc phải chép đi chép lại đồ đạc, nên thật ra chúng "viết" nhiều hơn bạn tưởng. Kiểu một dọn nền, mà lúc dọn thì người đang tìm đồ phải chờ lâu hơn bình thường. Kiểu hai không phải dọn, nhưng mỗi món chỉ nằm ở một ô duy nhất nên dễ khoá lại khi cần. Nhớ nhé: <strong>hỏi "chậm ở lúc nào" chứ đừng hỏi "cái nào nhanh hơn"</strong>.</p>
+          <p class="en-only" lang="en">Both families write to disk <em>more times</em> than the application wrote — <strong>write amplification</strong>. For leveled compaction, the RocksDB wiki states plainly that write amplification is "often larger than 10"<span class="cite"><a href="#ref-6">6</a></span>. In exchange, sorted-and-compressed files usually take less space than B-tree pages with their internal fragmentation. The nastier flip side is <em>tail latency</em>: compaction runs in the background and competes for disk bandwidth with live queries — Cassandra's docs describe exactly the situation where the space needed for old and new SSTables during compaction can outstrip a node's free space<span class="cite"><a href="#ref-7">7</a></span>. B-trees have a different edge: each key exists in <strong>exactly one place</strong> in the tree, so locks and transactional semantics attach more naturally<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Mỗi khi biểu đồ p99 của bạn có những gai nhọn không giải thích được bằng lưu lượng. Trước khi đổ cho mạng, hãy xem lịch hợp nhất — và nhớ rằng con số trung bình sẽ giấu đúng phần đó đi.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi hệ bình thường vẫn nhanh nhưng thỉnh thoảng lại khựng một nhịp — thường là lúc nó đang dọn dẹp.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Whenever your p99 chart shows spikes traffic can't explain. Before blaming the network, look at the compaction schedule — and remember the average will hide precisely that.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Điều bài LSM gốc tự nói về giới hạn của nó</h4>
+              <p>O'Neil và cộng sự viết rằng LSM-tree "hữu ích nhất trong các ứng dụng mà việc chèn vào chỉ mục thường xuyên hơn các lần tìm để lấy bản ghi ra", và rằng "các lần tìm cần trả lời ngay sẽ mất hiệu quả I/O trong một số trường hợp"<span class="cite"><a href="#ref-4">4</a></span>. Họ cũng nêu bối cảnh cụ thể mà cấu trúc này nhắm tới: bảng lịch sử và tệp nhật ký — nơi ghi nhiều hơn đọc<span class="cite"><a href="#ref-4">4</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao không nên trích một con số duy nhất</h4>
+              <p>Kleppmann trình bày đây là một <em>đánh đổi phụ thuộc workload</em>, và nhấn rằng kết quả đo phụ thuộc vào chi tiết của workload cụ thể, nên cách duy nhất đáng tin là tự đo trên chính workload của mình<span class="cite"><a href="#ref-1">1</a></span>. Một câu như "LSM luôn nhanh hơn B-tree" không có nội dung kỹ thuật cho tới khi nói rõ: nhanh ở thao tác nào, tỉ lệ đọc/ghi bao nhiêu, kích thước bản ghi thế nào, và đo ở percentile nào.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">06</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">In-memory storage</div>
+          <h3><span class="vi-only">Nếu bỏ hẳn đĩa đi thì sao</span><span class="en-only" lang="en">What if we drop the disk entirely</span></h3>
+          <p class="standard-copy">Một lối thoát thứ ba: giữ toàn bộ dữ liệu trong RAM. Kleppmann lưu ý một điều dễ hiểu sai — lợi thế tốc độ ở đây <strong>không chủ yếu</strong> đến từ việc khỏi đọc đĩa (hệ điều hành vốn đã đệm các trang nóng trong bộ nhớ), mà từ việc <em>không phải mã hoá</em> cấu trúc dữ liệu trong bộ nhớ sang một dạng ghi được xuống đĩa<span class="cite"><a href="#ref-1">1</a></span>. Lợi ích thứ hai là mô hình dữ liệu: nằm hẳn trong RAM cho phép cung cấp những cấu trúc vốn vụng về nếu phải bày lên đĩa — Redis công bố danh mục kiểu dữ liệu gồm danh sách, tập hợp, tập hợp có thứ tự, hash và stream<span class="cite"><a href="#ref-17">17</a></span>. Ở đầu thuần cache, Memcached tự mô tả mình là hệ cache đối tượng trong bộ nhớ, phân tán, dùng để giảm tải cho cơ sở dữ liệu<span class="cite"><a href="#ref-18">18</a></span>.</p>
+          <p class="easy-only">Cách thứ ba: không dùng tủ nữa, để hết đồ trên bàn. Nhanh thì khỏi nói. Điều bất ngờ là cái nhanh ấy không hẳn vì "khỏi mở tủ", mà vì <strong>khỏi phải gói đồ lại cho vừa hộp</strong> mỗi lần cất. Nhớ nhé: để trên bàn thì lấy liền, nhưng bàn nhỏ và dọn nhà là mất.</p>
+          <p class="en-only" lang="en">A third way out: keep the whole dataset in RAM. Kleppmann flags a common misreading — the speed advantage comes <strong>not mainly</strong> from skipping disk reads (the OS already caches hot pages in memory) but from not having to <em>encode</em> in-memory data structures into a form that can be written to disk<span class="cite"><a href="#ref-1">1</a></span>. The second benefit is the data model: living in RAM lets an engine offer structures that would be awkward on disk — Redis documents lists, sets, sorted sets, hashes and streams among its types<span class="cite"><a href="#ref-17">17</a></span>. At the pure-cache end, Memcached describes itself as a distributed in-memory object caching system for taking load off a database<span class="cite"><a href="#ref-18">18</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Ở lớp cache, hàng đợi ưu tiên, bảng xếp hạng, đếm theo thời gian thực — những chỗ mà cấu trúc dữ liệu quan trọng hơn độ bền, và mất dữ liệu là chấp nhận được vì dựng lại được từ nguồn khác.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở bảng xếp hạng, giỏ hàng tạm, số lượt thích đang chạy — những thứ cần nhanh và mất thì làm lại được.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In caches, priority queues, leaderboards, real-time counters — places where the data structure matters more than durability, and losing it is acceptable because it can be rebuilt.</div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Từ một khoá sang nhiều lối vào</strong>
+      <strong class="en-only" lang="en">From one key to many ways in</strong>
+      <span class="standard-copy">Tới đây ta mới chỉ nói tới việc tìm theo <em>khoá chính</em>. Nhưng đời thực hiếm khi chỉ hỏi một kiểu: người ta còn tìm theo cột khác, theo nhiều cột cùng lúc, theo toạ độ trên bản đồ, hay theo một từ viết sai chính tả. Mỗi câu hỏi ấy đòi một hình dạng chỉ mục riêng.</span>
+      <span class="easy-only">Nãy giờ ta chỉ tìm theo cái tên chính. Nhưng người ta còn tìm theo màu, theo chỗ, theo tên viết sai nữa. Phần sau nói về những kiểu mục lục khác.</span>
+      <span class="en-only" lang="en">So far we've only looked up by <em>primary key</em>. Real life rarely asks one way: people search by another column, by several at once, by a point on a map, or by a misspelled word. Each of those wants a different shape of index.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="index-shapes" aria-labelledby="index-shapes-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Nền tảng 3 · <span lang="en">Index shapes</span></span><span class="en-only" lang="en">Foundation 3 · Index shapes</span></div>
+        <h2 id="index-shapes-title"><span class="vi-only">Chỉ mục không chỉ có một hình dạng</span><span class="en-only" lang="en">An index has more than one shape</span></h2>
+      </div>
+      <p class="standard-copy">Cả LSM-tree lẫn B-tree đều có thể dùng làm chỉ mục cho khoá chính lẫn <em>chỉ mục phụ</em>. Khác biệt nằm ở chỗ: khoá của chỉ mục phụ <strong>không nhất thiết duy nhất</strong> — nhiều bản ghi có thể cùng một giá trị. Kleppmann nêu hai cách xử lý: cho mỗi mục trong chỉ mục trỏ tới một <em>danh sách</em> các bản ghi khớp, hoặc thêm định danh bản ghi vào khoá để khoá trở nên duy nhất<span class="cite"><a href="#ref-1">1</a></span>. Từ nền đó mọc ra một họ hình dạng: chỉ mục gom cụm, chỉ mục phủ, chỉ mục nhiều cột, chỉ mục đa chiều, và chỉ mục cho tìm kiếm mờ.</p>
+      <p class="easy-only">Mục lục không nhất thiết phải theo tên. Bạn có thể làm mục lục theo màu, theo năm, theo chỗ để. Nhưng có một chỗ khác: tên thì mỗi món một tên, còn màu thì nhiều món cùng màu — nên mục lục theo màu phải ghi được nhiều dòng cho một mục.</p>
+      <p class="en-only" lang="en">Both LSM-trees and B-trees can index a primary key or a <em>secondary</em> one. The difference: a secondary index key is <strong>not necessarily unique</strong> — many records can share a value. Kleppmann gives two ways to handle it: make each index entry point to a <em>list</em> of matching records, or append a record identifier to the key to make it unique<span class="cite"><a href="#ref-1">1</a></span>. From that base grows a family of shapes: clustered indexes, covering indexes, multi-column indexes, multi-dimensional indexes, and indexes for fuzzy search.</p>
+    </div>
+
+    <div class="surprise-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">The index decides which questions are cheap</div>
+        <p class="definition standard-copy">Chọn hình dạng chỉ mục là chọn trước <em>câu hỏi nào sẽ rẻ</em>. Một chỉ mục tuyệt vời cho truy vấn này có thể vô dụng hoàn toàn với truy vấn kia — vì vấn đề không nằm ở dữ liệu, mà ở việc thứ tự bạn đã chọn có khớp với cách bạn hỏi hay không.</p>
+        <p class="definition easy-only">Mục lục xếp theo tên thì tra tên rất nhanh, nhưng hỏi "món nào màu đỏ" thì chịu. Nhớ nhé: mục lục chỉ giúp đúng những câu hỏi mà nó được làm ra để trả lời.</p>
+        <p class="definition en-only" lang="en">Choosing an index shape is choosing <em>which questions will be cheap</em>. An index that is perfect for one query can be useless for another — the issue isn't the data, it's whether the order you picked matches the way you ask.</p>
+        <p class="deep-only">Đây cũng là chỗ khái niệm "cấu trúc phái sinh" ở phần đầu chương trả về lợi tức. Vì chỉ mục không chứa thông tin mới, bạn có quyền dựng <em>nhiều</em> chỉ mục trên cùng một dữ liệu, mỗi cái phục vụ một dạng câu hỏi — và cái giá phải trả luôn là cùng một loại: thêm chỗ trên đĩa và thêm việc ở mỗi lần ghi<span class="cite"><a href="#ref-1">1</a></span>. Câu hỏi thiết kế vì thế không phải "có nên đánh chỉ mục không" mà là "những câu hỏi nào xứng đáng để mình trả tiền trước".</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định về hình dạng chỉ mục">
+        <div class="equation-row">
+          <b>Khoá phụ không duy nhất</b>
+          <span>Một giá trị ứng nhiều bản ghi: trỏ tới danh sách, hoặc gắn định danh vào khoá.</span>
+        </div>
+        <div class="equation-row">
+          <b>Giữ hàng hay giữ con trỏ</b>
+          <span>Gom cụm thì lưu luôn hàng trong chỉ mục; ngược lại chỉ lưu con trỏ tới hàng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Thứ tự quyết định câu hỏi</b>
+          <span>Một chiều thì dùng B-tree; hai chiều trở lên cần cấu trúc khác hẳn.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về hình dạng chỉ mục">
+        <div class="equation-row">
+          <b>Nhiều món cùng màu</b>
+          <span>Mục lục theo màu phải ghi được nhiều món trong một dòng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Chép luôn hay chỉ ghi chỗ</b>
+          <span>Mục lục có thể ghi sẵn nội dung, hoặc chỉ ghi "ở trang mấy".</span>
+        </div>
+        <div class="equation-row">
+          <b>Bản đồ cần mục lục khác</b>
+          <span>Tìm theo vị trí trên bản đồ không xếp hàng dọc được.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three claims about index shapes">
+        <div class="equation-row">
+          <b>Secondary keys repeat</b>
+          <span>One value, many records: point at a list, or append a record id to the key.</span>
+        </div>
+        <div class="equation-row">
+          <b>Row or pointer</b>
+          <span>A clustered index stores the row itself; otherwise the entry only points at it.</span>
+        </div>
+        <div class="equation-row">
+          <b>Order decides the question</b>
+          <span>One dimension suits a B-tree; two or more needs a different structure entirely.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Clustered vs non-clustered</div>
+          <h3><span class="vi-only">Chỉ mục giữ luôn hàng, hay chỉ giữ chỗ</span><span class="en-only" lang="en">Holding the row, or just its address</span></h3>
+          <p class="standard-copy">Một chỉ mục có thể chỉ trỏ tới hàng, hoặc <strong>chứa luôn hàng</strong> bên trong. Tài liệu SQL Server mô tả ranh giới này rất gọn: chỉ mục gom cụm "sắp xếp và lưu các hàng dữ liệu trong bảng hoặc khung nhìn theo giá trị khoá của chúng", và vì bản thân các hàng chỉ có thể được lưu theo một thứ tự, mỗi bảng chỉ có <strong>một</strong> chỉ mục gom cụm<span class="cite"><a href="#ref-11">11</a></span>. Ngược lại, chỉ mục không gom cụm "có cấu trúc tách rời khỏi các hàng dữ liệu", mỗi mục khoá kèm một con trỏ tới hàng chứa giá trị đó<span class="cite"><a href="#ref-11">11</a></span>.</p>
+          <p class="easy-only">Có hai kiểu mục lục. Kiểu một chép luôn cả nội dung vào mục lục — tra xong là có ngay, khỏi lật. Kiểu hai chỉ ghi "ở trang 42" — tra xong vẫn phải lật thêm một lần. Nhớ nhé: chép luôn thì đọc nhanh nhưng tốn giấy, và mỗi cuốn chỉ chép luôn được theo <strong>một</strong> thứ tự thôi.</p>
+          <p class="en-only" lang="en">An index can merely point at a row, or <strong>hold the row itself</strong>. SQL Server's docs draw the line crisply: a clustered index "sorts and stores the data rows in the table or view based on their key values", and since the rows themselves can only be stored in one order, a table can have just <strong>one</strong> clustered index<span class="cite"><a href="#ref-11">11</a></span>. A nonclustered index, by contrast, "has a structure separate from the data rows", each key entry carrying a pointer to the row that holds the value<span class="cite"><a href="#ref-11">11</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Khi chọn khoá chính. Thứ tự gom cụm quyết định những truy vấn khoảng nào sẽ đọc tuần tự và những truy vấn nào phải nhảy khắp đĩa — một quyết định rất khó đảo sau này.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi quyết định "xếp theo gì" — vì cuốn sổ chỉ xếp được theo một thứ tự duy nhất.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>When choosing a primary key. The clustering order decides which range queries read sequentially and which jump all over the disk — a decision that's painful to reverse later.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Covering index</div>
+          <h3><span class="vi-only">Chỉ mục phủ: trả lời xong mà không cần mở bảng</span><span class="en-only" lang="en">A covering index answers without opening the table</span></h3>
+          <p class="standard-copy">Giữa hai thái cực trên có một lối giữa: để chỉ mục mang theo <em>một vài cột</em> mà truy vấn cần, đủ để trả lời ngay trong chỉ mục. PostgreSQL gọi kết quả là <strong><span lang="en">index-only scan</span></strong> — những lần quét "có thể trả lời truy vấn chỉ từ chỉ mục, không cần chạm tới <span lang="en">heap</span>", bằng cách trả giá trị thẳng từ mỗi mục chỉ mục thay vì tra bản ghi tương ứng<span class="cite"><a href="#ref-12">12</a></span>. Tài liệu gọi đúng cấu trúc phục vụ việc này là <em><span lang="en">covering index</span></em>: một chỉ mục được thiết kế riêng để chứa các cột mà một dạng truy vấn hay chạy cần tới<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <p class="easy-only">Mục lục thường chỉ ghi "ở trang 42". Nhưng nếu bạn hay hỏi đúng ba thứ, sao không ghi luôn ba thứ đó vào mục lục? Tra một phát là xong, khỏi lật trang. Nhớ nhé: ghi thêm vào mục lục làm nó dày hơn, nhưng đổi lại bạn khỏi phải lật sách.</p>
+          <p class="en-only" lang="en">Between those extremes lies a middle path: let the index carry <em>a few columns</em> the query needs, enough to answer inside the index. PostgreSQL calls the result an <strong>index-only scan</strong> — a scan that "can answer queries from an index alone without any heap access", returning values directly from each index entry instead of consulting the heap<span class="cite"><a href="#ref-12">12</a></span>. The structure built for it is the <em>covering index</em>: an index designed specifically to include the columns a frequently-run query needs<span class="cite"><a href="#ref-12">12</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Ở những truy vấn nóng, lặp lại nhiều lần với đúng một hình dạng. Thêm một cột vào chỉ mục có thể cắt hẳn một lượt đọc bảng — nhưng cũng làm mọi lần ghi nặng thêm, đúng theo đánh đổi mở đầu chương.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở những câu hỏi bạn lặp lại hoài, ngày nào cũng hỏi đúng kiểu đó.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In hot queries repeated many times in exactly one shape. Adding one column to the index can remove a whole table read — while making every write heavier, exactly per the chapter's opening trade-off.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Multi-column (concatenated) index</div>
+          <h3><span class="vi-only">Nhiều cột, nhưng thứ tự trái–phải là luật</span><span class="en-only" lang="en">Many columns, but left-to-right is law</span></h3>
+          <p class="standard-copy">Cách phổ biến nhất để đánh chỉ mục nhiều cột là <em>nối</em> chúng lại thành một khoá theo thứ tự định trước. Hệ quả rất thực dụng và hay bị quên: PostgreSQL ghi rõ rằng một chỉ mục B-tree nhiều cột có thể dùng với điều kiện truy vấn liên quan tới <em>bất kỳ tập con nào</em> của các cột trong chỉ mục, nhưng nó <strong>hiệu quả nhất khi ràng buộc nằm ở các cột dẫn đầu (ngoài cùng bên trái)</strong><span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <p class="easy-only">Giống cách xếp danh bạ: xếp theo họ trước, rồi mới tới tên. Biết họ thì tìm nhanh. Nhưng chỉ biết mỗi tên mà không biết họ thì gần như phải lật cả cuốn. Nhớ nhé: <strong>thứ tự các cột trong mục lục quan trọng không kém việc có mục lục</strong>.</p>
+          <p class="en-only" lang="en">The common way to index several columns is to <em>concatenate</em> them into one key in a fixed order. The practical consequence is easy to forget: PostgreSQL states that a multicolumn B-tree index can be used with query conditions involving <em>any subset</em> of its columns, but is <strong>most efficient when the constraints are on the leading (leftmost) columns</strong><span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Mỗi khi một truy vấn "đã có chỉ mục rồi mà vẫn chậm". Rất thường là vì điều kiện lọc rơi vào cột đứng sau, còn cột dẫn đầu lại để trống.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi bạn có mục lục rồi mà tìm vẫn lâu — thường vì hỏi sai thứ tự.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Every time a query is "already indexed but still slow". Usually the filter lands on a trailing column while the leading one is left unconstrained.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Multi-dimensional index</div>
+          <h3><span class="vi-only">Bản đồ không xếp thành một hàng dọc được</span><span class="en-only" lang="en">A map does not flatten into one queue</span></h3>
+          <p class="standard-copy">Chỉ mục nối cột vẫn chỉ là <em>một chiều</em>: nó sắp mọi thứ thành một hàng. Với truy vấn "mọi điểm nằm trong hình chữ nhật kinh độ–vĩ độ này", một hàng dọc không giúp được, vì hai điều kiện phải thoả <em>đồng thời</em> theo hai trục<span class="cite"><a href="#ref-1">1</a></span>. Giới không gian dùng cấu trúc khác: tài liệu PostGIS cho biết "cả PostGIS lẫn Oracle Spatial đều dùng chung cấu trúc chỉ mục không gian 'R-Tree'", và rằng chỉ mục không gian không đánh chỉ mục trực tiếp hình học mà đánh chỉ mục <strong>hộp bao</strong> của chúng<span class="cite"><a href="#ref-14">14</a></span>.</p>
+          <p class="easy-only">Danh bạ xếp theo tên là một hàng dọc. Nhưng nếu bạn hỏi "quán nào nằm trong ô vuông này trên bản đồ", hàng dọc không giúp gì. Người ta phải chia bản đồ thành ô to, rồi ô nhỏ, rồi ô nhỏ hơn nữa. Nhớ nhé: câu hỏi hai chiều cần mục lục hai chiều.</p>
+          <p class="en-only" lang="en">A concatenated index is still <em>one-dimensional</em>: it lines everything up in a single queue. For "every point inside this longitude–latitude rectangle", a queue doesn't help, because two conditions must hold <em>simultaneously</em> on two axes<span class="cite"><a href="#ref-1">1</a></span>. The spatial world uses a different structure: PostGIS documents that "both PostGIS and Oracle Spatial share the same 'R-Tree' spatial index structure", and that spatial indexes don't index the geometries themselves but their <strong>bounding boxes</strong><span class="cite"><a href="#ref-14">14</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Không chỉ ở bản đồ. Bất kỳ truy vấn nào lọc đồng thời trên hai trục liên tục — ví dụ "sản phẩm trong khoảng giá này và khoảng ngày này" — cũng là một bài toán đa chiều trá hình.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở bản đồ, và cả khi bạn lọc "giá từ đây tới đây, ngày từ đây tới đây" cùng lúc.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Not just maps. Any query filtering two continuous axes at once — "products in this price range and this date range" — is a multi-dimensional problem in disguise.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Fuzzy index</div>
+          <h3><span class="vi-only">Tìm được cả khi người dùng gõ sai</span><span class="en-only" lang="en">Finding it even when the user mistypes</span></h3>
+          <p class="standard-copy">Mọi chỉ mục nói tới đến giờ đều giả định bạn biết <strong>chính xác</strong> thứ mình tìm. Tìm kiếm toàn văn phá vỡ giả định ấy. Lucene giữ chỉ mục từ vựng của mình dưới dạng <em><span lang="en">finite state transducer</span></em> — một cấu trúc hoạt động như một ánh xạ có thứ tự từ chuỗi byte sang giá trị, tốn ít RAM hơn hẳn các hiện thực bản đồ thông thường, đổi lại tốn CPU hơn khi tra<span class="cite"><a href="#ref-15">15</a></span>. Trên nền đó, truy vấn mờ được định nghĩa theo <em>khoảng cách sửa</em>: tài liệu API của Lucene cho biết <span lang="en">FuzzyQuery</span> đo tương đồng dựa trên thuật toán Damerau–Levenshtein, và các từ được thu thập rồi chấm điểm theo khoảng cách sửa của chúng<span class="cite"><a href="#ref-16">16</a></span>.</p>
+          <p class="easy-only">Nếu bạn gõ "quyến sách" thay vì "quyển sách", mục lục thường sẽ bảo "không có". Công cụ tìm kiếm thì khác: nó biết đếm xem hai chữ khác nhau mấy nét, và vẫn đưa ra thứ gần giống nhất. Nhớ nhé: có loại mục lục được làm ra để chịu được lỗi gõ.</p>
+          <p class="en-only" lang="en">Every index so far assumes you know <strong>exactly</strong> what you're looking for. Full-text search breaks that assumption. Lucene keeps its term index as a <em>finite state transducer</em> — a structure behaving like a sorted map from byte sequences to values, needing far less RAM than ordinary map implementations at a higher CPU cost per lookup<span class="cite"><a href="#ref-15">15</a></span>. On that base, fuzzy queries are defined by <em>edit distance</em>: Lucene's API docs state that <span lang="en">FuzzyQuery</span> measures similarity with the Damerau–Levenshtein algorithm, with terms collected and scored by their edit distance<span class="cite"><a href="#ref-16">16</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Ở ô tìm kiếm của mọi sản phẩm có người thật gõ vào. Đây cũng là ranh giới nơi "cơ sở dữ liệu" và "công cụ tìm kiếm" tách làm hai, vì chúng tối ưu cho hai định nghĩa khác nhau của chữ "khớp".</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở ô tìm kiếm — chỗ mà ai cũng có lúc gõ sai chính tả.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In the search box of any product real people type into. It's also where "database" and "search engine" part ways, because they optimise for two different definitions of "match".</div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <aside class="signal surprise-connection">
+      <strong class="vi-only">Hết phần giao dịch, sang phần phân tích</strong>
+      <strong class="en-only" lang="en">End of the transaction side; now the analytics side</strong>
+      <span class="standard-copy">Toàn bộ những gì vừa nói đều phục vụ một dạng truy cập: chạm tới <em>ít</em> bản ghi mỗi lần, tìm bằng khoá, và làm việc đó rất nhiều lần mỗi giây. Nhưng có một loại câu hỏi hoàn toàn khác — "tổng doanh thu quý vừa rồi theo cửa hàng" — quét hàng trăm triệu dòng chỉ để trả về một con số. Với loại ấy, mọi kết luận ở trên đều phải xét lại.</span>
+      <span class="easy-only">Nãy giờ ta lo chuyện tìm <em>một món</em> thật nhanh. Nhưng còn loại câu hỏi khác hẳn: "cả năm nay bán được bao nhiêu?" — phải đếm hết cả kho. Phần sau nói về loại câu hỏi đó.</span>
+      <span class="en-only" lang="en">Everything above serves one access pattern: touching <em>few</em> records per request, found by key, done very many times per second. But a completely different question — "total revenue last quarter by store" — scans hundreds of millions of rows to return a single number. For that kind, every conclusion above must be revisited.</span>
+    </aside>
+  </section>
+
+  <section class="section" id="oltp-vs-olap" aria-labelledby="oltp-vs-olap-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Nền tảng 4 · <span lang="en">OLTP vs OLAP</span></span><span class="en-only" lang="en">Foundation 4 · OLTP vs OLAP</span></div>
+        <h2 id="oltp-vs-olap-title"><span class="vi-only">Cùng gọi là cơ sở dữ liệu, nhưng là hai thế giới</span><span class="en-only" lang="en">Both are called databases, but they are two worlds</span></h2>
+      </div>
+      <p class="standard-copy">Ranh giới không nằm ở công nghệ mà ở <strong>dạng truy cập</strong>. Hệ xử lý giao dịch (<span lang="en">OLTP</span>) lấy vài bản ghi mỗi truy vấn, tìm bằng khoá, và làm vậy rất nhiều lần mỗi giây; hệ phân tích (<span lang="en">OLAP</span>) quét hàng triệu bản ghi để trả về vài con số tổng hợp<span class="cite"><a href="#ref-1">1</a></span>. Bài C-Store phát biểu cùng sự phân đôi ấy từ phía thiết kế: kho theo hàng là hệ <em>tối ưu cho ghi</em> và "đặc biệt hiệu quả với các ứng dụng kiểu OLTP", còn "các hệ hướng tới truy vấn tuỳ biến trên lượng dữ liệu lớn thì nên được tối ưu cho đọc"<span class="cite"><a href="#ref-19">19</a></span>.</p>
+      <p class="easy-only">Có hai loại việc rất khác nhau. Loại một: "cho tôi xem đơn hàng số 4821" — chỉ cần lấy đúng một tờ. Loại hai: "cả năm nay bán được bao nhiêu tiền" — phải đếm hết cả kho. Cùng là một kho giấy tờ, nhưng cách xếp giấy cho hai việc này phải khác nhau hoàn toàn.</p>
+      <p class="en-only" lang="en">The line isn't drawn by technology but by <strong>access pattern</strong>. Transaction processing (OLTP) fetches a few records per query, found by key, very many times per second; analytics (OLAP) scans millions of records to return a handful of aggregates<span class="cite"><a href="#ref-1">1</a></span>. The C-Store paper states the same split from the design side: row stores are <em>write-optimized</em> and "especially effective on OLTP-style applications", while "systems oriented toward ad-hoc querying of large amounts of data should be read-optimized"<span class="cite"><a href="#ref-19">19</a></span>.</p>
+    </div>
+
+    <div class="surprise-lead trap-lead">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Rows for transactions, columns for questions</div>
+        <p class="definition standard-copy">Kho theo hàng gom <em>một bản ghi</em> lại gần nhau — hợp với việc lấy trọn một đơn hàng. Kho theo cột gom <em>một thuộc tính</em> của mọi bản ghi lại gần nhau — hợp với việc cộng một cột trên trăm triệu dòng mà không phải đọc những cột không hỏi tới.</p>
+        <p class="definition easy-only">Xếp theo hàng là mỗi tờ đơn một chỗ. Xếp theo cột là gom tất cả ô "số tiền" của mọi tờ vào cùng một trang. Nhớ nhé: muốn cộng tiền thì gom cột tiền lại là nhanh nhất.</p>
+        <p class="definition en-only" lang="en">A row store keeps <em>one record</em> together — good for pulling a whole order. A column store keeps <em>one attribute</em> of every record together — good for summing one column over a hundred million rows without reading the columns nobody asked about.</p>
+        <p class="deep-only">Hệ quả về nút thắt đi theo ngay: OLTP thường nghẽn ở việc tìm đúng chỗ trên đĩa, còn OLAP nghẽn ở <em>băng thông</em> — số byte phải kéo lên để trả lời<span class="cite"><a href="#ref-1">1</a></span>. Vì thế mọi kỹ thuật của phần này đều quy về một mục tiêu duy nhất: <strong>giảm số byte phải đọc</strong>. Bố trí theo cột giảm byte bằng cách không đọc cột thừa; nén giảm byte bằng cách biểu diễn gọn hơn; sắp xếp lại giảm byte bằng cách làm cho nén ăn hơn. Ba kỹ thuật, một ý đồ.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba nhận định về ranh giới OLTP và OLAP">
+        <div class="equation-row">
+          <b>Ít dòng vs nhiều dòng</b>
+          <span>OLTP chạm vài bản ghi theo khoá; OLAP quét hàng triệu bản ghi để tổng hợp.</span>
+        </div>
+        <div class="equation-row">
+          <b>Bản sao riêng</b>
+          <span>Phân tích chạy trên một kho đọc-là-chính, nạp theo lô, tách khỏi hệ vận hành.</span>
+        </div>
+        <div class="equation-row">
+          <b>Đích đến: bớt byte</b>
+          <span>Theo cột, nén, và sắp xếp lại đều chỉ nhằm giảm lượng byte phải kéo lên.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba điều cần nhớ về OLTP và OLAP">
+        <div class="equation-row">
+          <b>Lấy một tờ vs đếm cả kho</b>
+          <span>Hai việc khác hẳn nhau nên cách xếp giấy cũng khác.</span>
+        </div>
+        <div class="equation-row">
+          <b>Chép ra kho riêng</b>
+          <span>Đếm cả kho thì làm trên bản sao, đừng làm phiền chỗ đang bán hàng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Đọc càng ít càng nhanh</b>
+          <span>Mọi mẹo ở đây đều để phải lật ít giấy hơn.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three claims about the OLTP/OLAP divide">
+        <div class="equation-row">
+          <b>Few rows vs many</b>
+          <span>OLTP touches a few records by key; OLAP scans millions to aggregate.</span>
+        </div>
+        <div class="equation-row">
+          <b>A separate copy</b>
+          <span>Analytics runs on a read-oriented store, bulk-loaded, kept away from the operational system.</span>
+        </div>
+        <div class="equation-row">
+          <b>The goal: fewer bytes</b>
+          <span>Columns, compression and re-sorting all exist to reduce the bytes pulled off disk.</span>
+        </div>
+      </div>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">01</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Data warehouse &amp; ETL</div>
+          <h3><span class="vi-only">Một bản sao riêng để hỏi thoải mái</span><span class="en-only" lang="en">A separate copy you may interrogate freely</span></h3>
+          <p class="standard-copy">Vì một truy vấn phân tích có thể quét cạn tài nguyên, người ta không chạy nó thẳng trên hệ vận hành mà trích, biến đổi và nạp dữ liệu sang một <strong>kho dữ liệu</strong> riêng<span class="cite"><a href="#ref-1">1</a></span>. Bài C-Store mô tả đúng nhịp làm việc ấy: kho dữ liệu là "một lớp hệ tối ưu cho đọc, trong đó định kỳ thực hiện một lần nạp hàng loạt dữ liệu mới, rồi tiếp theo là một quãng tương đối dài các truy vấn tuỳ biến"<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <p class="easy-only">Bạn không mang cả kho hàng ra giữa cửa tiệm để đếm trong giờ cao điểm. Bạn chép sổ sang một cuốn khác, để trong phòng sau, rồi tha hồ đếm. Nhớ nhé: <strong>đếm trên bản sao, đừng đếm trên bản đang dùng</strong>.</p>
+          <p class="en-only" lang="en">Because one analytic query can exhaust a system, you don't run it on the operational database but extract, transform and load into a separate <strong>data warehouse</strong><span class="cite"><a href="#ref-1">1</a></span>. The C-Store paper describes exactly that rhythm: a data warehouse is "one class of read-optimized system, in which periodically a bulk load of new data is performed, followed by a relatively long period of ad-hoc queries"<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Ngay lần đầu một truy vấn báo cáo làm chậm trang thanh toán. Việc tách kho không phải là bước "trưởng thành" hình thức — nó là cách giữ cho hai dạng tải không giẫm lên nhau.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi một báo cáo chạy làm cả web chậm theo.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>The first time a reporting query slows down the checkout page. Splitting the warehouse off isn't a maturity ritual — it's how you stop two workloads trampling each other.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">02</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Star schema &amp; snowflake schema</div>
+          <h3><span class="vi-only">Bảng sự kiện ở giữa, các chiều vây quanh</span><span class="en-only" lang="en">A fact table at the centre, dimensions around it</span></h3>
+          <p class="standard-copy">Kho phân tích hiếm khi dùng lược đồ chuẩn hoá của hệ vận hành. Nó dùng <em>mô hình chiều</em>, mà Kimball Group mô tả: mô hình chiều có thể hiện thực trong cơ sở dữ liệu quan hệ — gọi là <strong>lược đồ sao</strong> — hoặc trong cơ sở dữ liệu đa chiều, gọi là <strong>khối OLAP</strong>; lược đồ sao "đặc trưng gồm các bảng sự kiện nối với các bảng chiều liên quan qua quan hệ khoá chính/khoá ngoại"<span class="cite"><a href="#ref-23">23</a></span>. Khi các phân cấp bên trong một bảng chiều lại được chuẩn hoá tiếp thành các bảng phụ, ta có <strong>lược đồ bông tuyết</strong><span class="cite"><a href="#ref-24">24</a></span>.</p>
+          <p class="easy-only">Ở giữa là một bảng ghi lại từng việc đã xảy ra: hôm nào, ai mua, mua gì, bao nhiêu tiền. Quanh nó là các bảng nhỏ giải thích: "mã 17 là bánh mì", "cửa hàng 3 ở quận 1". Vẽ ra thì giống một ngôi sao. Nhớ nhé: bảng sự kiện ở giữa, các bảng giải thích vây quanh.</p>
+          <p class="en-only" lang="en">Analytic stores rarely use the operational system's normalised schema. They use <em>dimensional modelling</em>, which the Kimball Group describes: dimensional models can be instantiated in relational databases — called <strong>star schemas</strong> — or in multidimensional databases, known as <strong>OLAP cubes</strong>; star schemas "characteristically consist of fact tables linked to associated dimension tables via primary/foreign key relationships"<span class="cite"><a href="#ref-23">23</a></span>. When the hierarchies inside a dimension table are themselves normalised into secondary tables, you get a <strong>snowflake schema</strong><span class="cite"><a href="#ref-24">24</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Trong mọi mô hình báo cáo mà bảng trung tâm có rất nhiều dòng và rất nhiều khoá ngoại, còn các bảng vệ tinh thì nhỏ nhưng nhiều cột mô tả.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Trong các bảng báo cáo: một bảng rất dài ở giữa, vài bảng ngắn giải thích quanh nó.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In any reporting model where the central table has enormous row counts and many foreign keys, while the satellites are small but rich in descriptive columns.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao Kimball khuyên tránh bông tuyết</h4>
+              <p>Tài liệu Kimball nói thẳng: dù bông tuyết biểu diễn dữ liệu phân cấp một cách chính xác, bạn <em>nên tránh</em> nó vì người dùng nghiệp vụ khó hiểu và khó lần theo, và nó cũng có thể làm giảm hiệu năng truy vấn; một bảng chiều phi chuẩn hoá đã được làm phẳng chứa <strong>đúng cùng một lượng thông tin</strong> như bảng bông tuyết<span class="cite"><a href="#ref-24">24</a></span>. Đây là một ví dụ đẹp cho luận điểm chung của chương: chuẩn hoá không phải luôn đúng — nó là một đánh đổi, và ở kho phân tích thì cán cân nghiêng về phía đọc.</p>
+            </div>
+            <div class="info-block">
+              <h4>Khối OLAP đứng ở đâu trong bức tranh</h4>
+              <p>Kimball mô tả khối OLAP là thứ "có thể tương đương về nội dung với, hoặc thường gặp hơn là được dẫn xuất từ, một lược đồ sao quan hệ", và nó thường là bước triển khai cuối cùng của một hệ kho dữ liệu, hoặc tồn tại như một cấu trúc tổng hợp dựng trên lược đồ sao nguyên tử hơn<span class="cite"><a href="#ref-23">23</a></span>. Nói cách khác, khối không thay thế kho — nó là lớp kết quả đã tính sẵn nằm trên kho.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">03</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Column-oriented storage</div>
+          <h3><span class="vi-only">Đừng lưu theo hàng, hãy lưu theo cột</span><span class="en-only" lang="en">Don't store by row; store by column</span></h3>
+          <p class="standard-copy">Ý tưởng cốt lõi rất gọn: thay vì để mọi giá trị của <em>một bản ghi</em> cạnh nhau, hãy để mọi giá trị của <em>một cột</em> cạnh nhau. Bài C-Store nêu đây là khác biệt đầu tiên trong thiết kế của nó — "lưu dữ liệu theo cột thay vì theo hàng"<span class="cite"><a href="#ref-19">19</a></span>. Ngày nay ý tưởng ấy thành định dạng tệp phổ thông: Apache Parquet tự mô tả là "định dạng tệp dữ liệu hướng cột, mã nguồn mở, thiết kế cho việc lưu trữ và truy xuất hiệu quả", cung cấp các lược đồ nén và mã hoá hiệu năng cao<span class="cite"><a href="#ref-20">20</a></span>.</p>
+          <p class="easy-only">Thay vì cất mỗi tờ đơn hàng một chỗ, người ta chép tất cả ô "ngày" vào một trang, tất cả ô "số tiền" vào một trang khác. Khi sếp hỏi "tổng tiền cả năm", bạn chỉ cần mở đúng trang tiền. Nhớ nhé: <strong>không đọc thứ mình không hỏi tới</strong>.</p>
+          <p class="en-only" lang="en">The core idea is compact: instead of keeping all values of <em>one record</em> together, keep all values of <em>one column</em> together. The C-Store paper lists this as the first difference in its design — "storage of data by column rather than by row"<span class="cite"><a href="#ref-19">19</a></span>. Today the idea is an everyday file format: Apache Parquet describes itself as "an open source, column-oriented data file format designed for efficient data storage and retrieval", providing high-performance compression and encoding schemes<span class="cite"><a href="#ref-20">20</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Trong hầu hết các <span lang="en">data lake</span> hiện đại, nơi dữ liệu nằm dưới dạng tệp Parquet và động cơ truy vấn chỉ đọc đúng những cột mà câu lệnh nhắc tới.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở các kho dữ liệu lớn — nơi máy chỉ đọc đúng cột nó cần.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In most modern data lakes, where data sits as Parquet files and the query engine reads only the columns the statement mentions.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Dữ liệu lồng nhau thì sao</h4>
+              <p>Bố trí theo cột có vẻ chỉ hợp với bảng phẳng. Parquet giải quyết bằng cách mượn một kỹ thuật cụ thể: tài liệu định dạng ghi rằng "Parquet dùng mã hoá Dremel với các mức định nghĩa và mức lặp"<span class="cite"><a href="#ref-21">21</a></span>. Dremel là hệ của Google được mô tả trong bài cùng tên như "một hệ truy vấn tuỳ biến, tương tác, có khả năng co giãn để phân tích dữ liệu lồng nhau chỉ-đọc", kết hợp cây thực thi nhiều tầng với bố trí dữ liệu theo cột<span class="cite"><a href="#ref-22">22</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao "chỉ đọc cột cần" lại quan trọng đến thế</h4>
+              <p>Vì nút thắt của phân tích là băng thông đĩa<span class="cite"><a href="#ref-1">1</a></span>. Một bảng sự kiện thực tế có thể có cả trăm cột, còn một truy vấn báo cáo điển hình chỉ chạm tới vài cột. Trong kho theo hàng, đọc vài cột ấy vẫn buộc phải kéo lên toàn bộ bề rộng của mỗi dòng; trong kho theo cột thì không. Đây là nguồn gốc của phần lớn chênh lệch hiệu năng, trước cả khi bàn tới nén.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">04</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Column compression: bitmap &amp; run-length</div>
+          <h3><span class="vi-only">Xếp theo cột rồi thì nén rất ăn</span><span class="en-only" lang="en">Once grouped by column, compression bites hard</span></h3>
+          <p class="standard-copy">Một cột thường lặp đi lặp lại rất nhiều giá trị giống nhau — và đó chính là điều kiện lý tưởng để nén. Bài C-Store mô tả một lược đồ mã hoá cụ thể: biểu diễn cột thành các cặp (giá trị, <em><span lang="en">bitmap</span></em> đánh dấu những vị trí chứa giá trị đó); ví dụ cột số nguyên 0,&nbsp;0,&nbsp;1,&nbsp;1,&nbsp;2,&nbsp;1,&nbsp;0,&nbsp;2,&nbsp;1 được mã hoá thành ba cặp, một cặp cho mỗi giá trị phân biệt. Và vì mỗi bitmap đều <strong>thưa</strong>, nó lại được <em>mã hoá theo độ dài chạy</em> (<span lang="en">run-length encoding</span>) để tiết kiệm chỗ<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <p class="easy-only">Một trang toàn ô "ngày" thì rất nhiều ô giống nhau. Thay vì chép "thứ Hai" tám trăm lần, bạn ghi "thứ Hai, tám trăm lần". Gọn đi bao nhiêu lần. Nhớ nhé: <strong>xếp những thứ giống nhau cạnh nhau thì viết tắt được</strong>.</p>
+          <p class="en-only" lang="en">A column typically repeats the same values over and over — ideal conditions for compression. The C-Store paper describes one concrete encoding: represent a column as (value, <em>bitmap</em> marking the positions holding that value) pairs; a column of integers 0,&nbsp;0,&nbsp;1,&nbsp;1,&nbsp;2,&nbsp;1,&nbsp;0,&nbsp;2,&nbsp;1, for instance, becomes three pairs, one per distinct value. And since each bitmap is <strong>sparse</strong>, it is in turn <em>run-length encoded</em> to save space<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Ở mọi cột có ít giá trị phân biệt nhưng rất nhiều dòng — mã cửa hàng, mã sản phẩm, trạng thái đơn. Đây cũng là lý do một bảng sự kiện khổng lồ có thể nén xuống nhỏ đến mức bất ngờ.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở những cột lặp đi lặp lại — mã cửa hàng, trạng thái, ngày trong tuần.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In every column with few distinct values but very many rows — store code, product code, order status. It's also why a gigantic fact table can compress down surprisingly small.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">05</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Sort order — and several of them</div>
+          <h3><span class="vi-only">Cùng một cột, lưu lại vài lần theo vài thứ tự</span><span class="en-only" lang="en">The same column, stored several times in several orders</span></h3>
+          <p class="standard-copy">Các cột trong kho không nằm lộn xộn: C-Store "lưu vật lý một tập hợp các cột, mỗi cột được sắp xếp theo một hoặc vài thuộc tính nào đó", và gọi nhóm các cột cùng thứ tự sắp xếp là <em><span lang="en">projection</span></em>; cùng một cột có thể tồn tại trong nhiều projection, mỗi nơi sắp theo một thuộc tính khác<span class="cite"><a href="#ref-19">19</a></span>. Một trong các tính năng được bài liệt kê chính là "lưu trữ dư thừa các phần tử của một bảng trong nhiều projection chồng lấn theo các thứ tự khác nhau, để một truy vấn có thể được giải bằng projection thuận lợi nhất"<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <p class="easy-only">Nếu hôm nay bạn hay tra theo ngày, mai lại hay tra theo cửa hàng, thì sao? Người ta chép kho ra vài bản, mỗi bản xếp theo một thứ tự. Hỏi kiểu nào thì mở bản hợp kiểu đó. Nhớ nhé: dữ liệu đã nén thì chép thêm vài bản cũng không quá đắt.</p>
+          <p class="en-only" lang="en">Columns in a warehouse don't sit in arbitrary order: C-Store "physically stores a collection of columns, each sorted on some attribute(s)", calling a group of columns sharing a sort order a <em>projection</em>; the same column may exist in several projections, each sorted on a different attribute<span class="cite"><a href="#ref-19">19</a></span>. One of the features the paper lists is "redundant storage of elements of a table in several overlapping projections in different orders, so that a query can be solved using the most advantageous projection"<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Khi bạn phải chọn khoá phân vùng và thứ tự sắp xếp cho một bảng phân tích. Chọn đúng thứ tự không chỉ giúp lọc nhanh — nó còn làm việc nén ăn hơn hẳn, vì các giá trị giống nhau nằm liền nhau.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi bạn quyết định "xếp kho theo ngày hay theo cửa hàng" — và câu trả lời có thể là "cả hai".</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>When choosing partition key and sort order for an analytic table. The right order doesn't just speed up filtering — it makes compression bite harder, because equal values end up adjacent.</div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">06</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Writing to a column store · materialized views</div>
+          <h3><span class="vi-only">Kho đã nén chặt thì ghi vào kiểu gì</span><span class="en-only" lang="en">How do you write into something packed that tight</span></h3>
+          <p class="standard-copy">Cột đã sắp xếp và nén thì không thể chèn một dòng vào giữa. Lời giải giống hệt LSM-tree: nhận ghi vào một tầng đệm rồi định kỳ trộn xuống. C-Store làm đúng thế bằng cách ghép trong một phần mềm duy nhất "một kho cột tối ưu cho đọc và một kho ghi được, hướng cập nhật/chèn, nối với nhau bởi một <em><span lang="en">tuple mover</span></em>": thành phần <span lang="en">Writeable Store</span> nhỏ lo chèn và cập nhật tốc độ cao, thành phần <span lang="en">Read-optimized Store</span> lớn hơn nhiều chỉ nhận dữ liệu qua các đợt chuyển hàng loạt do tuple mover thực hiện<span class="cite"><a href="#ref-19">19</a></span>. Ở tầng trên, kết quả hay dùng được tính sẵn và lưu lại: PostgreSQL mô tả khung nhìn vật chất hoá như một khung nhìn <strong>lưu lại kết quả truy vấn</strong> một cách vật lý và phải được làm mới định kỳ<span class="cite"><a href="#ref-25">25</a></span> — còn khối OLAP của Kimball chính là dạng tổng hợp nhiều chiều của cùng ý tưởng ấy<span class="cite"><a href="#ref-23">23</a></span>.</p>
+          <p class="easy-only">Kho đã xếp gọn và buộc chặt thì không nhét thêm một tờ vào giữa được. Nên hàng mới được để tạm ở một ngăn nhỏ ngoài cửa, đến kỳ thì gom lại và xếp vào kho một thể. Còn những con số hay bị hỏi thì tính sẵn, ghi ra một tờ riêng. Nhớ nhé: <strong>tính trước một lần còn hơn tính lại mỗi lần</strong>.</p>
+          <p class="en-only" lang="en">Sorted, compressed columns can't take a row inserted in the middle. The answer looks just like an LSM-tree: buffer writes, then merge down periodically. C-Store does exactly that, combining in one piece of software "both a read-optimized column store and an update/insert-oriented writeable store, connected by a <em>tuple mover</em>": a small Writeable Store architected for high-performance inserts and updates, and a much larger Read-optimized Store that accepts data only through the batch movement the tuple mover performs<span class="cite"><a href="#ref-19">19</a></span>. A layer up, frequently-used results are precomputed and kept: PostgreSQL describes a materialized view as one that <strong>physically stores the query result</strong> and must be refreshed<span class="cite"><a href="#ref-25">25</a></span> — and Kimball's OLAP cube is the multi-dimensional aggregate form of the same idea<span class="cite"><a href="#ref-23">23</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Bạn gặp nó ở đâu</strong>Ở mọi bảng tổng hợp chạy đêm, mọi khung nhìn vật chất hoá, mọi lớp "<span lang="en">gold</span>" trong kiến trúc dữ liệu nhiều tầng. Cái giá luôn là cùng một thứ: kết quả tính sẵn thì nhanh nhưng <em>cũ</em>, và bạn phải chọn được mức cũ chấp nhận được.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Ở những báo cáo "tính sẵn từ đêm qua" — mở ra là có ngay, nhưng số liệu là của hôm qua.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>In every nightly rollup table, every materialized view, every "gold" layer of a tiered data architecture. The price is always the same: precomputed results are fast but <em>stale</em>, and you must pick a staleness you can live with.</div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận thường gặp về engine lưu trữ</span><span class="en-only" lang="en">Three common misreadings about storage engines</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“LSM luôn nhanh hơn B-tree”</span><span class="en-only" lang="en">"LSM is always faster than a B-tree"</span></h4>
+          <p class="standard-copy">Sai — và chính bài LSM gốc đã nói ngược lại: cấu trúc này hữu ích nhất khi số lần chèn nhiều hơn số lần tìm, còn "các lần tìm cần trả lời ngay sẽ mất hiệu quả I/O trong một số trường hợp"<span class="cite"><a href="#ref-4">4</a></span>. Kleppmann trình bày đây là đánh đổi phụ thuộc workload, và khuyên đo trên chính workload của mình<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="en-only" lang="en">Wrong — and the original LSM paper says the opposite: the structure is most useful where inserts outnumber finds, while "indexed finds requiring immediate response will lose I/O efficiency in some cases"<span class="cite"><a href="#ref-4">4</a></span>. Kleppmann frames it as a workload-dependent trade-off and advises measuring on your own workload<span class="cite"><a href="#ref-1">1</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Hợp nhất là việc nền, không ảnh hưởng ai”</span><span class="en-only" lang="en">"Compaction is background work, it bothers nobody"</span></h4>
+          <p class="standard-copy">Sai: nó tiêu thụ chính băng thông đĩa mà truy vấn đang cần. Tài liệu Cassandra mô tả tình huống dung lượng cho cả tệp cũ lẫn mới trong lúc hợp nhất vượt quá chỗ trống của một nút<span class="cite"><a href="#ref-7">7</a></span>, còn wiki RocksDB ghi khuếch đại ghi của hợp nhất theo tầng "thường lớn hơn 10"<span class="cite"><a href="#ref-6">6</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: it consumes the very disk bandwidth live queries need. Cassandra's docs describe the space for old and new SSTables during compaction outstripping a node's free space<span class="cite"><a href="#ref-7">7</a></span>, and the RocksDB wiki puts leveled compaction's write amplification at "often larger than 10"<span class="cite"><a href="#ref-6">6</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Kho cột chỉ là bảng xoay ngang”</span><span class="en-only" lang="en">"A column store is just a table turned sideways"</span></h4>
+          <p class="standard-copy">Sai: lợi thế đến từ việc các cột được <em>sắp xếp và nén</em> cùng nhau. C-Store lưu "một tập hợp các projection hướng cột chồng lấn, thay cho kiểu bảng-và-chỉ-mục thường thấy", và dùng rộng rãi chỉ mục bitmap để bổ trợ cấu trúc B-tree<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: the advantage comes from columns being <em>sorted and compressed</em> together. C-Store stores "an overlapping collection of column-oriented projections, rather than the current fare of tables and indexes", and makes extensive use of bitmap indexes to complement B-tree structures<span class="cite"><a href="#ref-19">19</a></span>.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi cái engine đang đỡ hệ của bạn</span><span class="en-only" lang="en">Look at the engine holding your system up</span></h2>
+        <p class="standard-copy">Chương 3 không bắt bạn viết một engine; nó cho bạn đủ từ vựng để <em>hỏi đúng câu</em> về cái engine mình đang chạy. Những câu dưới đây không đo hệ của bạn lớn tới đâu — chúng soi xem bạn đã biết mình <strong>đang trả giá ở đâu</strong> hay chưa.</p>
+        <p class="easy-only">Thử soi một hệ thật bằng mấy câu dưới đây. Không phải để xem hệ to hay nhỏ, mà để xem bạn có biết nó đang tốn công ở chỗ nào không.</p>
+        <p class="en-only" lang="en">Chapter 3 doesn't ask you to write an engine; it gives you enough vocabulary to <em>ask the right questions</em> about the one you run. These don't measure how big your system is — they check whether you know <strong>where you are paying</strong>.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Engine dưới hệ của bạn thuộc họ nào — log-structured hay page-oriented?</strong><span class="deep-only">Câu này quyết định hình dạng của mọi vấn đề hiệu năng bạn sẽ gặp. Họ LSM sẽ cho bạn những cơn gai độ trễ lúc hợp nhất và hoá đơn khuếch đại ghi; họ B-tree sẽ cho bạn phân mảnh trang và tranh chấp khoá. Nếu chưa trả lời được, đây là thứ nên tra trước tiên trong tài liệu phiên bản bạn đang chạy.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có bao nhiêu chỉ mục trên bảng ghi nhiều nhất, và mỗi cái phục vụ truy vấn nào?</strong><span class="deep-only">Chỉ mục là cấu trúc phái sinh: mỗi cái đều bắt mọi lần ghi gánh thêm việc. Hãy liệt kê từng chỉ mục cùng truy vấn nó phục vụ. Cái nào không gọi tên được truy vấn tương ứng thì gần như chắc chắn bạn đang trả tiền cho một câu hỏi không ai hỏi.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Toàn bộ tập khoá của bạn có cần vừa bộ nhớ không — và bạn có biết nó đang chiếm bao nhiêu?</strong><span class="deep-only">Một số thiết kế chỉ mục giữ mọi khoá trong RAM, và khi đó tăng trưởng khoá chứ không phải tăng trưởng dữ liệu mới là cái tường bạn sẽ đâm vào. Hãy đo số khoá phân biệt, không chỉ dung lượng đĩa.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Truy vấn theo khoảng có quan trọng với bạn không, và chỉ mục hiện tại có phục vụ được không?</strong><span class="deep-only">Chỉ mục băm không giữ thứ tự nên "mọi khoá từ A đến B" sẽ phải quét. Nếu phần lớn câu hỏi của bạn có dạng khoảng — theo thời gian, theo tiền tố — thì một cấu trúc có thứ tự mới là chỗ đúng để đầu tư.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Lịch hợp nhất của bạn chạy khi nào, và bạn có nhìn thấy nó trên biểu đồ độ trễ không?</strong><span class="deep-only">Hợp nhất giành băng thông đĩa với truy vấn đang phục vụ, nên nó thường hiện ra ở phần đuôi p99 chứ không ở số trung bình. Nếu bạn chưa từng vẽ chồng lịch hợp nhất lên biểu đồ độ trễ, rất có thể bạn đang đổ lỗi nhầm cho mạng.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn còn dư bao nhiêu dung lượng cho lúc hợp nhất cần cả tệp cũ lẫn tệp mới?</strong><span class="deep-only">Đây là dạng sự cố im lặng đến bất ngờ: đĩa còn 30% trống nghe rất an toàn cho tới khi một lần hợp nhất lớn cần chỗ cho cả hai bản. Hãy tính chỗ dư theo kích thước tệp lớn nhất, không theo tỉ lệ phần trăm chung chung.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Truy vấn phân tích của bạn đang chạy trên hệ vận hành hay trên một bản sao riêng?</strong><span class="deep-only">Một truy vấn quét toàn bảng có thể hút sạch băng thông mà giao dịch đang cần. Nếu báo cáo và thanh toán dùng chung một đĩa, thì mỗi kỳ chốt sổ là một sự cố hiệu năng được lên lịch sẵn.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bảng phân tích lớn nhất của bạn lưu theo hàng hay theo cột — và nó đang được sắp xếp theo gì?</strong><span class="deep-only">Hai câu này đi liền nhau: bố trí theo cột giúp bạn không đọc cột thừa, còn thứ tự sắp xếp quyết định việc nén ăn tới đâu và bộ lọc nào cắt được sớm. Nếu bạn chưa từng chọn thứ tự sắp xếp một cách có chủ ý, thì hệ đang chọn hộ bạn.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Hệ của bạn ghi nhiều hơn hay đọc nhiều hơn?</strong><span>Biết điều này mới chọn được kiểu tủ phù hợp.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có bao nhiêu "mục lục", và mỗi cái để trả lời câu hỏi gì?</strong><span>Mục lục nào không ai dùng thì chỉ làm việc ghi nặng thêm.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có lúc nào hệ bỗng khựng một nhịp rồi lại bình thường không?</strong><span>Rất có thể đó là lúc nó đang dọn dẹp bên trong.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Khi cần đếm cả kho, bạn đếm trên bản chính hay bản sao?</strong><span>Đếm trên bản chính thì người đang mua hàng phải chờ.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>Which family is the engine under your system — log-structured or page-oriented?</strong><span>This shapes every performance problem you will meet. LSM gives you latency spikes during compaction and a write-amplification bill; B-trees give you page fragmentation and lock contention. If you can't answer, that's the first thing to look up for the version you run.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How many indexes sit on your most-written table, and which query does each serve?</strong><span>An index is derived data: each one makes every write do more. List them with the query they serve. Any index you can't name a query for is money paid for a question nobody asks.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Does your whole key set need to fit in memory — and do you know how big it is?</strong><span>Some index designs hold every key in RAM, and then key growth, not data growth, is the wall you hit. Measure distinct keys, not just disk usage.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Do range queries matter to you, and does your current index serve them?</strong><span>A hash index keeps no order, so "every key from A to B" degrades to a scan. If most of your questions are range-shaped — by time, by prefix — a sorted structure is the right place to invest.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>When does compaction run, and can you see it on your latency chart?</strong><span>Compaction competes for disk bandwidth with live queries, so it shows up in the p99 tail rather than the average. If you've never overlaid the compaction schedule on latency, you may be blaming the network unfairly.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>How much spare disk do you keep for the moment compaction needs old and new files at once?</strong><span>This failure is surprisingly quiet: 30% free sounds safe right up until one big merge needs room for both copies. Size the headroom against your largest file, not a blanket percentage.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Do your analytic queries run on the operational system or on a separate copy?</strong><span>One full-table scan can drain the bandwidth transactions need. If reporting and checkout share a disk, every close-of-books is a scheduled performance incident.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is your largest analytic table stored by row or by column — and what is it sorted on?</strong><span>The two go together: a column layout saves you from reading columns you didn't ask for, and the sort order decides how well compression bites and which filters cut early. If you never chose a sort order deliberately, the system chose one for you.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Không có engine lưu trữ nào nhanh hơn engine khác một cách tuyệt đối — chỉ có những engine <span class="closing-accent">trả giá ở chỗ khác nhau</span>. Ghi nối đuôi đẩy chi phí về phía hợp nhất; sửa tại chỗ đẩy chi phí về phía tìm trang và nhật ký; chỉ mục đẩy chi phí từ lúc đọc sang lúc ghi; kho cột đẩy chi phí từ lúc hỏi sang lúc nạp. Vì vậy câu hỏi đáng giá không phải "cái nào tốt nhất", mà <span class="closing-accent">"tôi đang trả giá ở đâu, và đó có phải chỗ tôi muốn trả không"</span> — và câu trả lời chỉ có nghĩa khi gắn với <span class="closing-accent">workload cụ thể của bạn</span>.</span><span class="easy-only">Không có cái tủ nào "tốt nhất". Chỉ có tủ <span class="closing-accent">tốn công ở chỗ này</span> và tủ <span class="closing-accent">tốn công ở chỗ kia</span>. Nhớ nhé: đừng hỏi "cái nào nhanh hơn", hãy hỏi <span class="closing-accent">"mình hay làm việc gì nhất"</span> — rồi chọn cái tủ hợp với việc đó.</span><span class="en-only" lang="en">No storage engine is absolutely faster than another — there are only engines that <span class="closing-accent">pay in different places</span>. Appending pushes cost into compaction; updating in place pushes it into page lookups and logging; an index pushes cost from read time to write time; a column store pushes it from query time to load time. So the question worth asking isn't "which is best", but <span class="closing-accent">"where am I paying, and is that where I want to pay"</span> — and the answer only means something tied to <span class="closing-accent">your specific workload</span>.</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-2-data-models-and-query-languages.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 2 · Mô hình dữ liệu &amp; ngôn ngữ truy vấn</span><span class="en-only" lang="en">Chapter 2 · Data Models &amp; Query Languages</span></span>
+    </a>
+    <a class="nav-cell nav-next" href="chapter-4-encoding-and-evolution.html">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 4 · Mã hoá &amp; tiến hoá</span><span class="en-only" lang="en">Chapter 4 · Encoding &amp; Evolution</span></span>
+    </a>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 3 <span lang="en">“Storage and Retrieval”</span><span class="cite"><a href="#ref-1">1</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (cuốn sổ chỉ được viết thêm, khay đồ trên bàn, tủ chia ngăn…) là minh hoạ do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. Về số liệu: con số 5000–6000 lần ghi/giây là <em>thử nghiệm ban đầu trên máy xách tay với đĩa chậm</em> nêu trong tài liệu Bitcask năm 2010<span class="cite"><a href="#ref-3">3</a></span>; các mốc 4,9 / 9,9 / 15,5 bit mỗi khoá là của tài liệu RocksDB<span class="cite"><a href="#ref-8">8</a></span>; và khuếch đại ghi "thường lớn hơn 10" là phát biểu của wiki RocksDB về hợp nhất theo tầng<span class="cite"><a href="#ref-6">6</a></span>. Không con số nào trong số đó là tuyên bố tổng quát về hiệu năng của phần cứng hay hệ của bạn.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 3 “Storage and Retrieval”<span class="cite"><a href="#ref-1">1</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (the append-only notebook, the tray on the desk, the shelved cabinet…) are illustrations added by this companion, not examples from the book. On figures: the 5,000–6,000 writes/sec number is from <em>early tests on a laptop with slow disks</em> reported in the 2010 Bitcask paper<span class="cite"><a href="#ref-3">3</a></span>; the 4.9 / 9.9 / 15.5 bits-per-key points are RocksDB's<span class="cite"><a href="#ref-8">8</a></span>; and write amplification "often larger than 10" is the RocksDB wiki's statement about leveled compaction<span class="cite"><a href="#ref-6">6</a></span>. None of them is a general claim about your hardware or your system.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 3, “Storage and Retrieval”.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách</a></li>
+        <li id="ref-3"><a href="https://riak.com/assets/bitcask-intro.pdf" target="_blank" rel="noopener noreferrer">Justin Sheehy &amp; David Smith, “Bitcask: A Log-Structured Hash Table for Fast Key/Value Data”, Basho Technologies, 2010 — keydir, ghi nối đuôi, merge &amp; hint file</a></li>
+        <li id="ref-4"><a href="https://www.cs.umb.edu/~poneil/lsmtree.pdf" target="_blank" rel="noopener noreferrer">Patrick O'Neil, Edward Cheng, Dieter Gawlick, Elizabeth O'Neil, “The Log-Structured Merge-Tree (LSM-Tree)”, Acta Informatica, 1996</a></li>
+        <li id="ref-5"><a href="https://github.com/google/leveldb/blob/main/doc/impl.md" target="_blank" rel="noopener noreferrer">LevelDB — Implementation notes (memtable, tầng 10^L MB, tệp đích 2 MB, cách chọn tệp để hợp nhất)</a></li>
+        <li id="ref-6"><a href="https://github.com/facebook/rocksdb/wiki/Leveled-Compaction" target="_blank" rel="noopener noreferrer">RocksDB Wiki — Leveled Compaction (hệ số nhân 10, khuếch đại ghi, khuếch đại không gian)</a></li>
+        <li id="ref-7"><a href="https://cassandra.apache.org/doc/latest/cassandra/managing/operating/compaction/stcs.html" target="_blank" rel="noopener noreferrer">Apache Cassandra — Size Tiered Compaction Strategy (mặc định, khuếch đại không gian, ảnh hưởng tới đọc; UCS từ Cassandra 5.0)</a></li>
+        <li id="ref-8"><a href="https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter" target="_blank" rel="noopener noreferrer">RocksDB Wiki — Bloom Filter (may exist / definitely does not exist, bit mỗi khoá và tỉ lệ dương tính giả)</a></li>
+        <li id="ref-9"><a href="https://carlosproal.com/ir/papers/p121-comer.pdf" target="_blank" rel="noopener noreferrer">Douglas Comer, “The Ubiquitous B-Tree”, ACM Computing Surveys, 1979</a></li>
+        <li id="ref-10"><a href="https://www.postgresql.org/docs/current/wal-intro.html" target="_blank" rel="noopener noreferrer">PostgreSQL Documentation — Write-Ahead Logging (WAL): nguyên tắc ghi nhật ký trước, khôi phục REDO, giảm số lần ghi đĩa</a></li>
+        <li id="ref-11"><a href="https://learn.microsoft.com/en-us/sql/relational-databases/indexes/clustered-and-nonclustered-indexes-described" target="_blank" rel="noopener noreferrer">Microsoft SQL Server Documentation — Clustered and nonclustered indexes described</a></li>
+        <li id="ref-12"><a href="https://www.postgresql.org/docs/current/indexes-index-only-scans.html" target="_blank" rel="noopener noreferrer">PostgreSQL Documentation — Index-Only Scans and Covering Indexes</a></li>
+        <li id="ref-13"><a href="https://www.postgresql.org/docs/current/indexes-multicolumn.html" target="_blank" rel="noopener noreferrer">PostgreSQL Documentation — Multicolumn Indexes (quy tắc cột dẫn đầu)</a></li>
+        <li id="ref-14"><a href="https://postgis.net/workshops/postgis-intro/indexing.html" target="_blank" rel="noopener noreferrer">PostGIS — Spatial Indexing (R-Tree, hộp bao)</a></li>
+        <li id="ref-15"><a href="https://lucene.apache.org/core/4_0_0/core/org/apache/lucene/util/fst/package-summary.html" target="_blank" rel="noopener noreferrer">Apache Lucene — org.apache.lucene.util.fst (finite state transducer làm cấu trúc ánh xạ có thứ tự)</a></li>
+        <li id="ref-16"><a href="https://lucene.apache.org/core/9_9_0/core/org/apache/lucene/search/FuzzyQuery.html" target="_blank" rel="noopener noreferrer">Apache Lucene API — FuzzyQuery (khoảng cách Damerau–Levenshtein)</a></li>
+        <li id="ref-17"><a href="https://redis.io/docs/latest/develop/data-types/" target="_blank" rel="noopener noreferrer">Redis Documentation — Data types (danh sách, tập hợp, tập hợp có thứ tự, hash, stream)</a></li>
+        <li id="ref-18"><a href="https://memcached.org/" target="_blank" rel="noopener noreferrer">Memcached — trang chính thức (hệ cache đối tượng trong bộ nhớ, phân tán)</a></li>
+        <li id="ref-19"><a href="https://www.vldb.org/conf/2005/papers/p553-stonebraker.pdf" target="_blank" rel="noopener noreferrer">Mike Stonebraker và cộng sự, “C-Store: A Column-oriented DBMS”, VLDB 2005 — projection, nén bitmap + run-length, WS/RS và tuple mover</a></li>
+        <li id="ref-20"><a href="https://parquet.apache.org/docs/overview/" target="_blank" rel="noopener noreferrer">Apache Parquet — Overview (định dạng tệp hướng cột, nén và mã hoá)</a></li>
+        <li id="ref-21"><a href="https://parquet.apache.org/docs/file-format/nestedencoding/" target="_blank" rel="noopener noreferrer">Apache Parquet — Nested Encoding (dùng mã hoá Dremel với mức định nghĩa và mức lặp)</a></li>
+        <li id="ref-22"><a href="https://research.google/pubs/dremel-interactive-analysis-of-web-scale-datasets/" target="_blank" rel="noopener noreferrer">Sergey Melnik và cộng sự, “Dremel: Interactive Analysis of Web-Scale Datasets”, Google Research</a></li>
+        <li id="ref-23"><a href="https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/star-schema-olap-cube/" target="_blank" rel="noopener noreferrer">Kimball Group — Star Schemas and OLAP Cubes</a></li>
+        <li id="ref-24"><a href="https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/snowflake-dimension/" target="_blank" rel="noopener noreferrer">Kimball Group — Snowflaked Dimensions</a></li>
+        <li id="ref-25"><a href="https://www.postgresql.org/docs/current/rules-materializedviews.html" target="_blank" rel="noopener noreferrer">PostgreSQL Documentation — Materialized Views</a></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-2-data-models-and-query-languages.html">Chương 2 — Mô hình dữ liệu &amp; ngôn ngữ truy vấn</a> · <a href="chapter-4-encoding-and-evolution.html">Chương 4 — Mã hoá &amp; tiến hoá</a>.</p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-2-data-models-and-query-languages.html">Chapter 2 — Data Models &amp; Query Languages</a> · <a href="chapter-4-encoding-and-evolution.html">Chapter 4 — Encoding &amp; Evolution</a>.</p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>

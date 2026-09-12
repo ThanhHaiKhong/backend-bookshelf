@@ -1,0 +1,1894 @@
+<!doctype html>
+<html lang="vi" data-reading-mode="deep">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Phân tích tiếng Việt về Chương 4 &quot;Encoding and Evolution&quot; trong Designing Data-Intensive Applications của Martin Kleppmann: tương thích ngược &amp; tương thích xuôi, JSON/XML/CSV, Thrift/Protocol Buffers/Avro, và ba dòng chảy dữ liệu.">
+<title>Encoding and Evolution</title>
+<link rel="icon" href="data:,">
+<script>
+  (function () {
+    const validModes = ["easy", "quick", "deep"];
+    let storedMode = "deep";
+    let storedLang = "vi";
+    try {
+      const preference = localStorage.getItem("ddia-reading-mode");
+      if (validModes.includes(preference)) storedMode = preference;
+      if (localStorage.getItem("ddia-lang") === "en") storedLang = "en";
+    } catch (_) {}
+    document.documentElement.dataset.readingMode = storedMode;
+    document.documentElement.dataset.lang = storedLang;
+    document.documentElement.setAttribute("lang", storedLang);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&family=Noto+Serif:wght@600;700&display=swap">
+
+<style>
+  :root {
+    --bg: #f0e7d6;
+    --surface: #f7f3ea;
+    --surface-strong: #fffdf7;
+    --ink: #211b14;
+    --muted: #6b6152;
+    --line: #e3d9c4;
+    --teal: #b5502f;
+    --teal-soft: #f1ddd1;
+    --blue: #2b7c73;
+    --blue-soft: #d5e8e4;
+    --amber: #b07d1a;
+    --amber-soft: #f2e6cc;
+    --leaf: #4f7a52;
+    --leaf-soft: #dde9db;
+    --shadow: 0 22px 60px rgba(60, 40, 20, 0.14);
+    --display: "Noto Serif", Georgia, serif;
+    --body: "Be Vietnam Pro", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #100c06;
+      --surface: #17130d;
+      --surface-strong: #221a11;
+      --ink: #efe7d8;
+      --muted: #b0a48f;
+      --line: #33291b;
+      --teal: #e28a63;
+      --teal-soft: #3a251a;
+      --blue: #6ec6ba;
+      --blue-soft: #12312d;
+      --amber: #d9a441;
+      --amber-soft: #3a2e15;
+      --leaf: #86b088;
+      --leaf-soft: #17301a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #100c06;
+    --surface: #17130d;
+    --surface-strong: #221a11;
+    --ink: #efe7d8;
+    --muted: #b0a48f;
+    --line: #33291b;
+    --teal: #e28a63;
+    --teal-soft: #3a251a;
+    --blue: #6ec6ba;
+    --blue-soft: #12312d;
+    --amber: #d9a441;
+    --amber-soft: #3a2e15;
+    --leaf: #86b088;
+    --leaf-soft: #17301a;
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--teal-soft) 74%, transparent), transparent 31rem),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  a { color: var(--teal); }
+
+  a:focus-visible,
+  button:focus-visible,
+  summary:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+
+  .page {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 72px;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 0 28px;
+  }
+
+  .book-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .book-label::before {
+    content: "";
+    width: 28px;
+    height: 2px;
+    background: var(--teal);
+  }
+
+  .reading-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .reading-controls button {
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html[data-reading-mode="easy"] .reading-controls button[data-mode="easy"],
+  html[data-reading-mode="quick"] .reading-controls button[data-mode="quick"],
+  html[data-reading-mode="deep"] .reading-controls button[data-mode="deep"] {
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+    align-items: center;
+    gap: clamp(36px, 7vw, 92px);
+    min-height: 620px;
+    padding: 46px clamp(24px, 5vw, 64px);
+    border: 1px solid var(--line);
+    border-radius: 34px 34px 8px 34px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .hero::after {
+    content: "DDIA / 04";
+    position: absolute;
+    right: 22px;
+    bottom: 16px;
+    color: var(--line);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    color: var(--teal);
+    font: 500 0.78rem var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--display);
+    line-height: 1.13;
+    text-wrap: balance;
+  }
+
+  h1 {
+    max-width: 720px;
+    margin: 18px 0 24px;
+    font-size: clamp(3rem, 6.4vw, 6.2rem);
+    letter-spacing: -0.045em;
+  }
+
+  html[data-reading-mode="easy"] h1 {
+    font-size: clamp(2.6rem, 5.2vw, 5rem);
+  }
+
+  .hero-title-accent {
+    color: var(--teal);
+    font-style: italic;
+  }
+
+  .hero-copy > p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: clamp(1.02rem, 1.5vw, 1.22rem);
+  }
+
+  .thesis {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    margin-top: 34px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .thesis-mark {
+    color: var(--amber);
+    font: 700 1.5rem var(--display);
+  }
+
+  .thesis strong { display: block; margin-bottom: 4px; }
+  .thesis p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+
+  .system-map {
+    position: relative;
+    width: min(100%, 470px);
+    aspect-ratio: 1;
+    margin: auto;
+  }
+
+  .system-map::before,
+  .system-map::after {
+    content: "";
+    position: absolute;
+    inset: 14%;
+    border: 1px dashed var(--line);
+    border-radius: 50%;
+  }
+
+  .system-map::after {
+    inset: 29%;
+    border-style: solid;
+    opacity: 0.75;
+  }
+
+  .core {
+    position: absolute;
+    inset: 36%;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.77rem/1.35 var(--mono);
+    letter-spacing: 0.05em;
+    box-shadow: 0 0 0 14px color-mix(in srgb, var(--teal-soft) 72%, transparent);
+  }
+
+  .node {
+    position: absolute;
+    width: 132px;
+    min-height: 92px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    padding: 15px;
+    border: 1px solid var(--line);
+    border-radius: 22px 22px 5px 22px;
+    background: var(--surface-strong);
+    box-shadow: 0 12px 30px color-mix(in srgb, var(--ink) 10%, transparent);
+  }
+
+  .node b { font-family: var(--display); font-size: 1rem; }
+  .node small { color: var(--muted); font-size: 0.7rem; line-height: 1.4; }
+  .node-resilience { top: 2%; left: 50%; transform: translateX(-50%); }
+  .node-organization { left: 2%; bottom: 8%; }
+  .node-hierarchy { right: 2%; bottom: 8%; }
+
+  .node-resilience b { color: var(--teal); }
+  .node-organization b { color: var(--blue); }
+  .node-hierarchy b { color: var(--amber); }
+
+  .pulse {
+    position: absolute;
+    inset: 29%;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    opacity: 0;
+    animation: pulse 4.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.6); opacity: 0; }
+    18% { opacity: 0.34; }
+    78%, 100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .section {
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 0;
+  }
+
+  .section-heading {
+    display: grid;
+    grid-template-columns: minmax(210px, 0.42fr) minmax(0, 1fr);
+    gap: clamp(28px, 7vw, 86px);
+    align-items: end;
+    margin-bottom: 44px;
+  }
+
+  .section-heading h2 {
+    margin: 8px 0 0;
+    font-size: clamp(2rem, 4vw, 3.8rem);
+    letter-spacing: -0.035em;
+  }
+
+  .section-heading p {
+    max-width: 62ch;
+    margin: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+  }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .overview-card {
+    display: grid;
+    gap: 18px;
+    min-height: 280px;
+    padding: 26px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .overview-card:first-child { border-radius: 28px 8px 8px 8px; }
+  .overview-card:last-child { border-radius: 8px 28px 8px 8px; }
+
+  .overview-card .term {
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .overview-card h3 { margin: 0; font-size: 1.72rem; }
+  .overview-card p { margin: 0; color: var(--muted); font-size: 0.94rem; }
+  .overview-card .result { align-self: end; padding-top: 14px; border-top: 1px solid var(--line); font-weight: 600; }
+  .overview-card.teal .term, .overview-card.teal .result { color: var(--teal); }
+  .overview-card.blue .term, .overview-card.blue .result { color: var(--blue); }
+  .overview-card.amber .term, .overview-card.amber .result { color: var(--amber); }
+
+  .info-block {
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--surface-strong);
+  }
+
+  .info-block h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font: 500 0.72rem var(--mono);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .info-block p { margin: 0; font-size: 0.92rem; }
+
+  .signal {
+    padding: 18px 20px;
+    border-left: 4px solid var(--teal);
+    background: var(--teal-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .signal strong { display: block; margin-bottom: 4px; }
+
+  html:not([data-reading-mode="easy"]) .easy-only,
+  html[data-reading-mode="easy"] .standard-copy,
+  html:not([data-reading-mode="deep"]) .deep-only {
+    display: none !important;
+  }
+
+  /* Bilingual: EN shows the single standard translation; VN keeps 3 modes.
+     .vi-only marks Vietnamese text outside the reading-mode system. */
+  html:not([data-lang="en"]) .en-only { display: none !important; }
+  html[data-lang="en"] .standard-copy,
+  html[data-lang="en"] .easy-only,
+  html[data-lang="en"] .deep-only,
+  html[data-lang="en"] .vi-only,
+  html[data-lang="en"] .reading-controls { display: none !important; }
+
+  .lang-controls {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+  }
+
+  .lang-controls button {
+    min-height: 44px;
+    min-width: 48px;
+    border: 0;
+    border-radius: 999px;
+    padding: 8px 13px;
+    background: transparent;
+    color: var(--muted);
+    font: 600 0.8rem var(--body);
+    cursor: pointer;
+  }
+
+  html:not([data-lang="en"]) .lang-controls button[data-lang-option="vi"],
+  html[data-lang="en"] .lang-controls button[data-lang-option="en"] {
+    background: var(--teal);
+    color: var(--surface);
+  }
+
+  .topbar-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .synthesis {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .loop-diagram,
+  .synthesis-copy {
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .loop-diagram {
+    min-height: 500px;
+    position: relative;
+    display: grid;
+    place-items: center;
+    padding: 38px;
+    border-radius: 34px 8px 8px 8px;
+    overflow: hidden;
+  }
+
+  .loop-diagram::before {
+    content: "";
+    width: 65%;
+    aspect-ratio: 1;
+    border: 2px solid var(--line);
+    border-radius: 50%;
+  }
+
+  .loop-center {
+    position: absolute;
+    width: 150px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--surface);
+    text-align: center;
+    font: 600 0.9rem/1.45 var(--body);
+  }
+
+  .loop-label {
+    position: absolute;
+    width: 150px;
+    padding: 13px 15px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface-strong);
+    text-align: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .loop-label.top { top: 11%; color: var(--teal); }
+  .loop-label.left { left: 7%; bottom: 14%; color: var(--blue); }
+  .loop-label.right { right: 7%; bottom: 14%; color: var(--amber); }
+
+  .synthesis-copy {
+    display: grid;
+    align-content: center;
+    gap: 24px;
+    padding: clamp(28px, 5vw, 54px);
+    border-radius: 8px 34px 34px 8px;
+  }
+
+  .synthesis-copy h3 { margin: 0; font-size: clamp(2rem, 3.4vw, 3rem); }
+  .synthesis-copy > p { margin: 0; color: var(--muted); }
+
+  .equation {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    background: var(--surface-strong);
+  }
+
+  .equation-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 0.65fr) 1fr;
+    gap: 16px;
+    align-items: baseline;
+    font-size: 0.9rem;
+  }
+
+  .equation-row b { font-family: var(--display); font-size: 1.05rem; }
+  .equation-row span { color: var(--muted); }
+
+  .surprise-lead {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(28px, 6vw, 72px);
+    align-items: center;
+    margin-bottom: 22px;
+    padding: clamp(28px, 5vw, 52px);
+    border: 1px solid var(--line);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--surface);
+  }
+
+  .surprise-lead-copy {
+    display: grid;
+    gap: 18px;
+  }
+
+  .surprise-lead-copy p { margin: 0; }
+  .surprise-lead-copy .deep-only { color: var(--muted); font-size: 0.94rem; }
+
+  .definition {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--display);
+    font-size: clamp(1.25rem, 2vw, 1.62rem);
+    line-height: 1.5;
+  }
+
+  .english-term { color: var(--muted); font: 500 0.75rem var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+  .surprise-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .surprise-mechanism {
+    --mechanism-accent: var(--teal);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-content: start;
+    padding: 26px;
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--mechanism-accent);
+    border-radius: 8px 24px 8px 24px;
+    background: var(--surface);
+  }
+
+  .surprise-number {
+    width: 42px;
+    height: 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--mechanism-accent);
+    color: var(--surface);
+    font: 500 0.76rem var(--mono);
+  }
+
+  .surprise-content {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .surprise-content h3 {
+    margin: 0;
+    font-size: clamp(1.35rem, 2.3vw, 1.85rem);
+  }
+
+  .surprise-content > p { margin: 0; color: var(--muted); }
+  .surprise-content .info-block { margin-top: 2px; }
+  .surprise-connection { margin-top: 22px; }
+
+  .mechanics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .chapter-path {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 18px 0 0;
+  }
+
+  .chapter-path a {
+    display: grid;
+    gap: 5px;
+    min-height: 82px;
+    align-content: center;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .chapter-path a:first-child { border-radius: 20px 5px 5px 5px; }
+  .chapter-path a:last-child { border-radius: 5px 20px 5px 5px; }
+  .chapter-path a:hover { border-color: var(--teal); background: var(--surface-strong); }
+  .chapter-path b { font-family: var(--display); }
+  .chapter-path span { color: var(--muted); font: 500 0.7rem var(--mono); letter-spacing: 0.05em; text-transform: uppercase; }
+
+  .trap-lead { border-top: 4px solid var(--leaf); }
+  .trap-grid { margin-top: 22px; }
+  .trap-card { --mechanism-accent: var(--leaf); }
+  .trap-card:nth-child(4n + 2) { --mechanism-accent: var(--teal); }
+  .trap-card:nth-child(4n + 3) { --mechanism-accent: var(--blue); }
+  .trap-card:nth-child(4n) { --mechanism-accent: var(--amber); }
+  .trap-card .english-term { overflow-wrap: anywhere; }
+
+  .opportunity {
+    margin-top: 2px;
+    padding: 18px 20px;
+    border-left: 4px solid var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+
+  .opportunity strong { display: block; margin-bottom: 4px; color: var(--leaf); }
+
+  .trap-comparison {
+    display: grid;
+    gap: 18px;
+    margin-top: 24px;
+    padding: clamp(26px, 5vw, 46px);
+    border: 1px solid var(--line);
+    border-radius: 28px 8px 28px 8px;
+    background: var(--surface);
+  }
+
+  .trap-comparison h3 { margin: 0; font-size: clamp(1.65rem, 3vw, 2.35rem); }
+
+  .comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .comparison-card {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    border: 1px solid var(--line);
+    border-top: 3px solid var(--leaf);
+    background: var(--surface-strong);
+  }
+
+  .comparison-card h4 { margin: 0; font: 700 1rem var(--body); }
+  .comparison-card p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+
+  .myths {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .myth {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 16px;
+    padding: 23px;
+    border-top: 1px solid var(--line);
+  }
+
+  .myth-mark {
+    color: var(--amber);
+    font: 700 1.4rem var(--display);
+  }
+
+  .myth h3 { margin: 0 0 6px; font: 700 1.08rem var(--body); }
+  .myth p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+
+  .diagnostic {
+    display: grid;
+    grid-template-columns: 0.72fr 1.28fr;
+    gap: clamp(28px, 7vw, 84px);
+    padding: clamp(34px, 6vw, 64px);
+    border-radius: 34px 8px 34px 8px;
+    background: var(--ink);
+    color: var(--surface);
+  }
+
+  .diagnostic h2 { margin: 10px 0 18px; font-size: clamp(2.3rem, 4.5vw, 4rem); }
+  .diagnostic .eyebrow { color: var(--surface); }
+  .diagnostic-intro p { margin: 0; color: color-mix(in srgb, var(--surface) 70%, transparent); }
+
+  .question-list {
+    display: grid;
+    gap: 0;
+    counter-reset: question;
+  }
+
+  .question {
+    counter-increment: question;
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--surface) 22%, transparent);
+  }
+
+  .question::before {
+    content: counter(question, decimal-leading-zero);
+    color: var(--teal);
+    font: 500 0.74rem var(--mono);
+  }
+
+  .question strong { display: block; margin-bottom: 5px; }
+  .question span { color: color-mix(in srgb, var(--surface) 70%, transparent); font-size: 0.88rem; }
+
+  .closing {
+    display: grid;
+    grid-template-columns: 0.45fr 1.55fr;
+    gap: clamp(28px, 8vw, 100px);
+    align-items: start;
+    padding: clamp(74px, 10vw, 128px) clamp(4px, 3vw, 28px) 40px;
+  }
+
+  .closing .eyebrow { padding-top: 12px; }
+  .closing blockquote {
+    margin: 0;
+    font: 600 clamp(1.7rem, 3.6vw, 3.25rem)/1.35 var(--display);
+    letter-spacing: -0.025em;
+  }
+
+  .closing-accent { color: var(--teal); }
+
+  .chapter-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: clamp(64px, 9vw, 110px);
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+  }
+
+  .chapter-nav .nav-cell {
+    display: grid;
+    gap: 5px;
+    align-content: start;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--surface);
+    color: var(--ink);
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+
+  .chapter-nav a.nav-cell:hover {
+    border-color: var(--teal);
+    background: var(--surface-strong);
+  }
+
+  .chapter-nav .nav-next { text-align: right; }
+
+  .chapter-nav .nav-cell.disabled { opacity: 0.55; }
+
+  .chapter-nav .nav-label {
+    color: var(--muted);
+    font: 500 0.7rem var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .chapter-nav .nav-title {
+    font-family: var(--display);
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    line-height: 1.25;
+  }
+
+  @media (max-width: 620px) {
+    .chapter-nav { grid-template-columns: 1fr; }
+    .chapter-nav .nav-next { text-align: left; }
+  }
+
+  .cite { font: 500 0.82em var(--mono); white-space: nowrap; }
+  .cite a { color: var(--amber); text-decoration: none; }
+  .cite a:hover { text-decoration: underline; }
+  .cite a::before { content: "["; }
+  .cite a::after { content: "]"; }
+
+  .footer-main { display: grid; gap: 10px; }
+
+  .ref-list { margin: 2px 0 0; padding-left: 1.4em; display: grid; gap: 4px; }
+  .ref-list li { font-size: 0.78rem; }
+  .ref-list li:target { color: var(--ink); font-weight: 600; }
+
+  footer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    padding: 26px clamp(4px, 3vw, 28px) 0;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  footer p { max-width: 80ch; margin: 0; }
+  footer .edition { font-family: var(--mono); white-space: nowrap; }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; min-height: auto; }
+    .system-map { width: min(100%, 420px); }
+    .section-heading,
+    .synthesis,
+    .surprise-lead,
+    .surprise-grid,
+    .comparison-grid,
+    .diagnostic,
+    .closing { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: 1fr; }
+    .overview-card { min-height: auto; border-radius: 18px !important; }
+    .loop-diagram { min-height: 440px; }
+  }
+
+  @media (max-width: 620px) {
+    .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+    .book-label { max-width: none; }
+    .reading-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+    .reading-controls button { width: 100%; padding: 8px 6px; font-size: 0.78rem; white-space: nowrap; }
+    .hero { padding: 34px 20px 54px; border-radius: 24px 24px 6px 24px; }
+    h1 { font-size: clamp(2.7rem, 14vw, 4rem); }
+    .system-map { aspect-ratio: auto; display: grid; gap: 10px; }
+    .system-map::before,
+    .system-map::after,
+    .core,
+    .pulse { display: none; }
+    .node { position: static; transform: none; width: 100%; min-height: auto; }
+    .mechanics, .myths { grid-template-columns: 1fr; }
+    .chapter-path { grid-template-columns: 1fr; }
+    .chapter-path a { min-height: auto; border-radius: 12px !important; }
+    .surprise-lead { padding: 28px 20px; }
+    .surprise-mechanism { grid-template-columns: 1fr; padding: 22px 20px; }
+    .trap-comparison { padding: 24px 20px; }
+    .equation-row { grid-template-columns: 1fr; gap: 3px; }
+    .loop-diagram { min-height: 390px; padding: 20px; }
+    .loop-label { width: 122px; padding: 10px; font-size: 0.7rem; }
+    .loop-label.left { left: 2%; }
+    .loop-label.right { right: 2%; }
+    .diagnostic { padding: 32px 22px; }
+    footer { grid-template-columns: 1fr; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .pulse { animation: none; }
+  }
+  /* SECTION-RAIL:START — on-page section index (scroll-spy); markup injected by the bottom script */
+  .section-rail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 50;
+    padding: 10px;
+    pointer-events: none;
+  }
+  .section-rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--surface-strong);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transform: translateX(-6px);
+    transform-origin: left center;
+    transition: opacity 0.18s ease, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+  }
+  .section-rail::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 42px;
+    pointer-events: auto;
+  }
+  .section-rail:hover::before,
+  .section-rail:focus-within::before {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .section-rail__list {
+    position: relative;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .section-rail__list::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    transform: translateX(-50%);
+    background: var(--line);
+    border-radius: 2px;
+  }
+  .section-rail__link {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px;
+    border-radius: 10px;
+    text-decoration: none;
+    color: var(--muted);
+    pointer-events: none;
+    transition: background-color 0.16s ease, color 0.16s ease;
+  }
+  .section-rail:hover .section-rail__link,
+  .section-rail:focus-within .section-rail__link { pointer-events: auto; }
+  .section-rail__tick {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--surface);
+    box-shadow: 0 0 0 2px var(--line);
+    transition: transform 0.2s cubic-bezier(0.34, 1.28, 0.64, 1), background-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .section-rail__label {
+    white-space: nowrap;
+    font: 500 0.78rem/1.35 var(--body);
+    letter-spacing: -0.005em;
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+  .section-rail:hover .section-rail__label,
+  .section-rail:focus-within .section-rail__label { opacity: 1; }
+  .section-rail__link:hover { background: var(--teal-soft); color: var(--ink); }
+  .section-rail__link:hover .section-rail__tick { box-shadow: 0 0 0 2px var(--teal); }
+  .section-rail__item.is-active .section-rail__link { color: var(--ink); }
+  .section-rail__item.is-active .section-rail__tick {
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+    transform: scale(1.5);
+  }
+  @media (max-width: 1279px) { .section-rail { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .section-rail::before,
+    .section-rail__tick,
+    .section-rail__label,
+    .section-rail__link { transition: none; }
+  }
+  /* SECTION-RAIL:END */
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="topbar">
+    <div class="book-label"><span class="standard-copy">DDIA · Martin Kleppmann · Chương 4</span><span class="easy-only">DDIA · Martin Kleppmann · Chương 4</span><span class="en-only" lang="en">DDIA · Martin Kleppmann · Chapter 4</span></div>
+    <div class="topbar-controls">
+      <div class="lang-controls" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" data-lang-option="vi" aria-pressed="true">VI</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
+      <div class="reading-controls" role="group" aria-label="Chế độ đọc">
+        <button type="button" data-mode="easy" aria-label="Dễ hiểu: giải thích bằng ví dụ cho người mới và trẻ nhỏ" aria-pressed="false">Dễ hiểu</button>
+        <button type="button" data-mode="quick" aria-pressed="false">Tóm tắt</button>
+        <button type="button" data-mode="deep" aria-pressed="true">Đầy đủ</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <div class="eyebrow"><span class="standard-copy">DDIA · Chương 4 · Mã hóa &amp; tiến hóa</span><span class="easy-only">DDIA · Chương 4 · Mã hóa &amp; tiến hóa</span><span class="en-only" lang="en">DDIA · Chapter 4 · Encoding and Evolution</span></div>
+      <h1 id="page-title"><span class="standard-copy">Dữ liệu <span class="hero-title-accent">sống lâu hơn</span> code</span><span class="easy-only">Dữ liệu ở lại lâu hơn chương trình</span><span class="en-only" lang="en">Data <span class="hero-title-accent">outlives</span> code</span></h1>
+      <p class="standard-copy">Ứng dụng luôn thay đổi: thêm trường, đổi tên, bỏ bớt. Nhưng khi bạn triển khai phiên bản mới lên một hệ nhiều máy, bạn gần như không bao giờ đổi hết cùng một lúc — bạn <em lang="en">rolling upgrade</em>, nâng từng nút một, và trong suốt quãng thời gian ấy <strong>code cũ và code mới chạy song song, đọc chung một kho dữ liệu</strong><span class="cite"><a href="#ref-1">1</a></span>. Chương 4 hỏi một câu rất thực dụng: <strong>ta chọn định dạng mã hóa nào để hai phiên bản ấy còn hiểu được nhau?</strong></p>
+      <p class="easy-only">Khi nâng cấp một hệ lớn, người ta không đổi hết mọi máy cùng lúc, mà đổi lần lượt từng máy. Trong lúc đó, <strong>máy chạy bản cũ và máy chạy bản mới cùng đọc chung một kho dữ liệu</strong>. Chương này hỏi: viết dữ liệu ra sao để cả bản cũ lẫn bản mới đều đọc được? Nhớ nhé: nâng cấp là chuyện diễn ra dần dần, không phải một cái bấm nút.</p>
+      <p class="en-only" lang="en">Applications change constantly: fields get added, renamed, dropped. But when you deploy a new version across many machines, you almost never switch them all at once — you do a <em>rolling upgrade</em>, one node at a time, and throughout that window <strong>old and new code run side by side over the same data</strong><span class="cite"><a href="#ref-1">1</a></span>. Chapter 4 asks a very practical question: <strong>which encoding do we choose so those two versions can still understand each other?</strong></p>
+      <div class="thesis">
+        <div class="thesis-mark">∴</div>
+        <div>
+          <strong class="standard-copy">Luận đề của chương</strong>
+          <strong class="easy-only">Điều quan trọng nhất</strong>
+          <strong class="en-only" lang="en">The thesis of the chapter</strong>
+          <p class="standard-copy">Vì các phiên bản code luôn có lúc cùng tồn tại và vì dữ liệu nằm lại lâu hơn code đã sinh ra nó, mọi định dạng mã hóa phải được đánh giá bằng đúng hai chiều tương thích: <em lang="en">backward</em> — code mới đọc được dữ liệu cũ, và <em lang="en">forward</em> — code cũ đọc được dữ liệu mới<span class="cite"><a href="#ref-1">1</a></span>. Chiều thứ hai khó hơn nhiều, vì nó buộc một chương trình phải <strong>giữ nguyên vẹn thứ nó không hiểu</strong>. Ba nơi hai chiều ấy va vào nhau là cơ sở dữ liệu, lời gọi dịch vụ, và hàng đợi thông điệp.</p>
+          <p class="easy-only">Có hai kiểu "hiểu nhau". Một: bản mới đọc được dữ liệu bản cũ viết ra. Hai: bản cũ đọc được dữ liệu bản mới viết ra. Kiểu thứ hai khó hơn, vì bản cũ gặp thứ nó chưa từng biết. Nhớ nhé: hệ tốt là hệ mà cả cũ lẫn mới đều không làm hỏng dữ liệu của nhau.</p>
+          <p class="en-only" lang="en">Because versions of code inevitably coexist, and because data lives longer than the code that produced it, every encoding must be judged on exactly two directions of compatibility: <em>backward</em> — new code can read old data, and <em>forward</em> — old code can read new data<span class="cite"><a href="#ref-1">1</a></span>. The second is far harder, because it forces a program to <strong>preserve intact what it does not understand</strong>. The three places these two directions collide are databases, service calls and message queues.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="system-map" role="img" aria-label="Hai chiều tương thích trong lúc triển khai cuốn chiếu: backward — code mới đọc dữ liệu cũ; forward — code cũ đọc dữ liệu mới / Two directions of compatibility during a rolling upgrade">
+      <div class="pulse"></div>
+      <div class="core"><span class="vi-only">CODE CŨ &amp;<br>CODE MỚI<br>CÙNG CHẠY</span><span class="en-only" lang="en">OLD &amp; NEW<br>CODE RUN<br>SIDE BY SIDE</span></div>
+      <div class="node node-resilience">
+        <b><span class="vi-only">Rolling upgrade</span><span class="en-only" lang="en">Rolling upgrade</span></b>
+        <small class="standard-copy">Nâng từng nút một, không có khoảnh khắc "tất cả cùng mới"</small>
+        <small class="easy-only">Đổi lần lượt từng máy, không đổi hết một lúc.</small>
+        <small class="en-only" lang="en">Node by node — there is no instant where everything is new</small>
+      </div>
+      <div class="node node-organization">
+        <b><span class="vi-only">Backward</span><span class="en-only" lang="en">Backward</span></b>
+        <small class="standard-copy">Code mới đọc được dữ liệu do code cũ viết</small>
+        <small class="easy-only">Bản mới đọc được đồ bản cũ viết ra.</small>
+        <small class="en-only" lang="en">New code can read data written by old code</small>
+      </div>
+      <div class="node node-hierarchy">
+        <b><span class="vi-only">Forward</span><span class="en-only" lang="en">Forward</span></b>
+        <small class="standard-copy">Code cũ đọc được dữ liệu do code mới viết</small>
+        <small class="easy-only">Bản cũ đọc được đồ bản mới viết ra.</small>
+        <small class="en-only" lang="en">Old code can read data written by new code</small>
+      </div>
+    </div>
+  </section>
+
+  <nav class="chapter-path" aria-label="Đi tới nội dung chính">
+    <a href="#compatibility"><span><span class="vi-only">Hai chiều</span><span class="en-only" lang="en">Two directions</span></span><b class="standard-copy">Backward và forward, đừng lẫn</b><b class="easy-only">Cũ với mới phải hiểu nhau</b><b class="en-only" lang="en">Backward vs forward — don't blur them</b></a>
+    <a href="#text-formats"><span><span class="vi-only">Văn bản</span><span class="en-only" lang="en">Text</span></span><b class="standard-copy">Ngôn ngữ-riêng, JSON, XML, CSV</b><b class="easy-only">Vì sao JSON chưa đủ</b><b class="en-only" lang="en">Language-specific, JSON, XML, CSV</b></a>
+    <a href="#binary-formats"><span><span class="vi-only">Nhị phân</span><span class="en-only" lang="en">Binary</span></span><b class="standard-copy">Thrift, Protocol Buffers, Avro</b><b class="easy-only">Gói dữ liệu gọn mà vẫn hiểu</b><b class="en-only" lang="en">Thrift, Protocol Buffers, Avro</b></a>
+    <a href="#dataflow"><span><span class="vi-only">Dòng chảy</span><span class="en-only" lang="en">Dataflow</span></span><b class="standard-copy">Qua CSDL, dịch vụ, thông điệp</b><b class="easy-only">Dữ liệu đi những đường nào</b><b class="en-only" lang="en">Through databases, services, messages</b></a>
+  </nav>
+
+  <section class="section" id="compatibility" aria-labelledby="compatibility-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 1 · <span lang="en">Compatibility</span></span><span class="en-only" lang="en">Axis 1 · Compatibility</span></div>
+        <h2 id="compatibility-title"><span class="vi-only">Hai chiều tương thích, và vì sao chúng không đối xứng</span><span class="en-only" lang="en">Two directions of compatibility, and why they aren't symmetric</span></h2>
+      </div>
+      <p class="standard-copy">Mọi thứ trong bộ nhớ — đối tượng, mảng, bảng băm — đều được tối ưu cho CPU truy cập qua con trỏ. Muốn ghi xuống đĩa hay gửi qua mạng, ta phải dịch chúng thành một chuỗi byte tự chứa: đó là <em lang="en">encoding</em> (còn gọi là serialization hay marshalling), và chiều ngược lại là <em lang="en">decoding</em><span class="cite"><a href="#ref-1">1</a></span>. Chương 4 lấy phép dịch ấy làm tâm, rồi hỏi điều mà các chương trước chưa hỏi: <strong>khi lược đồ đổi, chuỗi byte cũ và chuỗi byte mới có còn sống chung được không?</strong></p>
+      <p class="easy-only">Trong máy, dữ liệu nằm dưới dạng tiện cho máy dùng. Muốn cất vào ổ đĩa hay gửi đi xa, phải "gói" nó thành một dãy byte. Gói lại gọi là mã hóa, mở ra gọi là giải mã. Câu hỏi ở đây là: nếu hôm nay gói kiểu này, mai gói kiểu khác, thì có mở được của nhau không? Nhớ nhé: gói thế nào cũng được, miễn là mở ra vẫn đúng.</p>
+      <p class="en-only" lang="en">Everything in memory — objects, arrays, hash maps — is optimized for a CPU following pointers. To write it to disk or send it over the network, it must be translated into a self-contained byte sequence: that is <em>encoding</em> (also called serialization or marshalling), and the reverse is <em>decoding</em><span class="cite"><a href="#ref-1">1</a></span>. Chapter 4 puts that translation at the centre and asks what earlier chapters did not: <strong>when the schema changes, can the old bytes and the new bytes still live together?</strong></p>
+    </div>
+
+    <div class="overview-grid">
+      <article class="overview-card teal">
+        <div class="term"><span class="vi-only">Ý lõi 01 · <span lang="en">Rolling upgrade</span></span><span class="en-only" lang="en">Idea 01 · Rolling upgrade</span></div>
+        <h3><span class="vi-only">Không có khoảnh khắc "tất cả cùng mới"</span><span class="en-only" lang="en">There's no moment when all is new</span></h3>
+        <p class="standard-copy">Với ứng dụng phía máy chủ, cách triển khai thường thấy là <em lang="en">rolling upgrade</em>: đưa bản mới lên vài nút, quan sát, rồi lan dần ra cả cụm — nhờ đó không phải dừng dịch vụ<span class="cite"><a href="#ref-1">1</a></span>. Với ứng dụng phía khách, bạn thậm chí phụ thuộc vào việc người dùng có chịu cập nhật hay không. Hệ quả trong cả hai trường hợp là như nhau: <strong>luôn có một quãng, có khi rất dài, mà nhiều phiên bản cùng đọc và ghi chung một kho dữ liệu</strong>.</p>
+        <p class="easy-only">Muốn nâng cấp một dàn máy lớn, người ta đổi lần lượt vài máy một, xem có ổn không rồi mới đổi tiếp — như vậy dịch vụ không phải ngừng. Nghĩa là trong một khoảng thời gian, máy cũ và máy mới cùng làm việc. Nhớ nhé: cũ và mới luôn có lúc phải sống chung.</p>
+        <p class="en-only" lang="en">For server-side applications the usual deployment is a <em>rolling upgrade</em>: push the new version to a few nodes, watch, then spread it across the cluster — so service never stops<span class="cite"><a href="#ref-1">1</a></span>. For client-side applications you depend on users actually installing the update. Either way the consequence is the same: <strong>there is always a window, sometimes a long one, in which several versions read and write the same data</strong>.</p>
+        <div class="result standard-copy">Nhiều phiên bản luôn cùng tồn tại.</div>
+        <div class="result easy-only">Nhớ nhé: cũ mới sống chung.</div>
+        <div class="result en-only" lang="en">Versions always coexist.</div>
+      </article>
+      <article class="overview-card blue">
+        <div class="term"><span class="vi-only">Ý lõi 02 · <span lang="en">Backward vs forward</span></span><span class="en-only" lang="en">Idea 02 · Backward vs forward</span></div>
+        <h3><span class="vi-only">Hai chiều, không phải một</span><span class="en-only" lang="en">Two directions, not one</span></h3>
+        <p class="standard-copy"><strong>Tương thích ngược</strong> (<span lang="en">backward compatibility</span>): code mới đọc được dữ liệu do code cũ viết. <strong>Tương thích xuôi</strong> (<span lang="en">forward compatibility</span>): code cũ đọc được dữ liệu do code mới viết<span class="cite"><a href="#ref-1">1</a></span>. Cùng một cặp khái niệm được các sổ đăng ký lược đồ phát biểu theo phía người tiêu thụ: <span lang="en">BACKWARD</span> nghĩa là "consumers using new schema can read data written with old schema", <span lang="en">FORWARD</span> nghĩa là "consumers using old schema can read data written with new schema"<span class="cite"><a href="#ref-11">11</a></span>.</p>
+        <p class="easy-only">Hai chiều khác nhau. Chiều một: bản mới đọc đồ cũ — cái này dễ, vì bản mới biết cả luật cũ lẫn luật mới. Chiều hai: bản cũ đọc đồ mới — cái này khó, vì bản cũ gặp thứ nó chưa từng nghe tên. Nhớ nhé: đừng gộp hai chiều làm một.</p>
+        <p class="en-only" lang="en"><strong>Backward compatibility</strong>: new code can read data written by old code. <strong>Forward compatibility</strong>: old code can read data written by new code<span class="cite"><a href="#ref-1">1</a></span>. Schema registries state the same pair from the consumer's side: BACKWARD means "consumers using new schema can read data written with old schema", FORWARD means "consumers using old schema can read data written with new schema"<span class="cite"><a href="#ref-11">11</a></span>.</p>
+        <div class="result standard-copy">Ngược dễ, xuôi khó.</div>
+        <div class="result easy-only">Nhớ nhé: chiều xuôi khó hơn.</div>
+        <div class="result en-only" lang="en">Backward is easy; forward is hard.</div>
+      </article>
+      <article class="overview-card amber">
+        <div class="term"><span class="vi-only">Ý lõi 03 · <span lang="en">Data outlives code</span></span><span class="en-only" lang="en">Idea 03 · Data outlives code</span></div>
+        <h3><span class="vi-only">Kho dữ liệu là một bảo tàng phiên bản</span><span class="en-only" lang="en">Your database is a museum of versions</span></h3>
+        <p class="standard-copy">Code của một dịch vụ có thể được thay hoàn toàn trong vài tháng; những hàng dữ liệu nó ghi ra thì nằm đó hàng năm. Vì thế một cơ sở dữ liệu đang chạy thường chứa đồng thời bản ghi của nhiều thế hệ lược đồ — Kleppmann gọi đây là chuyện "dữ liệu sống lâu hơn code"<span class="cite"><a href="#ref-1">1</a></span>. Việc di trú toàn bộ sang lược đồ mới thì tốn kém, nên trong thực tế phần lớn hệ chọn cách rẻ hơn: <strong>để dữ liệu cũ nguyên chỗ và bắt code phải đọc được mọi thế hệ</strong>.</p>
+        <p class="easy-only">Chương trình có thể được viết lại sau vài tháng, nhưng dữ liệu nó đã ghi thì nằm lại nhiều năm. Vậy nên trong kho luôn có đủ loại dữ liệu cũ mới lẫn lộn. Nhớ nhé: code đi qua, dữ liệu ở lại.</p>
+        <p class="en-only" lang="en">A service's code may be entirely replaced within months; the rows it wrote sit there for years. So a running database usually holds records from several generations of schema at once — Kleppmann's point that "data outlives code"<span class="cite"><a href="#ref-1">1</a></span>. Migrating everything to the new schema is expensive, so in practice most systems take the cheaper route: <strong>leave old data where it is and make the code read every generation</strong>.</p>
+        <div class="result standard-copy">Code thay được; dữ liệu ở lại.</div>
+        <div class="result easy-only">Nhớ nhé: dữ liệu ở lại lâu hơn.</div>
+        <div class="result en-only" lang="en">Code gets replaced; data stays.</div>
+      </article>
+    </div>
+
+    <div class="surprise-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Forward compatibility = preserving what you don't understand</div>
+        <p class="definition standard-copy">Tương thích ngược chỉ đòi code mới <em>biết thêm</em> luật cũ. Tương thích xuôi đòi một điều lạ hơn nhiều: code cũ phải <em>đi ngang qua</em> những trường nó chưa từng nghe tên mà không hoảng, và lý tưởng nhất là giữ nguyên chúng khi ghi lại.</p>
+        <p class="definition easy-only">Bản mới đọc đồ cũ thì chỉ cần nhớ luật cũ. Còn bản cũ đọc đồ mới thì phải biết bỏ qua thứ lạ mà không làm hỏng nó. Nhớ nhé: biết bỏ qua đúng cách cũng là một kỹ năng.</p>
+        <p class="definition en-only" lang="en">Backward compatibility only asks new code to <em>also know</em> the old rules. Forward compatibility asks something stranger: old code must <em>walk past</em> fields it has never heard of without panicking — and ideally keep them intact when it writes back.</p>
+        <p class="deep-only">Đây là lý do các định dạng ở nửa sau chương được thiết kế quanh một ý duy nhất: <strong>mỗi trường phải tự khai báo đủ để người đọc lạ có thể nhảy qua nó</strong>. Protocol Buffers gói số hiệu trường và kiểu wire vào một tag varint theo công thức <code>(field_number &lt;&lt; 3) | wire_type</code>, và chính cấu trúc ấy "allows old parsers to skip over new fields they don't understand"<span class="cite"><a href="#ref-5">5</a></span>. Thrift đặt trước mỗi trường một byte kiểu và một số hiệu 16 bit<span class="cite"><a href="#ref-7">7</a></span>. Avro đi đường khác hẳn: không đánh số gì cả, mà bắt người đọc luôn có trong tay lược đồ của người viết<span class="cite"><a href="#ref-10">10</a></span>.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba mệnh đề nền của chương">
+        <div class="equation-row">
+          <b>Backward</b>
+          <span>Code mới đọc dữ liệu cũ. Thường dễ: người viết code mới vẫn còn biết định dạng cũ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Forward</b>
+          <span>Code cũ đọc dữ liệu mới. Khó: code cũ phải bỏ qua cái nó không biết mà không làm hỏng.</span>
+        </div>
+        <div class="equation-row">
+          <b>Rolling upgrade</b>
+          <span>Vì nâng cấp diễn ra dần, hai phiên bản luôn có lúc cùng đọc–ghi một kho.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba ý chính, nói gọn">
+        <div class="equation-row">
+          <b>Chiều ngược</b>
+          <span>Bản mới đọc đồ cũ — dễ, vì bản mới biết cả luật cũ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Chiều xuôi</b>
+          <span>Bản cũ đọc đồ mới — khó, vì gặp thứ chưa từng biết.</span>
+        </div>
+        <div class="equation-row">
+          <b>Nâng dần</b>
+          <span>Đổi từng máy một nên cũ mới luôn sống chung một lúc.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three founding propositions of the chapter">
+        <div class="equation-row">
+          <b>Backward</b>
+          <span>New code reads old data. Usually easy: whoever writes the new code still knows the old format.</span>
+        </div>
+        <div class="equation-row">
+          <b>Forward</b>
+          <span>Old code reads new data. Hard: it must skip what it doesn't know without damaging it.</span>
+        </div>
+        <div class="equation-row">
+          <b>Rolling upgrade</b>
+          <span>Because upgrades are gradual, two versions always end up sharing one store.</span>
+        </div>
+      </div>
+    </div>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Nối sang phần sau</strong>
+      <strong class="easy-only">Tiếp theo là gì</strong>
+      <strong class="en-only" lang="en">Where this leads</strong>
+      <div class="standard-copy">Nếu hai chiều tương thích là thước đo, thì phần còn lại của chương là bài kiểm tra: lần lượt đưa từng họ định dạng — ngôn ngữ-riêng, văn bản, nhị phân có lược đồ — qua đúng hai câu hỏi đó, rồi xem chúng hành xử ra sao ở ba nơi dữ liệu thực sự chảy.</div>
+      <div class="easy-only">Phần sau sẽ mang từng kiểu "gói dữ liệu" ra thử: kiểu gắn với một ngôn ngữ, kiểu chữ như JSON, và kiểu nhị phân có bản mô tả. Thử bằng đúng hai câu hỏi vừa nêu.</div>
+      <div class="en-only" lang="en">If the two directions are the yardstick, the rest of the chapter is the exam: each family of formats — language-specific, textual, schema-driven binary — is put through exactly those two questions, and then tested where data actually flows.</div>
+    </aside>
+  </section>
+
+  <section class="section" id="text-formats" aria-labelledby="text-formats-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 2 · <span lang="en">Language-specific &amp; textual</span></span><span class="en-only" lang="en">Axis 2 · Language-specific &amp; textual</span></div>
+        <h2 id="text-formats-title"><span class="vi-only">Hai họ định dạng dễ với, và cái giá của chúng</span><span class="en-only" lang="en">Two convenient families, and what they cost</span></h2>
+      </div>
+      <p class="standard-copy">Trước khi bàn định dạng nhị phân, Kleppmann dọn đường bằng cách loại bỏ hai lựa chọn mặc định mà lập trình viên hay với tay lấy đầu tiên: cơ chế tuần tự hóa <strong>gắn liền với một ngôn ngữ</strong>, và các định dạng <strong>văn bản</strong> như JSON, XML, CSV. Cả hai đều tiện, và cả hai đều trả giá ở đúng chỗ chương này quan tâm — khả năng để hai phiên bản code hiểu nhau qua thời gian.</p>
+      <p class="easy-only">Trước khi nói tới cách gói dữ liệu "chuyên nghiệp", chương sách dẹp bớt hai cách dễ mà nhiều người chọn trước: dùng công cụ có sẵn của chính ngôn ngữ mình viết, hoặc dùng chữ như JSON. Cả hai đều tiện nhưng đều có chỗ hụt. Nhớ nhé: cái dễ nhất lúc bắt đầu ít khi là cái tốt nhất về lâu dài.</p>
+      <p class="en-only" lang="en">Before reaching binary formats, Kleppmann clears the ground by ruling out the two defaults programmers reach for first: serialization <strong>built into a single language</strong>, and <strong>textual</strong> formats such as JSON, XML and CSV. Both are convenient, and both pay a price exactly where this chapter looks — at whether two versions of code can understand each other over time.</p>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">A</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Language-specific formats</div>
+          <h3><span class="vi-only">Định dạng ngôn ngữ-riêng — tiện một lần, kẹt mãi mãi</span><span class="en-only" lang="en">Language-specific formats — handy once, stuck forever</span></h3>
+          <p class="standard-copy">Nhiều ngôn ngữ có sẵn cách tuần tự hóa đối tượng của riêng mình, và Kleppmann nêu đúng nhóm ấy trong danh mục tham chiếu của chương: <span lang="en">Java Object Serialization</span>, <span lang="en">Ruby Marshal</span>, <span lang="en">Python pickle</span><span class="cite"><a href="#ref-3">3</a></span>. Chúng gọi một dòng là xong, nhưng buộc mọi bên đọc phải cùng một ngôn ngữ; việc giải mã thường kéo theo khởi tạo lớp tùy ý, mà <strong>giải tuần tự hóa dữ liệu không đáng tin là một lớp lỗ hổng đã được lập danh mục riêng</strong> — CWE-502<span class="cite"><a href="#ref-15">15</a></span>; và chuyện tương thích giữa các phiên bản thường bị coi là việc phụ. Kết luận của ông gọn: <strong>nói chung nên tránh</strong>, trừ những dùng rất tạm thời<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <p class="easy-only">Nhiều ngôn ngữ lập trình có nút "gói đối tượng lại" sẵn, bấm một cái là xong. Nhưng gói kiểu đó chỉ ngôn ngữ ấy mở được, lại dễ bị kẻ xấu lợi dụng khi mở gói lạ, và ít ai nghĩ tới chuyện bản cũ bản mới. Nhớ nhé: tiện nhất thời thường là kẹt lâu dài.</p>
+          <p class="en-only" lang="en">Many languages ship their own object serialization, and Kleppmann's chapter reference list names exactly that group: Java Object Serialization, Ruby Marshal, Python pickle<span class="cite"><a href="#ref-3">3</a></span>. One line of code and you're done — but every reader must then speak the same language; decoding typically instantiates arbitrary classes, and <strong>deserialization of untrusted data is a catalogued class of vulnerability</strong> — CWE-502<span class="cite"><a href="#ref-15">15</a></span>; and cross-version compatibility is usually an afterthought. His verdict is blunt: <strong>generally avoid them</strong>, except for very transient uses<span class="cite"><a href="#ref-1">1</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Nhận ra ở đâu</strong>Bất cứ chỗ nào bạn thấy một blob nhị phân trong cache, trong hàng đợi hay trong cột <span lang="en">BLOB</span> mà chỉ một dịch vụ viết bằng đúng một ngôn ngữ mới mở được — đó chính là cái bẫy này.</div>
+            <div class="easy-only"><strong>Thấy ở đâu</strong>Khi một cục dữ liệu chỉ đúng một chương trình mở được, còn ai khác nhìn vào cũng chịu — là đang dính kiểu này.</div>
+            <div class="en-only" lang="en"><strong>Where you see it</strong>Any binary blob in a cache, a queue or a BLOB column that only one service, in one language, can open — that is this trap.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao rủi ro bảo mật là điểm chí tử</h4>
+              <p>CWE-502 mô tả đúng kịch bản: ứng dụng giải tuần tự hóa dữ liệu không đáng tin mà không kiểm tra xem dữ liệu ấy có hợp lệ hay không, mở đường cho kẻ tấn công điều khiển luồng khởi tạo đối tượng<span class="cite"><a href="#ref-15">15</a></span>. Với một định dạng có lược đồ tường minh, thứ duy nhất người đọc dựng lên là các trường đã khai báo trước — bề mặt tấn công hẹp hơn hẳn.</p>
+            </div>
+            <div class="info-block">
+              <h4>Hiệu năng và tính khả chuyển</h4>
+              <p>Ngoài khóa ngôn ngữ, các cơ chế này thường không nhanh và không gọn như các định dạng chuyên dụng; danh mục tham chiếu của chương còn dẫn thẳng tới <span lang="en">jvm-serializers</span>, một bộ so sánh công khai giữa các thư viện tuần tự hóa trên JVM<span class="cite"><a href="#ref-3">3</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">B</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">JSON, XML, CSV</div>
+          <h3><span class="vi-only">JSON, XML, CSV — đọc được bằng mắt, mơ hồ với máy</span><span class="en-only" lang="en">JSON, XML, CSV — readable to the eye, vague to the machine</span></h3>
+          <p class="standard-copy">Ba định dạng văn bản này thắng nhờ một điều thật: <strong>chúng liên thông giữa mọi ngôn ngữ và người đọc được</strong>. Nhưng chúng mờ ở chỗ quan trọng. Số liệu là ví dụ rõ nhất: đặc tả JSON ghi rằng chỉ những số nguyên nằm trong khoảng <code>[-(2**53)+1, (2**53)-1]</code> mới <em lang="en">interoperable</em> giữa các bộ cài đặt<span class="cite"><a href="#ref-12">12</a></span> — nghĩa là một số nguyên 64 bit hoàn toàn có thể mất chính xác khi đi qua một bộ phân tích JSON. Không có kiểu chuỗi nhị phân, nên người ta nhét dữ liệu nhị phân qua <span lang="en">Base64</span>, mà phép mã hóa ấy biến mỗi 24 bit đầu vào thành 4 ký tự<span class="cite"><a href="#ref-14">14</a></span> — tức phình khoảng một phần ba. Còn CSV thì không có lược đồ nào cả, và chính RFC của nó thừa nhận "there is no formal specification in existence"<span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <p class="easy-only">JSON, XML, CSV có cái hay: ai cũng đọc được, ngôn ngữ nào cũng mở được. Nhưng chúng hay nhập nhèm. Một con số rất lớn có thể bị làm tròn sai. Muốn gửi ảnh hay file thì phải đổi sang chữ, và đổi xong thì phình ra khoảng một phần ba. Còn CSV thì chẳng có bản mô tả nào, mỗi nơi hiểu một kiểu. Nhớ nhé: dễ đọc bằng mắt không có nghĩa là rõ ràng với máy.</p>
+          <p class="en-only" lang="en">These three textual formats win on something real: <strong>they cross every language and a human can read them</strong>. But they blur exactly where it matters. Numbers are the clearest case: the JSON specification states that only integers in the range <code>[-(2**53)+1, (2**53)-1]</code> are <em>interoperable</em> across implementations<span class="cite"><a href="#ref-12">12</a></span> — so a 64-bit integer can lose precision passing through a JSON parser. There is no binary string type, so binary data is smuggled through Base64, an encoding that turns every 24 input bits into 4 characters<span class="cite"><a href="#ref-14">14</a></span> — roughly a third larger. And CSV has no schema at all; its own RFC concedes "there is no formal specification in existence"<span class="cite"><a href="#ref-13">13</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Khi nào vẫn nên dùng</strong>Kleppmann không cấm JSON: với API công khai giữa các tổ chức khác nhau, nơi cái giá của việc thỏa thuận trước một lược đồ cao hơn cái giá của sự mơ hồ, JSON vẫn là lựa chọn hợp lý<span class="cite"><a href="#ref-1">1</a></span>. Vấn đề chỉ bắt đầu khi bạn dùng nó làm định dạng lưu trữ nội bộ cho hàng tỉ bản ghi.</div>
+            <div class="easy-only"><strong>Vẫn dùng được khi nào</strong>Khi hai bên xa lạ cần trao đổi nhanh mà không kịp thống nhất bản mô tả, JSON vẫn tốt. Chỉ đừng lấy nó làm chỗ cất hàng tỉ bản ghi.</div>
+            <div class="en-only" lang="en"><strong>When it still fits</strong>Kleppmann doesn't forbid JSON: for public APIs across organizational boundaries, where agreeing a schema up front costs more than the ambiguity does, JSON remains reasonable<span class="cite"><a href="#ref-1">1</a></span>. The trouble starts when it becomes the internal storage format for billions of records.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Lược đồ là tùy chọn, nên thường không có</h4>
+              <p>Cả XML lẫn JSON đều có hệ lược đồ riêng — <span lang="en">XML Schema</span> là một W3C Recommendation<span class="cite"><a href="#ref-24">24</a></span> còn <span lang="en">JSON Schema</span> có đặc tả riêng<span class="cite"><a href="#ref-25">25</a></span>, và cả hai đều nằm trong danh mục tham chiếu của chương<span class="cite"><a href="#ref-3">3</a></span> — nhưng chúng là tùy chọn, khá phức tạp, và rất nhiều công cụ dựa trên JSON không dùng đến. Khi lược đồ vắng mặt, luật về nội dung dữ liệu chuyển ngược vào code ứng dụng, nơi không ai kiểm chứng được nó.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao "một phần ba" là con số có thật</h4>
+              <p>Base64 "represents 24-bit groups of input bits as output strings of 4 encoded characters"<span class="cite"><a href="#ref-14">14</a></span>: 3 byte vào, 4 byte ra. Tỉ lệ 4/3 là hệ quả số học trực tiếp, chưa kể phần đệm và phí tổn của việc nhúng chuỗi ấy vào JSON. Đây là ví dụ điển hình của một quy ước lách luật trở thành chi phí thường trực.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="surprise-lead trap-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Human-readable is not the same as machine-unambiguous</div>
+        <p class="definition standard-copy">Điểm chung của hai họ định dạng vừa rồi là chúng giải quyết bài toán "gửi được dữ liệu đi" mà bỏ ngỏ bài toán "hai phiên bản hiểu nhau". Chính khoảng trống ấy là chỗ các định dạng nhị phân có lược đồ bước vào.</p>
+        <p class="definition easy-only">Hai cách trên lo được việc gửi dữ liệu đi, nhưng chưa lo được việc bản cũ bản mới hiểu nhau. Nhớ nhé: đó là lý do người ta cần cách gói có kèm bản mô tả.</p>
+        <p class="definition en-only" lang="en">What the two families share is that they solve "get the data across" while leaving "two versions understand each other" open. That gap is where schema-driven binary formats step in.</p>
+        <p class="deep-only">Có một nhóm trung gian đáng nhắc: các định dạng nhị phân <em>không</em> lược đồ như <span lang="en">MessagePack</span>, vốn là "JSON nén lại" — vẫn mang theo tên trường trong từng bản ghi<span class="cite"><a href="#ref-3">3</a></span>. Chúng tiết kiệm được ít byte nhưng không đổi bản chất: vì mọi tên trường vẫn nằm trong dữ liệu, khoản lãi nhỏ hiếm khi biện minh nổi cho việc mất tính đọc-được-bằng-mắt. Bước nhảy thật sự chỉ đến khi tên trường được thay bằng số hiệu — hoặc bị bỏ hẳn.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Bốn điểm mờ của định dạng văn bản">
+        <div class="equation-row">
+          <b>Số</b>
+          <span>JSON không phân biệt nguyên với thực; chỉ khoảng ±2⁵³ được bảo đảm liên thông<span class="cite"><a href="#ref-12">12</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Nhị phân</b>
+          <span>Không có kiểu chuỗi byte; phải Base64, phình khoảng một phần ba<span class="cite"><a href="#ref-14">14</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Lược đồ</b>
+          <span>XML Schema / JSON Schema là tùy chọn; rất nhiều công cụ không dùng.</span>
+        </div>
+        <div class="equation-row">
+          <b>CSV</b>
+          <span>Không có lược đồ, và không có cả một đặc tả hình thức nào.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Bốn chỗ hụt, nói gọn">
+        <div class="equation-row">
+          <b>Số lớn</b>
+          <span>Số rất lớn có thể bị làm tròn sai khi đi qua JSON.</span>
+        </div>
+        <div class="equation-row">
+          <b>File, ảnh</b>
+          <span>Phải đổi sang chữ, xong thì phình thêm khoảng một phần ba.</span>
+        </div>
+        <div class="equation-row">
+          <b>Bản mô tả</b>
+          <span>Có thì tốt, nhưng thường chẳng ai kèm theo.</span>
+        </div>
+        <div class="equation-row">
+          <b>CSV</b>
+          <span>Mỗi chỗ hiểu một kiểu, vì chẳng có luật chung.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Four blind spots of textual formats">
+        <div class="equation-row">
+          <b>Numbers</b>
+          <span>JSON can't tell integers from floats; only about ±2⁵³ is guaranteed interoperable<span class="cite"><a href="#ref-12">12</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Binary</b>
+          <span>No byte-string type; Base64 is the workaround, at roughly a third more size<span class="cite"><a href="#ref-14">14</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Schema</b>
+          <span>XML Schema / JSON Schema are optional; plenty of tooling ignores them.</span>
+        </div>
+        <div class="equation-row">
+          <b>CSV</b>
+          <span>No schema — and no formal specification either.</span>
+        </div>
+      </div>
+    </div>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Câu hỏi chuyển tiếp</strong>
+      <strong class="easy-only">Câu hỏi tiếp theo</strong>
+      <strong class="en-only" lang="en">The question that follows</strong>
+      <div class="standard-copy">Nếu bỏ tên trường ra khỏi từng bản ghi, dữ liệu sẽ gọn hơn nhiều — nhưng lấy gì để người đọc còn biết byte nào là trường nào? Ba câu trả lời khác nhau cho đúng câu hỏi đó chính là Thrift, Protocol Buffers và Avro.</div>
+      <div class="easy-only">Nếu bỏ tên trường đi thì dữ liệu gọn hơn hẳn — nhưng làm sao biết byte nào là cái gì? Ba cách trả lời khác nhau là ba định dạng ở phần sau.</div>
+      <div class="en-only" lang="en">Drop the field names from every record and the data gets far smaller — but then how does a reader know which bytes are which field? Three different answers to that one question are Thrift, Protocol Buffers and Avro.</div>
+    </aside>
+  </section>
+
+  <section class="section" id="binary-formats" aria-labelledby="binary-formats-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 3 · <span lang="en">Schema-driven binary</span></span><span class="en-only" lang="en">Axis 3 · Schema-driven binary</span></div>
+        <h2 id="binary-formats-title"><span class="vi-only">Ba cách bỏ tên trường ra khỏi dữ liệu</span><span class="en-only" lang="en">Three ways to take field names out of the data</span></h2>
+      </div>
+      <p class="standard-copy">Thrift, Protocol Buffers và Avro đều bắt đầu từ một <em lang="en">schema</em> viết bằng ngôn ngữ mô tả giao diện riêng, rồi sinh mã cho nhiều ngôn ngữ lập trình. Điểm khác nhau nằm ở chỗ chúng thay tên trường bằng cái gì: Thrift và Protocol Buffers thay bằng <strong>số hiệu trường</strong> do con người gán trong lược đồ, còn Avro thì <strong>không thay bằng gì cả</strong> — dữ liệu chỉ còn giá trị, và người đọc buộc phải có lược đồ của người viết trong tay.</p>
+      <p class="easy-only">Ba cách gói dữ liệu này đều bắt đầu bằng một bản mô tả: có những trường nào, kiểu gì. Rồi máy tự sinh ra mã đọc–ghi. Khác nhau ở chỗ: hai cách đầu đánh số cho từng trường, còn cách thứ ba bỏ luôn cả tên lẫn số, chỉ giữ giá trị. Nhớ nhé: bỏ được nhãn đi thì gói nhỏ lại, nhưng phải có cách khác để biết chỗ nào là chỗ nào.</p>
+      <p class="en-only" lang="en">Thrift, Protocol Buffers and Avro all start from a <em>schema</em> written in their own interface definition language, then generate code for many programming languages. They differ in what replaces the field names: Thrift and Protocol Buffers use <strong>field numbers</strong> assigned by hand in the schema, while Avro uses <strong>nothing at all</strong> — the data is just values, and the reader must hold the writer's schema.</p>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">A</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Apache Thrift</div>
+          <h3><span class="vi-only">Thrift — một lược đồ, hai cách đóng gói</span><span class="en-only" lang="en">Thrift — one schema, two packings</span></h3>
+          <p class="standard-copy">Thrift ra đời ở Facebook và được công bố năm 2007<span class="cite"><a href="#ref-23">23</a></span>. Điều đáng nhớ nhất về nó là cùng một lược đồ có thể được ghi ra bằng nhiều giao thức khác nhau. Trong <span lang="en">BinaryProtocol</span>, mỗi trường mở đầu bằng một byte kiểu rồi một số hiệu 16 bit dạng <em lang="en">big endian</em>, và cấu trúc kết thúc bằng một "stop field" là byte 0<span class="cite"><a href="#ref-7">7</a></span>. Trong <span lang="en">CompactProtocol</span>, khi khoảng cách số hiệu so với trường trước nằm trong 1–15, cả <em>độ lệch số hiệu</em> lẫn <em>kiểu</em> được nhét chung vào một byte theo dạng <code>ddddtttt</code><span class="cite"><a href="#ref-8">8</a></span>. Trên bản ghi ví dụ trong bài viết của chính Kleppmann, hai cách ấy cho 59 byte so với 34 byte<span class="cite"><a href="#ref-4">4</a></span>.</p>
+          <p class="easy-only">Thrift do Facebook làm ra. Hay ở chỗ: cùng một bản mô tả, bạn chọn được cách gói "thoáng" hoặc cách gói "chật". Cách chật nhét số thứ tự và kiểu dữ liệu chung vào một byte, nên gói nhỏ hơn hẳn. Nhớ nhé: cùng một nội dung vẫn có thể gói to hay gói nhỏ tùy cách.</p>
+          <p class="en-only" lang="en">Thrift came out of Facebook and was published in 2007<span class="cite"><a href="#ref-23">23</a></span>. Its most memorable trait is that one schema can be written out by several protocols. In BinaryProtocol each field starts with a type byte and a 16-bit big-endian field id, and a struct ends with a "stop field", the zero byte<span class="cite"><a href="#ref-7">7</a></span>. In CompactProtocol, when the field-id delta from the previous field is 1–15, both the <em>id delta</em> and the <em>type</em> are packed into a single byte as <code>ddddtttt</code><span class="cite"><a href="#ref-8">8</a></span>. On the example record in Kleppmann's own write-up, the two come to 59 bytes versus 34<span class="cite"><a href="#ref-4">4</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Quy tắc tiến hóa</strong>Lược đồ Thrift đánh dấu mỗi trường là <span lang="en">required</span> hay <span lang="en">optional</span>: trường bắt buộc "are always written and are expected to be set", còn trường tùy chọn "are only written when they are set" và được theo dõi bằng cờ <span lang="en">isset</span><span class="cite"><a href="#ref-9">9</a></span>. Kleppmann cảnh báo rằng đổi qua lại giữa hai nhãn ấy là chỗ dễ sinh lỗi lúc chạy<span class="cite"><a href="#ref-4">4</a></span>.</div>
+            <div class="easy-only"><strong>Luật khi sửa</strong>Mỗi trường được đánh dấu "bắt buộc" hoặc "có cũng được". Đổi qua đổi lại hai nhãn này là chỗ hay sinh lỗi.</div>
+            <div class="en-only" lang="en"><strong>Evolution rule</strong>A Thrift schema marks each field required or optional: required fields "are always written and are expected to be set", optional ones "are only written when they are set" and are tracked with isset flags<span class="cite"><a href="#ref-9">9</a></span>. Kleppmann warns that flipping between those labels is where runtime errors come from<span class="cite"><a href="#ref-4">4</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao CompactProtocol gọn hơn</h4>
+              <p>Hai thủ thuật cộng lại. Thứ nhất, thay vì một số hiệu 16 bit cố định, nó ghi <em>độ lệch</em> so với trường trước, và độ lệch nhỏ thì chỉ tốn 4 bit; vượt khoảng 1–15 thì rơi về dạng dài <code>0000tttt</code> kèm số hiệu mã hóa zigzag varint<span class="cite"><a href="#ref-8">8</a></span>. Thứ hai, số nguyên không còn chiếm đủ 32 hay 64 bit mà dùng varint: "each 7 bits are encoded as 8 bits with the top bit set if it is not the last byte"<span class="cite"><a href="#ref-8">8</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Đừng đọc 59→34 như một tỉ lệ chung</h4>
+              <p>Cặp số ấy là kết quả đo trên <strong>một bản ghi ví dụ cụ thể</strong> trong bài blog năm 2012 của Kleppmann<span class="cite"><a href="#ref-4">4</a></span>, không phải hệ số nén phổ quát. Bản ghi nhiều số nhỏ và nhiều trường liền số sẽ lợi hơn hẳn; bản ghi toàn chuỗi dài thì gần như không khác. Khi ai đó trích con số này như tỉ lệ cố định, họ đã bỏ mất ngữ cảnh của phép đo.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">B</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Protocol Buffers</div>
+          <h3><span class="vi-only">Protocol Buffers — số hiệu trường là bản hợp đồng</span><span class="en-only" lang="en">Protocol Buffers — the field number is the contract</span></h3>
+          <p class="standard-copy">Protobuf gói số hiệu trường và kiểu wire vào một <em lang="en">tag</em> duy nhất dạng varint: "the 'tag' of a record is encoded as a varint formed from the field number and the wire type via the formula <code>(field_number &lt;&lt; 3) | wire_type</code>"<span class="cite"><a href="#ref-5">5</a></span>. Chỉ có một nhúm kiểu wire — <span lang="en">VARINT</span> (0), <span lang="en">I64</span> (1), <span lang="en">LEN</span> (2), <span lang="en">I32</span> (5) — và <span lang="en">LEN</span> mang ngay sau tag một varint độ dài<span class="cite"><a href="#ref-5">5</a></span>. Riêng <code>sint32</code>/<code>sint64</code> dùng zigzag thay vì bù hai, theo công thức <code>(n &lt;&lt; 1) ^ (n &gt;&gt; 31)</code> với <code>sint32</code>, để số âm nhỏ không tốn tối đa số byte<span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <p class="easy-only">Protobuf đánh cho mỗi trường một con số. Trong dữ liệu, nó ghi con số ấy kèm một mã nhỏ cho biết "cái tiếp theo dài bao nhiêu". Nhờ vậy chương trình cũ gặp con số lạ thì biết đường nhảy qua mà không vấp. Nhớ nhé: có nhãn số thì ai cũng biết chỗ nào là chỗ nào.</p>
+          <p class="en-only" lang="en">Protobuf packs the field number and the wire type into a single varint <em>tag</em>: "the 'tag' of a record is encoded as a varint formed from the field number and the wire type via the formula <code>(field_number &lt;&lt; 3) | wire_type</code>"<span class="cite"><a href="#ref-5">5</a></span>. There are only a handful of wire types — VARINT (0), I64 (1), LEN (2), I32 (5) — and LEN carries a varint length right after the tag<span class="cite"><a href="#ref-5">5</a></span>. <code>sint32</code>/<code>sint64</code> use ZigZag rather than two's complement, via <code>(n &lt;&lt; 1) ^ (n &gt;&gt; 31)</code> for <code>sint32</code>, so small negative numbers don't cost the maximum number of bytes<span class="cite"><a href="#ref-5">5</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Quy tắc tiến hóa</strong>Tài liệu chính thức nói thẳng: "changing field numbers for any existing field is not safe"; thêm trường mới thì an toàn vì "old binaries simply ignore the new field when parsing"; và số hiệu của trường đã xóa phải được đánh dấu <code>reserved</code> để không ai lỡ tay dùng lại<span class="cite"><a href="#ref-6">6</a></span>.</div>
+            <div class="easy-only"><strong>Luật khi sửa</strong>Số đã gán cho một trường thì đừng bao giờ đổi. Thêm trường mới thì được, vì bản cũ sẽ lờ nó đi. Xóa trường thì phải giữ chỗ, đừng cho ai dùng lại số đó.</div>
+            <div class="en-only" lang="en"><strong>Evolution rule</strong>The official guide is blunt: "changing field numbers for any existing field is not safe"; adding new fields is safe because "old binaries simply ignore the new field when parsing"; and a deleted field's number must be marked <code>reserved</code> so nobody reuses it by accident<span class="cite"><a href="#ref-6">6</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Đổi kiểu: tương thích nhưng có bẫy cắt cụt</h4>
+              <p>Hướng dẫn ghi rằng <code>int32</code>, <code>uint32</code>, <code>int64</code>, <code>uint64</code> và <code>bool</code> đều tương thích với nhau trên dây — nhưng kèm ngay cảnh báo: nếu một số 64 bit được đọc như <code>int32</code> thì "it will be truncated to 32 bits"<span class="cite"><a href="#ref-6">6</a></span>. Nói cách khác, việc nới rộng kiểu thì an toàn, còn thu hẹp thì âm thầm làm hỏng dữ liệu chứ không báo lỗi.</p>
+            </div>
+            <div class="info-block">
+              <h4>Nhãn <span lang="en">required</span> đã biến mất trong proto3</h4>
+              <p>Hướng dẫn ngôn ngữ proto3 hiện thời chỉ liệt kê các dạng <em lang="en">singular</em> (<code>optional</code> hoặc <em lang="en">implicit</em>), <code>repeated</code> và <code>map</code> — không còn nhãn <code>required</code> nào<span class="cite"><a href="#ref-6">6</a></span>. Đây là lời đáp muộn cho đúng nỗi lo mà Kleppmann nêu năm 2012 về việc đổi qua lại giữa <span lang="en">required</span> và <span lang="en">optional</span><span class="cite"><a href="#ref-4">4</a></span>: cách chắc chắn nhất để không gãy khi tiến hóa là không có trường bắt buộc nào ngay từ đầu.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">C</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Apache Avro</div>
+          <h3><span class="vi-only">Avro — hai lược đồ, khớp theo tên</span><span class="en-only" lang="en">Avro — two schemas, matched by name</span></h3>
+          <p class="standard-copy">Avro đi một đường khác hẳn: trong dữ liệu không có số hiệu trường, cũng không có tên trường. Đặc tả nói rõ "binary encoded Avro data does not include type information or field names"<span class="cite"><a href="#ref-10">10</a></span> — một bản ghi chỉ còn là các giá trị nối đuôi nhau, với <code>int</code> và <code>long</code> viết bằng zigzag độ dài thay đổi<span class="cite"><a href="#ref-10">10</a></span>. Muốn đọc, bạn cần hai thứ: <strong>lược đồ của người viết</strong> (<span lang="en">writer's schema</span>) và <strong>lược đồ mà ứng dụng của bạn mong đợi</strong> (<span lang="en">reader's schema</span>) — hai bản này không bắt buộc phải giống nhau, chỉ cần tương thích<span class="cite"><a href="#ref-10">10</a></span>.</p>
+          <p class="easy-only">Avro còn mạnh tay hơn: nó bỏ luôn cả tên lẫn số, chỉ ghi giá trị. Muốn đọc được thì phải kèm theo tờ giấy ghi "gói này đóng theo mẫu nào". Người đọc so tờ giấy ấy với mẫu mà mình cần, rồi ghép các trường theo <em>tên</em>. Nhớ nhé: bỏ được nhãn vì luôn có tờ hướng dẫn đi kèm.</p>
+          <p class="en-only" lang="en">Avro takes a different route: the data carries neither field numbers nor field names. The spec is explicit — "binary encoded Avro data does not include type information or field names"<span class="cite"><a href="#ref-10">10</a></span> — a record is just values in sequence, with <code>int</code> and <code>long</code> written in variable-length zig-zag coding<span class="cite"><a href="#ref-10">10</a></span>. To read it you need two things: <strong>the writer's schema</strong> and <strong>the reader's schema</strong> your application expects — and those two need not be identical, only compatible<span class="cite"><a href="#ref-10">10</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Quy tắc tiến hóa</strong>Phân giải lược đồ của Avro khớp các trường <strong>theo tên</strong>, nên thứ tự khai báo đổi được thoải mái. Nếu reader có một trường mà writer không có, reader "should use the default value"; nếu writer có một trường mà reader không có, "the writer's value for that field is ignored"<span class="cite"><a href="#ref-10">10</a></span>. Hệ quả thực dụng: <strong>muốn thêm hay bớt trường an toàn thì trường đó phải có giá trị mặc định</strong><span class="cite"><a href="#ref-4">4</a></span>.</div>
+            <div class="easy-only"><strong>Luật khi sửa</strong>Trường được ghép theo tên, nên đổi thứ tự không sao. Người đọc cần trường mà gói không có thì lấy giá trị mặc định; gói có trường lạ thì người đọc bỏ qua. Vậy nên thêm hay bớt trường đều phải có giá trị mặc định.</div>
+            <div class="en-only" lang="en"><strong>Evolution rule</strong>Avro's schema resolution matches fields <strong>by name</strong>, so declaration order can change freely. If the reader has a field the writer lacks, the reader "should use the default value"; if the writer has a field the reader lacks, "the writer's value for that field is ignored"<span class="cite"><a href="#ref-10">10</a></span>. The practical consequence: <strong>to add or remove a field safely, it must have a default value</strong><span class="cite"><a href="#ref-4">4</a></span>.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Lược đồ của người viết đi kèm dữ liệu bằng cách nào</h4>
+              <p>Với tệp lớn, Avro dùng <em lang="en">object container file</em>: phần đầu tệp gồm bốn byte nhận dạng <code>Obj\x01</code>, một bản đồ siêu dữ liệu trong đó khóa <code>avro.schema</code> "contains the schema of objects stored in the file, as JSON data (required)", và một <em lang="en">sync marker</em> 16 byte<span class="cite"><a href="#ref-10">10</a></span>. Nghĩa là lược đồ được ghi <strong>một lần cho cả triệu bản ghi</strong>, chứ không lặp lại ở từng bản ghi. Đặc tả cũng đưa ra nguyên tắc chung: hệ thống lưu dữ liệu Avro "should always include the writer's schema for that data"<span class="cite"><a href="#ref-10">10</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao Avro hợp với lược đồ sinh động</h4>
+              <p>Vì không cần con người gán tag, bạn có thể <strong>sinh lược đồ Avro tự động từ lược đồ cơ sở dữ liệu</strong> mỗi khi nó đổi, rồi dùng lược đồ mới để kết xuất — người đọc vẫn hiểu nhờ phân giải theo tên. Với Thrift hay Protobuf, mỗi lần lược đồ nguồn đổi bạn lại phải trông chừng việc gán tag bằng tay, và một cột bị đổi tên rất dễ thành một tag bị dùng lại. Kleppmann lập luận rằng chính cơ chế này khiến Avro hợp với những nơi lược đồ thay đổi liên tục hoặc được sinh ra tự động<span class="cite"><a href="#ref-4">4</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="surprise-lead trap-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">A schema is documentation that cannot go stale</div>
+        <p class="definition standard-copy">Cái lợi ít được nói của định dạng có lược đồ không nằm ở vài byte tiết kiệm được, mà ở chỗ lược đồ là <em>tài liệu buộc phải đúng</em>: nó được dùng để sinh mã và để giải mã, nên không thể lệch khỏi thực tế như một trang wiki bị bỏ quên.</p>
+        <p class="definition easy-only">Điều hay nhất không phải là gói nhỏ hơn, mà là bản mô tả ấy luôn đúng — vì chính máy dùng nó để đọc và ghi. Nhớ nhé: tài liệu mà máy phải dùng thì không bao giờ lỗi thời.</p>
+        <p class="definition en-only" lang="en">The underrated benefit of a schema-driven format isn't the bytes saved but that the schema is <em>documentation that cannot go stale</em>: it is used to generate code and to decode, so it can't drift from reality the way a forgotten wiki page does.</p>
+        <p class="deep-only">Cần nói rõ một chỗ dễ nhầm về thuật ngữ. Kleppmann phát biểu hai chiều tương thích theo <em>code</em> (code mới/cũ đọc dữ liệu cũ/mới)<span class="cite"><a href="#ref-1">1</a></span>, còn các sổ đăng ký lược đồ phát biểu theo <em>consumer</em> và <em>schema</em><span class="cite"><a href="#ref-11">11</a></span>. Hai cách nói trùng nhau về nội dung, nhưng chủ ngữ bị đảo, nên khi đọc tài liệu vận hành rất dễ hiểu ngược. Đáng chú ý hơn: chế độ mặc định của Confluent Schema Registry là <span lang="en">BACKWARD</span> chứ không phải cả hai chiều<span class="cite"><a href="#ref-11">11</a></span> — tức là bật một công cụ quản lý lược đồ lên <strong>không</strong> tự động cho bạn tương thích xuôi; đó vẫn là một lựa chọn phải cấu hình.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba cách thay tên trường">
+        <div class="equation-row">
+          <b>Thrift</b>
+          <span>Số hiệu 16 bit (BinaryProtocol)<span class="cite"><a href="#ref-7">7</a></span> hoặc độ lệch 4 bit gói cùng kiểu (CompactProtocol)<span class="cite"><a href="#ref-8">8</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Protobuf</b>
+          <span>Tag varint <code>(field_number &lt;&lt; 3) | wire_type</code><span class="cite"><a href="#ref-5">5</a></span>; số hiệu là bất biến vĩnh viễn<span class="cite"><a href="#ref-6">6</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Avro</b>
+          <span>Không số hiệu, không tên; khớp theo tên giữa writer's schema và reader's schema.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba cách, nói gọn">
+        <div class="equation-row">
+          <b>Thrift</b>
+          <span>Đánh số cho từng trường, có kiểu gói thoáng và kiểu gói chật.</span>
+        </div>
+        <div class="equation-row">
+          <b>Protobuf</b>
+          <span>Cũng đánh số, và con số đó thì đừng bao giờ đổi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Avro</b>
+          <span>Không đánh số, chỉ ghi giá trị, kèm tờ mô tả để ghép theo tên.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three ways to replace field names">
+        <div class="equation-row">
+          <b>Thrift</b>
+          <span>A 16-bit id (BinaryProtocol)<span class="cite"><a href="#ref-7">7</a></span> or a 4-bit delta packed with the type (CompactProtocol)<span class="cite"><a href="#ref-8">8</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Protobuf</b>
+          <span>A varint tag, <code>(field_number &lt;&lt; 3) | wire_type</code><span class="cite"><a href="#ref-5">5</a></span>; the number is permanent<span class="cite"><a href="#ref-6">6</a></span>.</span>
+        </div>
+        <div class="equation-row">
+          <b>Avro</b>
+          <span>No ids, no names; matched by name between writer's and reader's schema.</span>
+        </div>
+      </div>
+    </div>
+
+    <aside class="signal surprise-connection">
+      <strong class="standard-copy">Từ định dạng sang đường đi</strong>
+      <strong class="easy-only">Từ cách gói sang đường đi</strong>
+      <strong class="en-only" lang="en">From format to route</strong>
+      <div class="standard-copy">Chọn được định dạng mới xong một nửa. Nửa còn lại là nhận ra rằng hai chiều tương thích không được kiểm tra ở trong thư viện mã hóa, mà ở ba nơi dữ liệu thực sự đi qua giữa các tiến trình — và mỗi nơi hỏng theo một kiểu riêng.</div>
+      <div class="easy-only">Chọn xong cách gói mới chỉ là một nửa. Nửa kia là xem dữ liệu đi qua những đường nào, vì mỗi đường có kiểu hỏng riêng.</div>
+      <div class="en-only" lang="en">Picking a format is half the job. The other half is seeing that the two directions aren't tested inside the encoding library but at the three places data actually crosses between processes — and each fails in its own way.</div>
+    </aside>
+  </section>
+
+  <section class="section" id="dataflow" aria-labelledby="dataflow-title">
+    <div class="section-heading">
+      <div>
+        <div class="eyebrow"><span class="vi-only">Trục 4 · <span lang="en">Modes of dataflow</span></span><span class="en-only" lang="en">Axis 4 · Modes of dataflow</span></div>
+        <h2 id="dataflow-title"><span class="vi-only">Ba con đường dữ liệu rời khỏi một tiến trình</span><span class="en-only" lang="en">Three routes data takes out of a process</span></h2>
+      </div>
+      <p class="standard-copy">Nửa sau chương chuyển từ "gói thế nào" sang "gửi đi đâu". Kleppmann liệt kê ba dòng chảy phổ biến nhất giữa các tiến trình: <strong>qua cơ sở dữ liệu</strong>, <strong>qua lời gọi dịch vụ</strong> (REST và RPC), và <strong>qua truyền thông điệp bất đồng bộ</strong><span class="cite"><a href="#ref-1">1</a></span>. Mỗi con đường có một đặc tính thời gian riêng, và chính đặc tính ấy quyết định chiều tương thích nào trở nên cấp bách.</p>
+      <p class="easy-only">Phần sau của chương chuyển câu hỏi: không phải "gói ra sao" nữa mà là "gửi đi đường nào". Có ba đường: cất vào kho dữ liệu, gọi thẳng sang chương trình khác, hoặc gửi thư qua một cái hộp trung gian. Mỗi đường có kiểu trục trặc riêng. Nhớ nhé: dữ liệu đi đường nào thì hỏng theo kiểu của đường đó.</p>
+      <p class="en-only" lang="en">The second half of the chapter moves from "how to pack" to "where it goes". Kleppmann lists the three most common flows between processes: <strong>via databases</strong>, <strong>via service calls</strong> (REST and RPC), and <strong>via asynchronous message passing</strong><span class="cite"><a href="#ref-1">1</a></span>. Each route has its own relationship with time, and that is what decides which direction of compatibility becomes urgent.</p>
+    </div>
+
+    <ol class="surprise-grid trap-grid">
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">A</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Dataflow through databases</div>
+          <h3><span class="vi-only">Qua cơ sở dữ liệu — gửi thư cho chính mình ở tương lai</span><span class="en-only" lang="en">Through a database — a message to your future self</span></h3>
+          <p class="standard-copy">Ghi vào cơ sở dữ liệu là gửi một thông điệp cho chính bạn ở thời điểm nào đó về sau — có thể là vài mili giây, có thể là năm năm<span class="cite"><a href="#ref-1">1</a></span>. Vì trong một cụm đang <em lang="en">rolling upgrade</em>, tiến trình cũ và mới cùng ghi vào một kho, nên cả hai chiều tương thích đều bắt buộc <strong>cùng lúc</strong>: bản mới phải đọc nổi bản ghi cũ, và bản cũ phải đọc nổi bản ghi mới. Đây là con đường mà quãng thời gian giữa lúc ghi và lúc đọc dài nhất, nên cũng là nơi lỗi tiến hóa nằm im lâu nhất trước khi lộ ra.</p>
+          <p class="easy-only">Ghi dữ liệu vào kho giống như viết thư cho chính mình đọc sau này — có khi đọc ngay, có khi năm năm nữa mới mở. Trong lúc nâng cấp, chương trình cũ và mới cùng viết vào một kho, nên cả hai phải đọc được thư của nhau. Nhớ nhé: thư viết hôm nay, người đọc có thể là bản cũ hoặc bản mới.</p>
+          <p class="en-only" lang="en">Writing to a database is sending a message to yourself at some later moment — maybe milliseconds away, maybe five years<span class="cite"><a href="#ref-1">1</a></span>. Because during a rolling upgrade old and new processes write into the same store, both directions of compatibility are required <strong>at once</strong>: new code must read old rows, and old code must read new rows. This is the route with the longest gap between write and read, so it is also where an evolution bug lies dormant longest.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Cái bẫy đắt nhất của chương</strong>Một ứng dụng bản cũ đọc một bản ghi đã có trường mới, giải mã vào đối tượng của nó, sửa một chỗ, rồi ghi cả đối tượng trở lại. Trường mới — thứ nó không hề biết — <strong>biến mất</strong>. Bản ghi vẫn hợp lệ, không ai báo lỗi, và dữ liệu thì đã mất<span class="cite"><a href="#ref-1">1</a></span>. Tương thích xuôi ở đây không chỉ là "đọc được mà không sập", mà là "giữ nguyên vẹn thứ mình không hiểu khi ghi lại".</div>
+            <div class="easy-only"><strong>Cái bẫy đáng nhớ nhất</strong>Bản cũ mở một bản ghi có trường lạ, sửa một chỗ rồi cất lại — và trường lạ kia biến mất luôn. Không ai báo lỗi cả. Nhớ nhé: đọc được thôi chưa đủ, phải giữ lại được cái mình không hiểu.</div>
+            <div class="en-only" lang="en"><strong>The chapter's costliest trap</strong>An old version of the application reads a record that already has a new field, decodes it into its own object, changes one thing, and writes the whole object back. The new field — which it never knew about — <strong>disappears</strong>. The record stays valid, nothing raises an error, and the data is gone<span class="cite"><a href="#ref-1">1</a></span>. Forward compatibility here isn't just "read without crashing"; it's "preserve what you don't understand when writing back".</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Vì sao di trú toàn bộ hiếm khi là câu trả lời</h4>
+              <p>Về nguyên tắc bạn có thể viết lại toàn bộ dữ liệu sang lược đồ mới, nhưng trên một tập dữ liệu lớn đó là thao tác tốn kém và rủi ro. Vì vậy các hệ quản trị thường chọn cách rẻ hơn: thêm cột với giá trị mặc định <code>null</code> mà không đụng tới dữ liệu cũ, để mọi bản ghi cũ được đọc như thể chúng luôn có trường ấy<span class="cite"><a href="#ref-1">1</a></span>. Bản ghi trên đĩa giữ nguyên; chỉ cách diễn giải đổi.</p>
+            </div>
+            <div class="info-block">
+              <h4>Ảnh chụp lược đồ và kho phân tích</h4>
+              <p>Khi kết xuất dữ liệu ra kho phân tích hay bản sao lưu, dữ liệu được ghi một lần rồi bất biến, nên có thể mã hóa bằng <strong>một lược đồ duy nhất cho cả ảnh chụp</strong> — đúng mô hình tệp chứa của Avro, nơi <code>avro.schema</code> nằm trong phần đầu tệp<span class="cite"><a href="#ref-10">10</a></span>. Chính vì kịch bản này mà việc sinh lược đồ tự động từ lược đồ cơ sở dữ liệu trở nên tự nhiên<span class="cite"><a href="#ref-4">4</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">B</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Dataflow through services: REST and RPC</div>
+          <h3><span class="vi-only">Qua dịch vụ — vì sao RPC không phải lời gọi hàm</span><span class="en-only" lang="en">Through services — why RPC isn't a function call</span></h3>
+          <p class="standard-copy">Con đường thứ hai là gọi qua mạng. <span lang="en">REST</span> không phải một giao thức mà là một phong cách kiến trúc dựng trên các nguyên tắc của HTTP, được Roy Fielding trình bày trong luận án năm 2000<span class="cite"><a href="#ref-18">18</a></span>. <span lang="en">RPC</span> thì già hơn nhiều — ý tưởng gọi thủ tục từ xa đã được Birrell và Nelson hiện thực và phân tích từ năm 1984<span class="cite"><a href="#ref-17">17</a></span> — và tham vọng của nó là làm cho lời gọi qua mạng <em>trông giống</em> lời gọi trong cùng tiến trình. Ngay trang giới thiệu gRPC hôm nay vẫn hứa đúng điều đó: máy khách "can directly call a method on a server application on a different machine as if it were a local object"<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <p class="easy-only">Cách thứ hai là gọi thẳng sang máy khác qua mạng. Có kiểu REST — dùng đúng cách của web. Có kiểu RPC — cố làm cho việc gọi qua mạng trông y hệt gọi một hàm ngay trong máy mình. Nhưng "trông giống" không có nghĩa là "giống". Nhớ nhé: gọi qua mạng luôn khác gọi trong nhà.</p>
+          <p class="en-only" lang="en">The second route is the call across the network. REST is not a protocol but an architectural style built on the principles of HTTP, set out by Roy Fielding in his 2000 dissertation<span class="cite"><a href="#ref-18">18</a></span>. RPC is much older — remote procedure calls were implemented and analysed by Birrell and Nelson back in 1984<span class="cite"><a href="#ref-17">17</a></span> — and its ambition is to make a network call <em>look like</em> a call inside the same process. gRPC's own introduction still promises exactly that today: a client "can directly call a method on a server application on a different machine as if it were a local object"<span class="cite"><a href="#ref-19">19</a></span>.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao phép ẩn dụ ấy rò rỉ</strong>Lập luận kinh điển mà Kleppmann dựa vào là bài "A Note on Distributed Computing" của Waldo và cộng sự (1994): đối tượng trong hệ phân tán về bản chất khác đối tượng trong một không gian địa chỉ, vì lập trình viên buộc phải để ý tới <strong>độ trễ</strong>, một <strong>mô hình truy cập bộ nhớ khác</strong>, và <strong>lỗi bộ phận cùng tính đồng thời</strong><span class="cite"><a href="#ref-16">16</a></span>. Một lời gọi cục bộ hoặc chạy hoặc không; một lời gọi qua mạng có thể hết giờ mà bạn <em>không biết</em> phía kia đã thực thi hay chưa.</div>
+            <div class="easy-only"><strong>Vì sao ví von đó hỏng</strong>Gọi hàm trong máy thì hoặc chạy hoặc không. Gọi qua mạng thì có thể chờ mãi không thấy trả lời, mà bên kia có khi đã làm rồi. Hai chuyện đó khác hẳn nhau.</div>
+            <div class="en-only" lang="en"><strong>Why that metaphor leaks</strong>The classic argument Kleppmann leans on is Waldo et al.'s 1994 "A Note on Distributed Computing": objects in a distributed system are intrinsically unlike objects in a single address space, because programmers must reckon with <strong>latency</strong>, a <strong>different model of memory access</strong>, and <strong>partial failure and concurrency</strong><span class="cite"><a href="#ref-16">16</a></span>. A local call either runs or doesn't; a network call can time out while you have <em>no idea</em> whether the other side executed.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Chiều tương thích nào cho dịch vụ</h4>
+              <p>Với dịch vụ, máy chủ và máy khách thường không được nâng cấp cùng lúc, và trong thực tế máy chủ thường đi trước. Nghĩa là <strong>yêu cầu</strong> cần tương thích ngược (máy chủ mới phục vụ được máy khách cũ) còn <strong>phản hồi</strong> cần tương thích xuôi (máy khách cũ đọc được phản hồi mới)<span class="cite"><a href="#ref-1">1</a></span>. Với API công khai, bạn thậm chí không kiểm soát được lúc nào máy khách cập nhật, nên phiên bản cũ có thể phải sống nhiều năm.</p>
+            </div>
+            <div class="info-block">
+              <h4>Thử lại: chỗ RPC khác nhất</h4>
+              <p>Một lời gọi thất bại có thể được thử lại tự động, nhưng nếu yêu cầu đã tới đích và chỉ có phản hồi bị mất, việc thử lại sẽ khiến hành động xảy ra hai lần — trừ khi giao thức có cơ chế khử trùng lặp (<em lang="en">idempotence</em>)<span class="cite"><a href="#ref-1">1</a></span>. Đây chính là "lỗi bộ phận" mà Waldo nói tới: thứ không tồn tại trong lời gọi hàm cục bộ nên cũng không có trong trực giác của lập trình viên<span class="cite"><a href="#ref-16">16</a></span>.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="surprise-mechanism trap-card">
+        <span class="surprise-number" aria-hidden="true">C</span>
+        <div class="surprise-content">
+          <div class="english-term" lang="en">Message-passing dataflow</div>
+          <h3><span class="vi-only">Qua thông điệp — người trung gian không hỏi bên trong có gì</span><span class="en-only" lang="en">Through messages — the middleman never opens the envelope</span></h3>
+          <p class="standard-copy">Con đường thứ ba nằm giữa hai con đường trên: thông điệp được gửi qua một <em lang="en">message broker</em> — Kleppmann nêu nhóm công cụ như RabbitMQ, ActiveMQ, Apache Kafka<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>. Cái lợi: broker làm bộ đệm khi bên nhận quá tải, tự gửi lại khi tiến trình chết, bên gửi không cần biết địa chỉ IP của bên nhận, và một thông điệp có thể tới nhiều người nhận. Cái giá: giao tiếp trở thành <strong>một chiều, bất đồng bộ</strong> — bên gửi thường không chờ trả lời.</p>
+          <p class="easy-only">Cách thứ ba là gửi thư qua một cái hộp chung: người gửi bỏ thư vào hộp rồi đi làm việc khác, người nhận lúc nào rảnh thì lấy ra. Hộp giữ thư hộ khi người nhận bận, và gửi lại nếu chẳng may hỏng giữa chừng. Nhớ nhé: gửi qua hộp thì không ai phải đứng đợi ai.</p>
+          <p class="en-only" lang="en">The third route sits between the other two: messages go through a <em>message broker</em> — Kleppmann names tools such as RabbitMQ, ActiveMQ and Apache Kafka<span class="cite"><a href="#ref-1">1</a></span><span class="cite"><a href="#ref-3">3</a></span>. The upside: the broker buffers when the recipient is overloaded, redelivers when a process dies, the sender needn't know the recipient's IP, and one message can reach many consumers. The cost: communication becomes <strong>one-way and asynchronous</strong> — the sender usually doesn't wait for a reply.</p>
+          <div class="opportunity">
+            <div class="standard-copy"><strong>Vì sao điều này quan trọng với tiến hóa</strong>Broker thường chỉ coi thông điệp là một dãy byte kèm chút siêu dữ liệu, hoàn toàn không quan tâm mô hình dữ liệu bên trong<span class="cite"><a href="#ref-1">1</a></span>. Sự vô tư ấy là lợi thế — bạn đổi định dạng mà không phải đổi hạ tầng — nhưng cũng có nghĩa là <strong>không có ai kiểm tra tương thích giúp bạn</strong>. Trách nhiệm rơi trọn vào bên gửi và bên nhận, mà hai bên thì được triển khai độc lập.</div>
+            <div class="easy-only"><strong>Vì sao đáng chú ý</strong>Cái hộp trung gian không mở thư ra xem, nó chỉ chuyển. Tiện, nhưng cũng nghĩa là chẳng ai kiểm giúp xem người nhận có hiểu nổi thư hay không.</div>
+            <div class="en-only" lang="en"><strong>Why it matters for evolution</strong>A broker usually treats a message as a byte sequence with some metadata and is entirely agnostic about the data model inside<span class="cite"><a href="#ref-1">1</a></span>. That indifference is an advantage — you change format without touching infrastructure — but it also means <strong>nobody checks compatibility for you</strong>. The burden falls on sender and receiver, which are deployed independently.</div>
+          </div>
+          <div class="mechanics deep-only">
+            <div class="info-block">
+              <h4>Mô hình actor phân tán</h4>
+              <p>Mô hình actor là một cách lập trình đồng thời trong đó logic được đóng trong các actor chỉ giao tiếp bằng thông điệp bất đồng bộ, và mỗi actor xử lý <strong>một thông điệp tại một thời điểm</strong> nên không cần khóa: tài liệu Akka nói thẳng rằng "no concurrency guards such as <code>synchronized</code> or <code>AtomicInteger</code> are needed since an actor instance processes one message at a time"<span class="cite"><a href="#ref-21">21</a></span>. Khi mô hình ấy trải ra nhiều nút — Akka, hay Microsoft Orleans với các <em lang="en">virtual actor</em><span class="cite"><a href="#ref-22">22</a></span> — thông điệp phải đi qua mạng, và bài toán mã hóa cùng hai chiều tương thích quay lại nguyên vẹn<span class="cite"><a href="#ref-1">1</a></span>.</p>
+            </div>
+            <div class="info-block">
+              <h4>Vì sao nâng cấp cuốn chiếu vẫn là phép thử</h4>
+              <p>Với actor phân tán, việc nâng cấp cuốn chiếu chỉ an toàn khi thông điệp giữ được cả tương thích ngược lẫn xuôi — danh mục tham chiếu của chương dẫn tới đúng một thảo luận cộng đồng về việc nâng cấp trong một cụm Akka, cho thấy đây là vấn đề vận hành có thật chứ không phải chuyện lý thuyết<span class="cite"><a href="#ref-3">3</a></span>. Còn với Kafka, thông điệp được giữ lại theo chính sách lưu trữ của chủ đề<span class="cite"><a href="#ref-20">20</a></span>, nên một thông điệp viết hôm nay vẫn có thể được đọc lại bởi một phiên bản khác rất lâu sau đó.</p>
+            </div>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="surprise-lead trap-lead" style="margin-top: 22px;">
+      <div class="surprise-lead-copy">
+        <div class="english-term" lang="en">Every boundary between processes is a version boundary</div>
+        <p class="definition standard-copy">Ba dòng chảy khác nhau về công nghệ nhưng giống nhau ở bản chất: mỗi lần dữ liệu rời khỏi một tiến trình, nó bước qua một ranh giới nơi <em>hai phiên bản code khác nhau</em> có thể đang đứng ở hai đầu. Thiết kế cho tiến hóa chính là thừa nhận ranh giới ấy thay vì giả vờ nó không có.</p>
+        <p class="definition easy-only">Ba đường đi khác nhau nhưng giống nhau một điểm: cứ mỗi lần dữ liệu ra khỏi một chương trình, hai đầu có thể là hai bản khác nhau. Nhớ nhé: chỗ nào dữ liệu đi qua, chỗ đó cũ mới phải hiểu nhau.</p>
+        <p class="definition en-only" lang="en">The three flows differ in technology but agree in nature: every time data leaves a process it crosses a boundary where <em>two different versions of code</em> may stand on either side. Designing for evolvability means admitting that boundary rather than pretending it isn't there.</p>
+        <p class="deep-only">Có một sợi chỉ nối chương này về Chương 1. Ở đó Kleppmann đặt <em lang="en">evolvability</em> — khả năng thay đổi hệ khi yêu cầu thay đổi — làm một trong ba trụ của maintainability<span class="cite"><a href="#ref-2">2</a></span>. Chương 4 là lần đầu khái niệm ấy được đưa xuống tận tầng byte: tính dễ tiến hóa của một hệ dữ liệu không nằm ở chỗ code sạch đến đâu, mà nằm ở chỗ <strong>định dạng mã hóa có cho phép hai phiên bản cùng tồn tại hay không</strong>. Một lược đồ chọn sai ở tuần đầu có thể khóa chặt khả năng thay đổi của cả hệ trong nhiều năm.</p>
+      </div>
+      <div class="equation standard-copy" aria-label="Ba dòng chảy và chiều tương thích tương ứng">
+        <div class="equation-row">
+          <b>Qua CSDL</b>
+          <span>Khoảng cách ghi–đọc dài nhất; cần cả hai chiều, và cần giữ nguyên trường lạ khi ghi lại.</span>
+        </div>
+        <div class="equation-row">
+          <b>Qua dịch vụ</b>
+          <span>Máy chủ thường nâng trước: yêu cầu cần tương thích ngược, phản hồi cần tương thích xuôi.</span>
+        </div>
+        <div class="equation-row">
+          <b>Qua thông điệp</b>
+          <span>Broker không quan tâm nội dung; không ai kiểm tra tương thích thay bạn.</span>
+        </div>
+      </div>
+      <div class="equation easy-only" aria-label="Ba đường đi, nói gọn">
+        <div class="equation-row">
+          <b>Vào kho</b>
+          <span>Viết hôm nay, có khi năm sau mới đọc — cả cũ lẫn mới đều phải đọc được.</span>
+        </div>
+        <div class="equation-row">
+          <b>Gọi thẳng</b>
+          <span>Máy chủ thường đổi trước, nên phải chiều được máy khách cũ.</span>
+        </div>
+        <div class="equation-row">
+          <b>Gửi thư</b>
+          <span>Hộp thư không mở thư ra xem, nên hai đầu tự lo hiểu nhau.</span>
+        </div>
+      </div>
+      <div class="equation en-only" lang="en" aria-label="Three flows and the compatibility each needs">
+        <div class="equation-row">
+          <b>Via database</b>
+          <span>Longest write-to-read gap; both directions needed, plus preserving unknown fields on write-back.</span>
+        </div>
+        <div class="equation-row">
+          <b>Via services</b>
+          <span>Servers usually upgrade first: requests need backward, responses need forward compatibility.</span>
+        </div>
+        <div class="equation-row">
+          <b>Via messages</b>
+          <span>The broker is agnostic about content; nobody checks compatibility on your behalf.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="trap-comparison deep-only">
+      <h3><span class="vi-only">Ba ngộ nhận thường gặp về mã hóa và tiến hóa</span><span class="en-only" lang="en">Three common misreadings of encoding and evolution</span></h3>
+      <div class="comparison-grid">
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Ngược với xuôi là một, chỉ khác cách nói”</span><span class="en-only" lang="en">"Backward and forward are the same thing said twice"</span></h4>
+          <p class="standard-copy">Sai, và đây là nhầm lẫn tốn kém nhất. Tương thích ngược chỉ cần code mới biết thêm luật cũ; tương thích xuôi buộc code cũ phải hành xử đúng trước thứ chưa tồn tại lúc nó được viết. Sổ đăng ký lược đồ tách bạch hai chế độ <span lang="en">BACKWARD</span> và <span lang="en">FORWARD</span> chính vì chúng cho phép những thay đổi khác nhau<span class="cite"><a href="#ref-11">11</a></span>.</p>
+          <p class="en-only" lang="en">Wrong, and it's the costliest confusion here. Backward only needs new code to also know the old rules; forward demands that old code behave correctly in the face of something that did not exist when it was written. Schema registries keep BACKWARD and FORWARD as separate modes precisely because they permit different changes<span class="cite"><a href="#ref-11">11</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“Dùng Protobuf là tự khắc tiến hóa được”</span><span class="en-only" lang="en">"Using Protobuf makes you evolvable automatically"</span></h4>
+          <p class="standard-copy">Sai: định dạng chỉ cấp cho bạn cơ chế, kỷ luật vẫn là của con người. Đổi số hiệu một trường đang dùng là thao tác không an toàn<span class="cite"><a href="#ref-6">6</a></span>; dùng lại số hiệu của trường đã xóa cũng vậy, nên tài liệu khuyên đánh dấu <code>reserved</code><span class="cite"><a href="#ref-6">6</a></span>. Và thu hẹp kiểu số vẫn cắt cụt dữ liệu trong im lặng<span class="cite"><a href="#ref-6">6</a></span>.</p>
+          <p class="en-only" lang="en">Wrong: the format gives you the mechanism, the discipline stays human. Changing the number of a live field is unsafe<span class="cite"><a href="#ref-6">6</a></span>; reusing a deleted field's number is too, which is why the guide says to mark it <code>reserved</code><span class="cite"><a href="#ref-6">6</a></span>. And narrowing a numeric type still truncates data silently<span class="cite"><a href="#ref-6">6</a></span>.</p>
+        </div>
+        <div class="comparison-card">
+          <h4><span class="vi-only">“RPC hiện đại làm mạng trở nên trong suốt”</span><span class="en-only" lang="en">"Modern RPC makes the network transparent"</span></h4>
+          <p class="standard-copy">Sai: giao diện có thể trông giống lời gọi cục bộ<span class="cite"><a href="#ref-19">19</a></span>, nhưng độ trễ, mô hình bộ nhớ, lỗi bộ phận và tính đồng thời thì không biến mất chỉ vì cú pháp đã đẹp<span class="cite"><a href="#ref-16">16</a></span>. Các khung RPC tốt không che giấu mạng — chúng phơi ra thời hạn chờ, việc thử lại và tính khử trùng lặp để bạn phải quyết định một cách có ý thức.</p>
+          <p class="en-only" lang="en">Wrong: the interface may look like a local call<span class="cite"><a href="#ref-19">19</a></span>, but latency, the memory model, partial failure and concurrency don't vanish because the syntax got prettier<span class="cite"><a href="#ref-16">16</a></span>. Good RPC frameworks don't hide the network — they surface timeouts, retries and idempotence so you have to decide consciously.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="diagnostic" aria-labelledby="diagnostic-title" style="padding-top: clamp(74px, 10vw, 128px);">
+    <div class="diagnostic">
+      <div class="diagnostic-intro">
+        <div class="eyebrow"><span class="vi-only">Tự đọc mình</span><span class="en-only" lang="en">Read yourself</span></div>
+        <h2 id="diagnostic-title"><span class="vi-only">Soi khả năng tiến hóa của chính hệ bạn</span><span class="en-only" lang="en">Test your own system's evolvability</span></h2>
+        <p class="standard-copy">Chương 4 cho một bộ câu hỏi rất dễ áp dụng, vì câu trả lời hoặc có hoặc không — không có chỗ cho cảm tính. Chúng không hỏi hệ của bạn dùng công nghệ gì, mà hỏi <em>điều gì sẽ xảy ra vào đúng giây phút hai phiên bản code của bạn gặp nhau</em>.</p>
+        <p class="easy-only">Thử soi hệ bạn đang làm bằng mấy câu dưới. Không hỏi bạn dùng công nghệ gì, chỉ hỏi: nếu bản cũ và bản mới gặp nhau thì chuyện gì xảy ra? Nhớ nhé: câu trả lời hoặc là có, hoặc là không — không có chỗ cho cảm tính.</p>
+        <p class="en-only" lang="en">Chapter 4 gives questions that are easy to apply, because the answers are yes or no — there's no room for vibes. They don't ask what technology you use; they ask <em>what happens at the exact moment two versions of your code meet</em>.</p>
+      </div>
+      <div class="question-list standard-copy">
+        <div class="question">
+          <div><strong>Trong lúc triển khai, hai phiên bản code của bạn cùng sống bao lâu?</strong><span class="deep-only">Vài phút hay vài tháng? Với ứng dụng phía khách mà bạn không ép cập nhật được, con số ấy có thể là nhiều năm. Độ dài của quãng đó chính là độ dài của khoảng thời gian bạn phải bảo đảm cả hai chiều tương thích.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có gọi tên được chiều nào đang thiếu không?</strong><span class="deep-only">Thử nói thành lời: "code mới của tôi đọc được dữ liệu tháng trước" (ngược) và "code tháng trước đọc được dữ liệu code mới ghi" (xuôi). Nếu câu thứ hai khiến bạn ngập ngừng, bạn đã tìm ra chỗ yếu.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Định dạng bạn đang dùng có cho người đọc nhảy qua trường lạ không?</strong><span class="deep-only">Đây là câu hỏi kỹ thuật rất cụ thể. Protobuf làm được vì mỗi trường mang tag chứa kiểu wire nên parser cũ biết cần bỏ qua bao nhiêu byte<span class="cite"><a href="#ref-5">5</a></span>. JSON làm được ở tầng cú pháp nhưng chẳng có gì bảo đảm ứng dụng của bạn không ném lỗi khi gặp khóa lạ.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có chỗ nào trong hệ đọc-sửa-ghi cả bản ghi không?</strong><span class="deep-only">Đây là nơi bẫy mất trường nằm chờ. Hãy tìm mọi đoạn code tải một bản ghi vào đối tượng rồi ghi nguyên đối tượng trở lại. Nếu bản ghi có trường mà đối tượng không có, trường ấy sẽ bốc hơi mà không ai báo<span class="cite"><a href="#ref-1">1</a></span>.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Ai đang giữ lược đồ, và nó có được kiểm chứng tự động không?</strong><span class="deep-only">Một lược đồ nằm trong kho mã và được dùng để sinh mã thì không thể lỗi thời. Một "lược đồ" chỉ tồn tại trong đầu vài người thì không phải lược đồ. Nếu bạn dùng sổ đăng ký lược đồ, bạn đã đặt chế độ tương thích nào — và có biết mặc định của nó là gì không<span class="cite"><a href="#ref-11">11</a></span>?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bạn có quy ước nào về việc không dùng lại số hiệu trường không?</strong><span class="deep-only">Với Thrift và Protobuf, số hiệu là bản hợp đồng vĩnh viễn với mọi byte đã ghi ra trong quá khứ. Tài liệu Protobuf khuyên đánh dấu <code>reserved</code> cho số hiệu của trường đã xóa để không ai dùng lại<span class="cite"><a href="#ref-6">6</a></span>. Nhóm bạn có làm vậy, hay đang trông vào trí nhớ?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Ở ranh giới dịch vụ, bên nào được nâng cấp trước?</strong><span class="deep-only">Nếu máy chủ đi trước, thì yêu cầu cần tương thích ngược còn phản hồi cần tương thích xuôi<span class="cite"><a href="#ref-1">1</a></span>. Nếu bạn không biết bên nào đi trước, bạn đang phải bảo đảm cả hai chiều cho cả hai hướng — hãy nói rõ điều đó ra thay vì hy vọng.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Nếu một lời gọi hết giờ, bạn có biết nó đã thực thi hay chưa?</strong><span class="deep-only">Đây là lỗi bộ phận mà Waldo và cộng sự cảnh báo<span class="cite"><a href="#ref-16">16</a></span>. Nếu câu trả lời là "không biết" thì việc thử lại của bạn cần tính khử trùng lặp. Nếu bạn chưa từng hỏi câu này, có nghĩa là khung RPC đã che mạng đi quá tốt.</span></div>
+        </div>
+      </div>
+      <div class="question-list easy-only">
+        <div class="question">
+          <div><strong>Khi bạn nâng cấp, bản cũ và bản mới sống chung bao lâu?</strong><span>Càng lâu thì càng phải chắc là hai bên hiểu được nhau.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bản cũ gặp trường lạ thì làm gì — bỏ qua hay báo lỗi?</strong><span>Bỏ qua được mà không làm hỏng mới là ổn.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Có chỗ nào mở bản ghi ra sửa rồi cất lại nguyên cả cục không?</strong><span>Đó là chỗ trường lạ dễ biến mất nhất.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Bản mô tả dữ liệu của bạn nằm ở đâu — trong mã hay trong đầu ai đó?</strong><span>Nếu chỉ nằm trong đầu người thì nó sẽ sai lúc nào không hay.</span></div>
+        </div>
+      </div>
+      <div class="question-list en-only" lang="en">
+        <div class="question">
+          <div><strong>During a deploy, how long do two versions of your code coexist?</strong><span>Minutes or months? For client-side apps you can't force-update, it may be years. That window is exactly how long you must guarantee both directions.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Can you name which direction you're missing?</strong><span>Say it out loud: "my new code reads last month's data" (backward) and "last month's code reads what my new code writes" (forward). If the second one makes you hesitate, you've found the weak spot.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Does your format let a reader skip an unknown field?</strong><span>Protobuf can, because each field's tag carries the wire type so an old parser knows how many bytes to skip<span class="cite"><a href="#ref-5">5</a></span>. JSON can syntactically, but nothing stops your application from throwing on an unknown key.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Is there anywhere in the system that reads, modifies and writes a whole record?</strong><span>That's where the field-loss trap waits. Find every place that loads a record into an object and writes the object back. Fields the object doesn't know about evaporate silently<span class="cite"><a href="#ref-1">1</a></span>.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Who holds the schema, and is it checked automatically?</strong><span>A schema in the repo that generates code cannot go stale. A "schema" that lives in a few people's heads isn't one. If you run a registry, which compatibility mode did you set — and do you know its default<span class="cite"><a href="#ref-11">11</a></span>?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>Do you have a rule against reusing field numbers?</strong><span>In Thrift and Protobuf the number is a permanent contract with every byte ever written. The Protobuf guide says to mark a deleted field's number <code>reserved</code><span class="cite"><a href="#ref-6">6</a></span>. Does your team do that, or rely on memory?</span></div>
+        </div>
+        <div class="question">
+          <div><strong>At a service boundary, which side upgrades first?</strong><span>If servers go first, requests need backward and responses need forward compatibility<span class="cite"><a href="#ref-1">1</a></span>. If you don't know which goes first, you owe both directions both ways — say so rather than hope.</span></div>
+        </div>
+        <div class="question">
+          <div><strong>When a call times out, do you know whether it executed?</strong><span>This is the partial failure Waldo et al. warned about<span class="cite"><a href="#ref-16">16</a></span>. If the answer is "no idea", your retries need idempotence. If you've never asked, your RPC framework hid the network too well.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <div class="eyebrow"><span class="vi-only">Kết luận cô đọng</span><span class="en-only" lang="en">The conclusion, distilled</span></div>
+    <blockquote><span class="standard-copy">Mọi định dạng mã hóa cuối cùng đều được chấm bằng một câu hỏi: <span class="closing-accent">hai phiên bản code có sống chung được không</span>. Vì nâng cấp luôn diễn ra dần và dữ liệu luôn ở lại lâu hơn code đã sinh ra nó, tương thích ngược và tương thích xuôi không phải tính năng thêm vào mà là <span class="closing-accent">điều kiện để thay đổi</span>. Chọn được một định dạng mà người đọc lạ biết cách bước qua thứ nó không hiểu, ấy là bạn đã mua cho hệ của mình <span class="closing-accent">quyền được tiến hóa</span>.</span><span class="easy-only">Gói dữ liệu kiểu nào cũng chỉ hơn thua ở một điểm: <span class="closing-accent">bản cũ và bản mới có hiểu nhau không</span>. Vì nâng cấp thì đổi dần, mà dữ liệu thì <span class="closing-accent">ở lại rất lâu</span>. Nhớ nhé: chọn cách gói cho phép người đọc bỏ qua thứ lạ mà không làm hỏng — đó là cách giữ cho hệ của bạn <span class="closing-accent">còn sửa được về sau</span>.</span><span class="en-only" lang="en">Every encoding is finally graded on one question: <span class="closing-accent">can two versions of the code coexist</span>. Because upgrades are always gradual and data always outlives the code that produced it, backward and forward compatibility aren't added features but <span class="closing-accent">the precondition for change</span>. Choose a format whose readers know how to step over what they don't understand, and you have bought your system <span class="closing-accent">the right to evolve</span>.</span></blockquote>
+  </section>
+
+  <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+  <nav class="chapter-nav" aria-label="Điều hướng chương">
+    <a class="nav-cell nav-prev" href="chapter-3-storage-and-retrieval.html">
+      <span class="nav-label"><span class="vi-only">◀ Chương trước</span><span class="en-only" lang="en">◀ Previous</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 3 · Lưu trữ &amp; truy xuất</span><span class="en-only" lang="en">Chapter 3 · Storage and Retrieval</span></span>
+    </a>
+    <span class="nav-cell nav-next" aria-disabled="true">
+      <span class="nav-label"><span class="vi-only">Chương sau ▶</span><span class="en-only" lang="en">Next ▶</span></span>
+      <span class="nav-title"><span class="vi-only">Chương 5 · Sao chép · sắp có</span><span class="en-only" lang="en">Chapter 5 · Replication · soon</span></span>
+    </span>
+  </nav>
+  <!-- NAV:END -->
+
+  <footer>
+    <div class="footer-main">
+      <p class="vi-only"><strong>Nguồn chính:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chương 4 <span lang="en">“Encoding and Evolution”</span><span class="cite"><a href="#ref-26">26</a></span>. Tài liệu này là bản đọc-cùng diễn giải phục vụ học tập, không phải bản dịch nguyên văn hoặc bản sao nội dung chương sách. Các ví von trong chế độ Dễ hiểu (viết thư cho chính mình, gói thoáng gói chật, hộp thư chung…) là minh họa do tài liệu bổ sung, không phải ví dụ nguyên văn trong sách. Cặp số 59 byte / 34 byte là kết quả đo trên một bản ghi ví dụ cụ thể trong bài blog năm 2012 của Kleppmann <span class="cite"><a href="#ref-4">4</a></span>, không phải tỉ lệ nén phổ quát của Thrift.</p>
+      <p class="en-only" lang="en"><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017, Chapter 4 “Encoding and Evolution”<span class="cite"><a href="#ref-26">26</a></span>. This is an interpretive study companion, not a verbatim translation or reproduction of the chapter. The Dễ hiểu-mode analogies (a letter to your future self, loose vs tight packing, the shared mailbox…) are illustrations added by this companion, not examples from the book. The 59-byte / 34-byte pair is a measurement on one specific example record in Kleppmann's 2012 blog post <span class="cite"><a href="#ref-4">4</a></span>, not a universal Thrift compression ratio.</p>
+      <p class="vi-only"><strong>Tham chiếu:</strong></p>
+      <p class="en-only" lang="en"><strong>References:</strong></p>
+      <ol class="ref-list">
+        <li id="ref-1">Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, O'Reilly Media, 2017 — Chương 4, “Encoding and Evolution”.</li>
+        <li id="ref-2"><a href="https://dataintensive.net/" target="_blank" rel="noopener noreferrer">dataintensive.net — trang chính thức của cuốn sách (mục lục, khung reliable / scalable / maintainable)</a></li>
+        <li id="ref-3"><a href="https://github.com/ept/ddia-references/blob/master/chapter-04-refs.md" target="_blank" rel="noopener noreferrer">Martin Kleppmann — ept/ddia-references, danh mục tham chiếu Chương 4 (Java Serialization, Ruby Marshal, Python pickle, jvm-serializers, XML Schema, JSON Schema, MessagePack, RabbitMQ/Kafka, Akka cluster upgrade…)</a></li>
+        <li id="ref-4"><a href="https://martin.kleppmann.com/2012/12/05/schema-evolution-in-avro-protocol-buffers-thrift.html" target="_blank" rel="noopener noreferrer">Martin Kleppmann, “Schema Evolution in Avro, Protocol Buffers and Thrift”, martin.kleppmann.com, 5.12.2012 — 59 byte vs 34 byte trên bản ghi ví dụ, quy tắc tag &amp; default</a></li>
+        <li id="ref-5"><a href="https://protobuf.dev/programming-guides/encoding/" target="_blank" rel="noopener noreferrer">Protocol Buffers — Encoding (tag = (field_number &lt;&lt; 3) | wire_type, varint, wire types, ZigZag, LEN)</a></li>
+        <li id="ref-6"><a href="https://protobuf.dev/programming-guides/proto3/" target="_blank" rel="noopener noreferrer">Protocol Buffers — Language Guide (proto3): “Updating A Message Type”, field cardinality, reserved</a></li>
+        <li id="ref-7"><a href="https://github.com/apache/thrift/blob/master/doc/specs/thrift-binary-protocol.md" target="_blank" rel="noopener noreferrer">Apache Thrift — Binary protocol encoding specification (type byte + field id 16 bit big endian, stop field)</a></li>
+        <li id="ref-8"><a href="https://github.com/apache/thrift/blob/master/doc/specs/thrift-compact-protocol.md" target="_blank" rel="noopener noreferrer">Apache Thrift — Compact protocol encoding specification (field id delta, varint, ZigZag)</a></li>
+        <li id="ref-9"><a href="https://thrift.apache.org/docs/idl" target="_blank" rel="noopener noreferrer">Apache Thrift — Interface Description Language (field identifiers, required / optional, isset)</a></li>
+        <li id="ref-10"><a href="https://avro.apache.org/docs/1.11.1/specification/" target="_blank" rel="noopener noreferrer">Apache Avro 1.11.1 Specification — binary encoding, schema resolution (writer's / reader's schema), object container files</a></li>
+        <li id="ref-11"><a href="https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html" target="_blank" rel="noopener noreferrer">Confluent Schema Registry — Schema Evolution and Compatibility (BACKWARD, FORWARD, chế độ mặc định)</a></li>
+        <li id="ref-12"><a href="https://www.rfc-editor.org/rfc/rfc8259" target="_blank" rel="noopener noreferrer">RFC 8259 — The JavaScript Object Notation (JSON) Data Interchange Format (§6: khoảng số nguyên liên thông ±2⁵³)</a></li>
+        <li id="ref-13"><a href="https://www.rfc-editor.org/rfc/rfc4180" target="_blank" rel="noopener noreferrer">RFC 4180 — Common Format and MIME Type for Comma-Separated Values (CSV) Files (§2: “there is no formal specification in existence”)</a></li>
+        <li id="ref-14"><a href="https://www.rfc-editor.org/rfc/rfc4648" target="_blank" rel="noopener noreferrer">RFC 4648 — The Base16, Base32, and Base64 Data Encodings (§4: 24 bit đầu vào → 4 ký tự)</a></li>
+        <li id="ref-15"><a href="https://cwe.mitre.org/data/definitions/502.html" target="_blank" rel="noopener noreferrer">CWE-502: Deserialization of Untrusted Data — MITRE Common Weakness Enumeration</a></li>
+        <li id="ref-16"><a href="https://link.springer.com/chapter/10.1007/3-540-62852-5_6" target="_blank" rel="noopener noreferrer">Jim Waldo, Geoff Wyant, Ann Wollrath, Sam Kendall, “A Note on Distributed Computing”, Sun Microsystems Laboratories TR-94-29, 1994 (bản Springer)</a></li>
+        <li id="ref-17"><a href="https://www.cs.princeton.edu/courses/archive/fall03/cs518/papers/rpc.pdf" target="_blank" rel="noopener noreferrer">Andrew D. Birrell &amp; Bruce Jay Nelson, “Implementing Remote Procedure Calls”, ACM TOCS 2(1), 1984</a></li>
+        <li id="ref-18"><a href="https://www.ics.uci.edu/~fielding/pubs/dissertation/fielding_dissertation.pdf" target="_blank" rel="noopener noreferrer">Roy Thomas Fielding, “Architectural Styles and the Design of Network-Based Software Architectures”, PhD Thesis, UC Irvine, 2000 — nguồn gốc REST</a></li>
+        <li id="ref-19"><a href="https://grpc.io/docs/what-is-grpc/introduction/" target="_blank" rel="noopener noreferrer">gRPC — Introduction to gRPC (“as if it were a local object”, Protocol Buffers làm IDL)</a></li>
+        <li id="ref-20"><a href="https://kafka.apache.org/documentation/" target="_blank" rel="noopener noreferrer">Apache Kafka — Documentation (message broker, chính sách lưu trữ của chủ đề)</a></li>
+        <li id="ref-21"><a href="https://doc.akka.io/libraries/akka-core/current/typed/actors.html" target="_blank" rel="noopener noreferrer">Akka — Actors (thông điệp bất đồng bộ, mỗi actor xử lý một thông điệp tại một thời điểm)</a></li>
+        <li id="ref-22"><a href="https://www.microsoft.com/en-us/research/publication/orleans-distributed-virtual-actors-for-programmability-and-scalability/" target="_blank" rel="noopener noreferrer">Philip A. Bernstein, Sergey Bykov, Alan Geller và cộng sự, “Orleans: Distributed Virtual Actors for Programmability and Scalability”, Microsoft Research MSR-TR-2014-41</a></li>
+        <li id="ref-23"><a href="https://thrift.apache.org/static/files/thrift-20070401.pdf" target="_blank" rel="noopener noreferrer">Mark Slee, Aditya Agarwal, Marc Kwiatkowski, “Thrift: Scalable Cross-Language Services Implementation”, Facebook technical report, 2007</a></li>
+        <li id="ref-24"><a href="https://www.w3.org/TR/xmlschema11-1/" target="_blank" rel="noopener noreferrer">W3C XML Schema Definition Language (XSD) 1.1 Part 1: Structures — W3C Recommendation</a> <em>(w3.org chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+        <li id="ref-25"><a href="https://json-schema.org/" target="_blank" rel="noopener noreferrer">JSON Schema — đặc tả lược đồ cho JSON (json-schema.org)</a></li>
+        <li id="ref-26"><a href="https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/" target="_blank" rel="noopener noreferrer">O’Reilly — trang sách chính thức (định danh ấn bản, mục lục, số hiệu chương)</a> <em>(oreilly.com chặn truy cập tự động: link trả 403 cho fetcher nhưng mở bình thường trên trình duyệt)</em></li>
+      </ol>
+      <!-- NAV:START · owned by book-cover-curator · body owned by book-chapter-author -->
+      <p class="vi-only"><strong>Cùng cuốn:</strong> <a href="index.html">Trang bìa</a> · <a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Chương 1 — Tin cậy, mở rộng &amp; bảo trì</a> · <a href="chapter-3-storage-and-retrieval.html">Chương 3 — Lưu trữ &amp; truy xuất</a>. <span class="soon-note">Chương 5 — Sao chép: sắp có.</span></p>
+      <p class="en-only" lang="en"><strong>Elsewhere in this book:</strong> <a href="index.html">Cover</a> · <a href="chapter-1-reliable-scalable-and-maintainable-applications.html">Chapter 1 — Reliable, Scalable &amp; Maintainable</a> · <a href="chapter-3-storage-and-retrieval.html">Chapter 3 — Storage and Retrieval</a>. <span class="soon-note">Chapter 5 — Replication: coming soon.</span></p>
+      <!-- NAV:END -->
+    </div>
+    <div class="edition"><span class="vi-only">VI · 2026</span><span class="en-only" lang="en">EN · 2026</span></div>
+  </footer>
+</main>
+
+<script>
+  (function () {
+    const STORAGE_KEY = "ddia-reading-mode";
+    const VALID_MODES = ["easy", "quick", "deep"];
+    const modeButtons = document.querySelectorAll(".reading-controls [data-mode]");
+
+    function setMode(requestedMode, persist) {
+      const mode = VALID_MODES.includes(requestedMode) ? requestedMode : "deep";
+      document.documentElement.dataset.readingMode = mode;
+      modeButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.mode === mode));
+      });
+      if (persist) {
+        try { localStorage.setItem(STORAGE_KEY, mode); } catch (_) {}
+      }
+    }
+
+    setMode(document.documentElement.dataset.readingMode, false);
+    modeButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setMode(button.dataset.mode, true); });
+    });
+
+    const LANG_KEY = "ddia-lang";
+    const langButtons = document.querySelectorAll(".lang-controls [data-lang-option]");
+
+    function setLang(requestedLang, persist) {
+      const lang = requestedLang === "en" ? "en" : "vi";
+      document.documentElement.dataset.lang = lang;
+      document.documentElement.setAttribute("lang", lang);
+      langButtons.forEach(function (button) {
+        button.setAttribute("aria-pressed", String(button.dataset.langOption === lang));
+      });
+      if (persist) {
+        try { localStorage.setItem(LANG_KEY, lang); } catch (_) {}
+      }
+    }
+
+    setLang(document.documentElement.dataset.lang, false);
+    langButtons.forEach(function (button) {
+      button.addEventListener("click", function () { setLang(button.dataset.langOption, true); });
+    });
+  })();
+
+  /* SECTION-RAIL: on-page section index (scroll-spy). Built from the page's own id'd
+     sections; reuses each heading's vi-only/en-only + reading-mode spans so language
+     and reading mode are handled by the existing CSS. No per-page markup. */
+  (function () {
+    if (document.querySelector(".section-rail")) return;
+    var main = document.querySelector("main") || document.body;
+    var targets = Array.prototype.slice.call(
+      document.querySelectorAll("main .section[id], main .closing[id]")
+    );
+    if (targets.length < 2) return;
+
+    function labelFor(sec) {
+      var id = sec.getAttribute("aria-labelledby");
+      var el = (id && document.getElementById(id)) ||
+               sec.querySelector(".section-heading h2, h2, h3, .eyebrow");
+      return el ? el.innerHTML : sec.id;
+    }
+
+    var nav = document.createElement("nav");
+    nav.className = "section-rail";
+    nav.setAttribute("aria-label", "Mục lục trang");
+    var list = document.createElement("ol");
+    list.className = "section-rail__list";
+    var byId = {};
+
+    targets.forEach(function (sec) {
+      var li = document.createElement("li");
+      li.className = "section-rail__item";
+      var a = document.createElement("a");
+      a.className = "section-rail__link";
+      a.href = "#" + sec.id;
+      a.innerHTML =
+        '<span class="section-rail__tick" aria-hidden="true"></span>' +
+        '<span class="section-rail__label">' + labelFor(sec) + "</span>";
+      li.appendChild(a);
+      list.appendChild(li);
+      byId[sec.id] = li;
+    });
+    nav.appendChild(list);
+    main.appendChild(nav);
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      if (activeId && byId[activeId]) byId[activeId].classList.remove("is-active");
+      if (id && byId[id]) byId[id].classList.add("is-active");
+      activeId = id;
+    }
+    function update() {
+      var line = window.innerHeight * 0.3;
+      var current = targets[0].id;
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i].getBoundingClientRect().top - line <= 0) current = targets[i].id;
+      }
+      setActive(current);
+    }
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(function () { update(); ticking = false; });
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll, { passive: true });
+    update();
+  })();
+</script>
+</body>
+</html>
